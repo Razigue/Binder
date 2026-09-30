@@ -63,7 +63,9 @@ class DocumentOut(BaseModel):
     def from_model(cls, doc: Document) -> "DocumentOut":
         from binder.services import deadlines, organize, retention
 
-        data = doc.model_dump(exclude={"text", "missing_fields", "sha256", "stored_name"})
+        data = doc.model_dump(
+            exclude={"text", "missing_fields", "sha256", "stored_name", "explanation"}
+        )
         rule = retention.rule_for(doc)
         return cls(
             **data,
@@ -172,6 +174,8 @@ class ChatResponse(BaseModel):
     documents: list[DocumentOut] = []
     deadlines: list[DeadlineOut] = []
     tool_calls: list[ToolCallTrace] = []
+    # Documents cités dans la réponse ([#id]), tous issus des résultats d'outils.
+    citations: list[int] = []
     engine: str
 
 

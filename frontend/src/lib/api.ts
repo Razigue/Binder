@@ -87,6 +87,7 @@ export interface ChatResponse {
   documents: Doc[]
   deadlines: Deadline[]
   tool_calls: { name: string; arguments: Record<string, unknown> }[]
+  citations: number[]
   engine: "llm" | "rules"
 }
 
@@ -140,6 +141,14 @@ export interface ImportSettingsIn {
 
 type ImportRun = { imported: number; error: string | null } | null
 
+export interface Explanation {
+  summary: string
+  action_required: boolean
+  actions: { label: string; due_date: string | null }[]
+  key_points: string[]
+  engine: "llm" | "rules"
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -190,6 +199,8 @@ export const api = {
   updateDocument: (id: number, patch: DocPatch) => request<DocDetail>(`/documents/${id}`, json("PATCH", patch)),
   reanalyze: (id: number) => request<DocDetail>(`/documents/${id}/reanalyze`, { method: "POST" }),
   deleteDocument: (id: number) => request<void>(`/documents/${id}`, { method: "DELETE" }),
+  explanation: (id: number, refresh = false) =>
+    request<Explanation>(`/documents/${id}/explanation${query({ refresh: refresh || undefined })}`),
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),

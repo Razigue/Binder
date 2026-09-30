@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlmodel import Session, col, select
 
 from binder.models import Category, Deadline, Document, DocumentStatus
-from binder.services import activity
+from binder.services import activity, explain
 from binder.services.rules import MONTHS, normalize
 
 STOP_WORDS = {
@@ -206,8 +206,8 @@ def create_reminder(
         f"Rappel « {title} » créé pour le {activity.display(when)} à votre demande",
         actor="agent",
     )
-    session.commit()
-    session.refresh(reminder)
+    # Pas de commit ici : il expirerait les documents déjà trouvés dans ce tour.
+    session.flush()
     return ToolResult(payload={"cree": _deadline_summary(reminder)}, deadlines=[reminder])
 
 
@@ -226,6 +226,20 @@ def documents_to_review(session: Session) -> ToolResult:
     )
 
 
+def explain_document(session: Session, document_id: int) -> ToolResult:
+    doc = session.get(Document, document_id)
+    if doc is None or doc.deleted_at is not None:
+        return ToolResult(payload={"erreur": f"Document {document_id} introuvable"})
+    if doc.explanation:
+        result = explain.Explanation.model_validate_json(doc.explanation)
+    else:
+        result = explain.explain(doc)
+        doc.explanation = result.model_dump_json()
+        session.add(doc)
+        session.flush()
+    return ToolResult(payload={"id": doc.id, **result.model_dump(mode="json")}, documents=[doc])
+
+
 def export_folder(session: Session, category: str | None = None) -> ToolResult:
     result = search_documents(session, category=category, limit=500)
     suffix = f"?category={category}" if category else ""
@@ -241,6 +255,7 @@ TOOLS: dict[str, Any] = {
     "list_deadlines": list_deadlines,
     "create_reminder": create_reminder,
     "documents_to_review": documents_to_review,
+    "explain_document": explain_document,
     "export_folder": export_folder,
 }
 
@@ -314,6 +329,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "name": "documents_to_review",
             "description": "Liste les documents incomplets ou à vérifier.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_document",
+            "description": "Explique un courrier en langage simple et dit s'il demande une action.",
+            "parameters": {
+                "type": "object",
+                "properties": {"document_id": {"type": "integer"}},
+                "required": ["document_id"],
+            },
         },
     },
     {

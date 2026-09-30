@@ -127,6 +127,7 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.doc_type = ext.doc_type
     doc.confidence = ext.confidence
     doc.extractor = ext.extractor
+    doc.explanation = None
     refresh_status(doc)
 
 

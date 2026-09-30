@@ -63,6 +63,8 @@ class Document(SQLModel, table=True):
     duplicate_dismissed: bool = False
     # Ancienne version d'un document renouvelé (attestation, pièce d'identité…).
     superseded_by: int | None = Field(default=None, index=True)
+    # Explication en langage simple (JSON), recalculée quand le document change.
+    explanation: str | None = None
     page_count: int = 0
     text: str = ""
 

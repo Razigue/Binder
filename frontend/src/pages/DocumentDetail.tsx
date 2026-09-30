@@ -5,7 +5,7 @@ import {
   CalendarDays, Check, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
   Pencil, RefreshCw, Trash2, X,
 } from "lucide-react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -208,6 +208,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
       </div>
 
       <OrganizeNotices doc={doc} />
+      {!processing && <InShort doc={doc} />}
 
       <div className="p-5">
         <h2 className="mb-2 font-semibold">Informations extraites</h2>
@@ -439,6 +440,75 @@ function RetentionInfo({ doc }: { doc: DocDetail }) {
         <p className="mt-2 text-amber-700">
           {doc.deletable_reason}. <Link to="/tri" className="underline">Voir les documents à trier</Link>
         </p>
+      )}
+    </div>
+  )
+}
+
+/** Le courrier expliqué simplement, et ce qu'il y a à faire. */
+function InShort({ doc }: { doc: DocDetail }) {
+  const qc = useQueryClient()
+  const key = ["explanation", doc.id, doc.amount, doc.due_date, doc.expiry_date, doc.title]
+  const ex = useQuery({ queryKey: key, queryFn: () => api.explanation(doc.id), staleTime: Infinity })
+  const refresh = useMutation({
+    mutationFn: () => api.explanation(doc.id, true),
+    onSuccess: (data) => qc.setQueryData(key, data),
+  })
+  return (
+    <div className="border-b px-5 py-4 text-sm">
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="font-semibold">En bref</h2>
+        {ex.data &&
+          (ex.data.action_required ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Action requise</span>
+          ) : (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Rien à faire</span>
+          ))}
+        {ex.data && (
+          <button
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            className="ml-auto text-muted-foreground hover:text-foreground"
+            aria-label="Réexpliquer"
+            title="Réexpliquer"
+          >
+            <RefreshCw className={cn("size-3.5", refresh.isPending && "animate-spin")} />
+          </button>
+        )}
+      </div>
+      {ex.isPending ? (
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Lecture du courrier…
+        </p>
+      ) : ex.isError ? (
+        <p className="text-muted-foreground">Explication indisponible.</p>
+      ) : (
+        <>
+          <p className="leading-relaxed">{ex.data.summary}</p>
+          {ex.data.actions.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {ex.data.actions.map((a) => (
+                <li key={a.label} className="flex items-start gap-2 font-medium">
+                  <Check className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                  <span>
+                    {a.label}
+                    {a.due_date && <span className="font-normal text-muted-foreground"> · avant le {formatDate(a.due_date)}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {ex.data.key_points.length > 0 && (
+            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
+              {ex.data.key_points.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {ex.data.engine === "llm" ? "Rédigé par le modèle local" : "Rédigé par les règles locales"}
+          </p>
+        </>
       )}
     </div>
   )

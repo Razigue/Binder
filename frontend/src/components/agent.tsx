@@ -5,7 +5,7 @@ import { ArrowUp, Bot, CalendarClock, ChevronRight, FileText, Loader2, Search, U
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { useInvalidateAll } from "@/hooks/queries"
-import { api, type ChatMessage, type ChatResponse } from "@/lib/api"
+import { api, type ChatMessage, type ChatResponse, type Doc } from "@/lib/api"
 import { daysLabel, formatAmount, formatDate } from "@/lib/format"
 import { CategoryIcon } from "./CategoryIcon"
 
@@ -213,20 +213,37 @@ function AgentConversation({
   )
 }
 
-/** Rendu minimal des liens markdown [texte](url) renvoyés par l'agent. */
-function RichText({ text }: { text: string }) {
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\))/g)
+/** Rendu minimal des liens markdown [texte](url) et des citations [#id] de l'agent. */
+function RichText({ text, docs, onNavigate }: { text: string; docs: Doc[]; onNavigate: () => void }) {
+  const parts = text.split(/(\[[^\]]+\]\([^)]+\)|\s?\[#\d+\])/g)
+  const order = [...new Set([...text.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))]
   return (
     <>
       {parts.map((part, i) => {
-        const m = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
-        return m ? (
-          <a key={i} href={m[2]} className="font-medium text-primary underline underline-offset-2">
-            {m[1]}
-          </a>
-        ) : (
-          <span key={i}>{part}</span>
-        )
+        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+        if (link)
+          return (
+            <a key={i} href={link[2]} className="font-medium text-primary underline underline-offset-2">
+              {link[1]}
+            </a>
+          )
+        const cite = part.match(/^\s?\[#(\d+)\]$/)
+        if (cite) {
+          const id = Number(cite[1])
+          const doc = docs.find((d) => d.id === id)
+          return (
+            <Link
+              key={i}
+              to={`/documents/${id}`}
+              onClick={onNavigate}
+              title={doc ? `Source : ${doc.title}` : "Source"}
+              className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 align-super text-[10px] font-semibold text-primary hover:bg-primary/20"
+            >
+              {order.indexOf(id) + 1}
+            </Link>
+          )
+        }
+        return <span key={i}>{part}</span>
       })}
     </>
   )
@@ -238,7 +255,7 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
   return (
     <div className="space-y-3">
       <p className="text-sm leading-relaxed">
-        <RichText text={response.answer} />
+        <RichText text={response.answer} docs={docs} onNavigate={onNavigate} />
       </p>
       {docs.length > 0 && (
         <div className="overflow-hidden rounded-lg border">

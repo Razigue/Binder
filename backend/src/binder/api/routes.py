@@ -42,6 +42,7 @@ from binder.schemas import (
 from binder.services import (
     activity,
     deadlines,
+    explain,
     importers,
     ingest,
     llm,
@@ -198,6 +199,7 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
             document=doc,
         )
     if diff:
+        doc.explanation = None
         doc.extractor = "manual" if doc.extractor == "rules" else doc.extractor
         activity.log(
             session,
@@ -241,6 +243,21 @@ def reanalyze(doc_id: int, session: SessionDep) -> DocumentDetail:
     )
     doc = ingest.analyze(session, doc)
     return DocumentDetail.from_model(doc)
+
+
+@router.get("/documents/{doc_id}/explanation")
+def explain_document(
+    doc_id: int, session: SessionDep, refresh: bool = False
+) -> explain.Explanation:
+    """Explication en langage simple et actions à mener (mise en cache sur le document)."""
+    doc = _get_doc(session, doc_id)
+    if doc.explanation and not refresh:
+        return explain.Explanation.model_validate_json(doc.explanation)
+    result = explain.explain(doc)
+    doc.explanation = result.model_dump_json()
+    session.add(doc)
+    session.commit()
+    return result
 
 
 @router.delete("/documents/{doc_id}", status_code=204)
@@ -555,7 +572,9 @@ def list_activity(
 
 @router.post("/agent/chat")
 def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
-    return loop.run(session, body.message, body.history)
+    response = loop.run(session, body.message, body.history)
+    session.commit()
+    return response
 
 
 @router.post("/demo")
