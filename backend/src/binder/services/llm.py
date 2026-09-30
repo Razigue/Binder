@@ -85,7 +85,7 @@ def chat(
 def extract(text: str) -> Extraction | None:
     """Extraction par le modèle local. None en cas d'échec : le pipeline garde les règles."""
     schema = Extraction.model_json_schema()
-    for key in ("missing_fields", "extractor"):
+    for key in ("missing_fields", "extractor", "doc_type"):
         schema["properties"].pop(key, None)
     prompt = EXTRACTION_PROMPT.format(
         categories=", ".join(c.value for c in Category), text=text[:MAX_CHARS]
@@ -94,6 +94,7 @@ def extract(text: str) -> Extraction | None:
         message = chat([{"role": "user", "content": prompt}], fmt=schema)
         data = json.loads(message.get("content") or "{}")
         data.pop("missing_fields", None)
+        data.pop("doc_type", None)
         # Les petits modèles recopient parfois l'étiquette : « N° client : 6012… » → « 6012… ».
         if isinstance(data.get("reference"), str) and ":" in data["reference"]:
             data["reference"] = data["reference"].split(":", 1)[1].strip() or None

@@ -14,7 +14,7 @@ from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import activity, llm, rules
+from binder.services import activity, llm, organize, rules
 from binder.services.text import SUPPORTED_MIME, read_document
 
 log = logging.getLogger(__name__)
@@ -100,6 +100,7 @@ def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
     if merged.category == Category.AUTRE and by_rules.category != Category.AUTRE:
         merged.category = by_rules.category
     merged.title = merged.title or by_rules.title
+    merged.doc_type = by_rules.doc_type
     if by_rules.category == merged.category:
         merged.confidence = round(max(by_llm.confidence, by_rules.confidence), 2)
     else:
@@ -116,13 +117,20 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.issue_date = ext.issue_date
     doc.due_date = ext.due_date
     doc.reference = ext.reference
+    doc.doc_type = ext.doc_type
     doc.confidence = ext.confidence
     doc.extractor = ext.extractor
     refresh_status(doc)
 
 
 def refresh_status(doc: Document, validated: bool = False) -> None:
+    if validated and doc.duplicate_of is not None:
+        # Valider un doublon signalé, c'est décider de garder les deux.
+        doc.duplicate_of = None
+        doc.duplicate_dismissed = True
     missing = rules.missing_for(doc.category, doc.model_dump())
+    if doc.duplicate_of is not None:
+        missing.append("duplicate")
     doc.missing_fields = json.dumps(missing)
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
@@ -138,7 +146,8 @@ def sync_deadline(session: Session, doc: Document) -> None:
     existing = session.exec(
         select(Deadline).where(Deadline.document_id == doc.id, Deadline.source == "extracted")
     ).first()
-    if doc.due_date is None:
+    # Un doublon ou un document à la corbeille ne doit pas compter deux fois.
+    if doc.due_date is None or doc.duplicate_of is not None or doc.deleted_at is not None:
         if existing:
             session.delete(existing)
         return
@@ -151,6 +160,8 @@ def sync_deadline(session: Session, doc: Document) -> None:
 
 
 def analyze(session: Session, doc: Document) -> Document:
+    previous_key = organize.series_key(doc)
+    doc.duplicate_of = None
     read = read_document(load_file(doc), doc.mime_type)
     doc.text = read.text
     doc.page_count = read.page_count
@@ -163,9 +174,12 @@ def analyze(session: Session, doc: Document) -> Document:
     apply_extraction(doc, ext)
     session.add(doc)
     session.flush()
+    _log_analysis(session, doc)
+    organize.detect_duplicate(session, doc)
+    refresh_status(doc)
     sync_deadline(session, doc)
     index_document(session, doc)
-    _log_analysis(session, doc)
+    organize.reorganize(session, doc, previous_key)
     session.commit()
     session.refresh(doc)
     return doc
@@ -205,6 +219,7 @@ def _log_analysis(session: Session, doc: Document) -> None:
 
 def trash(session: Session, doc: Document, *, actor: str = "user", reason: str = "") -> None:
     """Met le document à la corbeille : caché partout, restaurable, fichier conservé."""
+    previous_key = organize.series_key(doc)
     doc.deleted_at = datetime.now(UTC)
     for dl in session.exec(select(Deadline).where(Deadline.document_id == doc.id)):
         if dl.source == "extracted":
@@ -212,6 +227,10 @@ def trash(session: Session, doc: Document, *, actor: str = "user", reason: str =
     if doc.id is not None:
         unindex_document(session, doc.id)
     session.add(doc)
+    for freed in organize.release_duplicates(session, doc):
+        refresh_status(freed)
+        sync_deadline(session, freed)
+    organize.reorganize(session, doc, previous_key)
     suffix = f" ({reason})" if reason else ""
     activity.log(
         session, "trash", f"« {doc.title} » mis à la corbeille{suffix}", actor=actor, document=doc
@@ -224,6 +243,7 @@ def restore(session: Session, doc: Document, *, actor: str = "user", reason: str
     session.flush()
     sync_deadline(session, doc)
     index_document(session, doc)
+    organize.reorganize(session, doc, None)
     suffix = f" ({reason})" if reason else ""
     activity.log(session, "restore", f"« {doc.title} » restauré{suffix}", actor=actor, document=doc)
 

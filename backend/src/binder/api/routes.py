@@ -2,11 +2,13 @@
 
 import io
 import json
+import os
 import re
 import unicodedata
 import zipfile
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -30,7 +32,7 @@ from binder.schemas import (
     Stats,
     SystemStatus,
 )
-from binder.services import activity, ingest, llm
+from binder.services import activity, ingest, llm, organize
 from binder.services.text import render_page
 
 router = APIRouter(prefix="/api")
@@ -165,6 +167,7 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
     doc = _get_doc(session, doc_id)
     changes = patch.model_dump(exclude_unset=True)
     validated = bool(changes.pop("validated", False))
+    previous_key = organize.series_key(doc)
     diff = {k: (getattr(doc, k), v) for k, v in changes.items() if getattr(doc, k) != v}
     for key, value in changes.items():
         setattr(doc, key, value)
@@ -179,12 +182,22 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
             details={k: {"avant": old, "apres": new} for k, (old, new) in diff.items()},
         )
     was_review = doc.status == DocumentStatus.TO_REVIEW
+    was_duplicate = doc.duplicate_of is not None
     ingest.refresh_status(doc, validated=validated)
-    if validated and was_review:
+    if validated and was_duplicate:
+        activity.log(
+            session,
+            "keep_duplicate",
+            f"« {doc.title} » conservé : ce n'est pas un doublon",
+            actor="user",
+            document=doc,
+        )
+    elif validated and was_review:
         activity.log(session, "validate", f"« {doc.title} » validé", actor="user", document=doc)
     session.add(doc)
     ingest.sync_deadline(session, doc)
     index_document(session, doc)
+    organize.reorganize(session, doc, previous_key)
     session.commit()
     session.refresh(doc)
     return DocumentDetail.from_model(doc)
@@ -246,7 +259,7 @@ def download(doc_id: int, session: SessionDep) -> Response:
     return Response(
         ingest.load_file(doc),
         media_type=doc.mime_type,
-        headers={"Content-Disposition": f'inline; filename="{_safe(doc.filename)}"'},
+        headers={"Content-Disposition": _disposition("inline", organize.standard_name(doc))},
     )
 
 
@@ -261,6 +274,11 @@ def _safe(name: str) -> str:
     """Nom de fichier ASCII, sûr pour les en-têtes HTTP et les chemins d'archive."""
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     return re.sub(r"[^A-Za-z0-9.\- ]", "_", ascii_name)
+
+
+def _disposition(kind: str, name: str) -> str:
+    """En-tête Content-Disposition : repli ASCII + nom UTF-8 complet (RFC 6266)."""
+    return f"{kind}; filename=\"{_safe(name)}\"; filename*=UTF-8''{quote(name)}"
 
 
 @router.get("/export")
@@ -281,8 +299,16 @@ def export(session: SessionDep, category: Category | None = None) -> StreamingRe
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         index = []
+        used: set[str] = set()
         for doc in docs:
-            path = f"{_safe(doc.category.value)}/{doc.id}-{_safe(doc.filename)}"
+            # Rangé par catégorie puis par année, sous son nom normalisé.
+            year = (doc.issue_date or doc.due_date or doc.created_at.date()).year
+            folder = f"{doc.category.value}/{year}"
+            stem, ext = os.path.splitext(organize.standard_name(doc))
+            path, n = f"{folder}/{stem}{ext}", 2
+            while path in used:
+                path, n = f"{folder}/{stem} ({n}){ext}", n + 1
+            used.add(path)
             archive.writestr(path, ingest.load_file(doc))
             index.append({**DocumentOut.from_model(doc).model_dump(mode="json"), "fichier": path})
         archive.writestr("index.json", json.dumps(index, ensure_ascii=False, indent=2))

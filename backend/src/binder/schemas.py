@@ -21,6 +21,8 @@ class Extraction(BaseModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
     missing_fields: list[str] = []
     extractor: str = "rules"
+    # Type détecté par les règles (« Facture », « Attestation d'assurance »…).
+    doc_type: str | None = None
 
 
 class DocumentOut(BaseModel):
@@ -42,11 +44,22 @@ class DocumentOut(BaseModel):
     page_count: int
     created_at: datetime
     deleted_at: datetime | None = None
+    doc_type: str | None = None
+    duplicate_of: int | None = None
+    superseded_by: int | None = None
+    # Nom normalisé utilisé au téléchargement et à l'export (« 2026-09-18 Facture EDF.pdf »).
+    standard_name: str = ""
 
     @classmethod
     def from_model(cls, doc: Document) -> "DocumentOut":
+        from binder.services.organize import standard_name
+
         data = doc.model_dump(exclude={"text", "missing_fields", "sha256", "stored_name"})
-        return cls(**data, missing_fields=json.loads(doc.missing_fields))
+        return cls(
+            **data,
+            missing_fields=json.loads(doc.missing_fields),
+            standard_name=standard_name(doc),
+        )
 
 
 class DocumentDetail(DocumentOut):
@@ -66,6 +79,7 @@ class DocumentUpdate(BaseModel):
     issue_date: date | None = None
     due_date: date | None = None
     reference: str | None = None
+    doc_type: str | None = None
     # Valider manuellement le document le sort de la file « à vérifier ».
     validated: bool | None = None
 

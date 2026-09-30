@@ -28,6 +28,10 @@ export interface Doc {
   page_count: number
   created_at: string
   deleted_at: string | null
+  doc_type: string | null
+  duplicate_of: number | null
+  superseded_by: number | null
+  standard_name: string
 }
 
 export interface DocDetail extends Doc {
@@ -35,7 +39,7 @@ export interface DocDetail extends Doc {
 }
 
 export type DocPatch = Partial<
-  Pick<Doc, "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "reference">
+  Pick<Doc, "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "reference" | "doc_type">
 > & { validated?: boolean }
 
 export interface Deadline {

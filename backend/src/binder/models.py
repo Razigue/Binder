@@ -50,6 +50,13 @@ class Document(SQLModel, table=True):
     # Liste JSON des champs manquants ou douteux.
     missing_fields: str = "[]"
     extractor: str = "rules"
+    doc_type: str | None = None
+    # Doublon probable (contenu quasi identique à un document déjà présent).
+    duplicate_of: int | None = Field(default=None, index=True)
+    # L'utilisateur a confirmé que ce n'est pas un doublon : on ne le signale plus.
+    duplicate_dismissed: bool = False
+    # Ancienne version d'un document renouvelé (attestation, pièce d'identité…).
+    superseded_by: int | None = Field(default=None, index=True)
     page_count: int = 0
     text: str = ""
 

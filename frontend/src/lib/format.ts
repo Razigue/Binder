@@ -64,10 +64,12 @@ export const FIELD_LABELS: Record<string, string> = {
   issue_date: "Date d'émission",
   reference: "Référence",
   text: "Texte illisible",
+  duplicate: "Doublon probable",
 }
 
 export function missingLabel(fields: string[]): string {
   if (fields.includes("text")) return "Texte illisible"
+  if (fields.includes("duplicate")) return "Doublon probable"
   if (fields.length === 0) return "À confirmer"
   if (fields.length > 1) return "Document incomplet"
   return `${FIELD_LABELS[fields[0]] ?? fields[0]} manquant${fields[0] === "due_date" ? "e" : ""}`

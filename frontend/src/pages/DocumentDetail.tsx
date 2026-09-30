@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
-  CalendarDays, Check, ChevronLeft, ChevronRight, Download, Folder, Loader2, MoreHorizontal, Pencil,
-  RefreshCw, Trash2, X,
+  CalendarDays, Check, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
+  Pencil, RefreshCw, Trash2, X,
 } from "lucide-react"
 import { useMutation } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
@@ -100,6 +100,7 @@ function toDraft(doc: DocDetail): Draft {
     issue_date: doc.issue_date,
     due_date: doc.due_date,
     reference: doc.reference,
+    doc_type: doc.doc_type,
   }
 }
 
@@ -139,6 +140,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
     { key: "due_date", label: FIELD_LABELS.due_date, type: "date", display: formatDate(doc.due_date) },
     { key: "reference", label: FIELD_LABELS.reference, type: "text", display: doc.reference ?? "—" },
     { key: "issuer", label: "Émetteur", type: "text", display: doc.issuer ?? "—" },
+    { key: "doc_type", label: "Type", type: "text", display: doc.doc_type ?? "—" },
   ]
   const year = (doc.issue_date ?? doc.due_date ?? doc.created_at).slice(0, 4)
 
@@ -202,6 +204,8 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <OrganizeNotices doc={doc} />
 
       <div className="p-5">
         <h2 className="mb-2 font-semibold">Informations extraites</h2>
@@ -274,6 +278,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           <Folder className="size-4" />
           <Link to={`/documents?category=${encodeURIComponent(doc.category)}`} className="hover:underline">{doc.category}</Link>
           <ChevronRight className="size-3" /> {year}
+          <ChevronRight className="size-3" /> <span className="truncate text-muted-foreground" title="Nom utilisé au téléchargement et à l'export">{doc.standard_name}</span>
         </p>
       </div>
 
@@ -300,7 +305,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
                 <Check /> Valider
               </Button>
             )}
-            <Button variant="outline" render={<a href={fileUrl(doc.id)} download={doc.filename} />} nativeButton={false}>
+            <Button variant="outline" render={<a href={fileUrl(doc.id)} download={doc.standard_name} />} nativeButton={false}>
               <Download /> Exporter
             </Button>
           </>
@@ -330,4 +335,68 @@ function DocumentHistory({ id }: { id: number }) {
       </div>
     </details>
   )
+}
+
+/** Doublon probable ou ancienne version : Binder signale, vous décidez. */
+function OrganizeNotices({ doc }: { doc: DocDetail }) {
+  const original = useDocument(doc.duplicate_of)
+  const latest = useDocument(doc.superseded_by)
+  const update = useUpdateDocument(doc.id)
+  const remove = useDeleteDocument()
+  const restore = useRestoreDocument()
+  const navigate = useNavigate()
+
+  if (doc.duplicate_of !== null)
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-b bg-amber-50/70 px-5 py-3 text-sm">
+        <Copy className="size-4 shrink-0 text-amber-600" />
+        <p className="min-w-0 flex-1">
+          Doublon probable de{" "}
+          <Link to={`/documents/${doc.duplicate_of}`} className="font-medium underline">
+            « {original.data?.title ?? "…"} »
+          </Link>
+          . Son échéance n'est pas comptée deux fois.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={update.isPending}
+          onClick={() => update.mutate({ validated: true }, { onSuccess: () => toast.success("Les deux documents sont conservés") })}
+        >
+          Garder les deux
+        </Button>
+        <Button
+          size="sm"
+          disabled={remove.isPending}
+          onClick={() =>
+            remove.mutate(doc.id, {
+              onSuccess: () => {
+                toast.success("Doublon mis à la corbeille", {
+                  action: { label: "Annuler", onClick: () => restore.mutate(doc.id) },
+                })
+                navigate(`/documents/${doc.duplicate_of}`)
+              },
+            })
+          }
+        >
+          <Trash2 /> Mettre le doublon à la corbeille
+        </Button>
+      </div>
+    )
+
+  if (doc.superseded_by !== null)
+    return (
+      <div className="flex items-center gap-3 border-b bg-muted/60 px-5 py-3 text-sm">
+        <History className="size-4 shrink-0 text-muted-foreground" />
+        <p>
+          Ancienne version. La plus récente est{" "}
+          <Link to={`/documents/${doc.superseded_by}`} className="font-medium underline">
+            « {latest.data?.title ?? "…"} »
+          </Link>
+          {latest.data?.issue_date ? ` du ${formatDate(latest.data.issue_date)}` : ""}.
+        </p>
+      </div>
+    )
+
+  return null
 }

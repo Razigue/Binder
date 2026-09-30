@@ -138,6 +138,7 @@ DOC_TYPES: list[tuple[str, str]] = [
     (r"bulletin de (?:paie|salaire)|fiche de paie", "Bulletin de paie"),
     (r"decompte de remboursement", "Décompte de remboursement"),
     (r"attestation", "Attestation"),
+    (r"devis", "Devis"),
     (r"echeancier", "Échéancier"),
     (r"facture", "Facture"),
     (r"contrat", "Contrat"),
@@ -351,11 +352,20 @@ def extract_reference(lines: list[str], original_lines: list[str]) -> str | None
 def detect_title(
     norm: str, category: Category, issuer: str | None, year: int | None, first_line: str = ""
 ) -> str:
-    base = next((title for pattern, title in DOC_TYPES if re.search(pattern, norm)), None)
+    base = detect_doc_type(norm)
     if base is None:
         # Document inconnu : sa première ligne (souvent l'en-tête de l'émetteur) parle mieux.
         base = category.value if category != Category.AUTRE else first_line[:60] or "Document"
-    if issuer and base in {"Facture", "Attestation", "Contrat", "Avis d'échéance", "Échéancier"}:
+    with_issuer = {
+        "Facture",
+        "Attestation",
+        "Attestation d'assurance",
+        "Contrat",
+        "Avis d'échéance",
+        "Échéancier",
+        "Devis",
+    }
+    if issuer and base in with_issuer:
         base = f"{base} {issuer}"
     if year and base in {"Taxe foncière", "Taxe d'habitation", "Avis d'imposition"}:
         base = f"{base} {year}"
@@ -371,8 +381,24 @@ def detect_issuer(norm: str) -> str | None:
     return best[1] if best else None
 
 
+# Documents sans montant ni échéance, quelle que soit leur catégorie.
+INFORMATIVE_TYPES = ("Attestation", "Relevé bancaire", "Contrat", "Devis")
+
+
+def required_fields(category: Category, doc_type: str | None) -> list[str]:
+    if doc_type and doc_type.startswith(INFORMATIVE_TYPES):
+        return ["issue_date"]
+    return REQUIRED_FIELDS[category]
+
+
 def missing_for(category: Category, fields: dict[str, object]) -> list[str]:
-    return [f for f in REQUIRED_FIELDS[category] if fields.get(f) in (None, "")]
+    doc_type = fields.get("doc_type")
+    required = required_fields(category, doc_type if isinstance(doc_type, str) else None)
+    return [f for f in required if fields.get(f) in (None, "")]
+
+
+def detect_doc_type(norm: str) -> str | None:
+    return next((title for pattern, title in DOC_TYPES if re.search(pattern, norm)), None)
 
 
 def extract(text: str) -> Extraction:
@@ -393,7 +419,9 @@ def extract(text: str) -> Extraction:
     reference = extract_reference(lines, original_lines)
     known = issue or due
     year = known.year if known else None
+    doc_type = detect_doc_type(norm)
     fields: dict[str, object] = {
+        "doc_type": doc_type,
         "amount": amount,
         "due_date": due,
         "issue_date": issue,
@@ -416,4 +444,5 @@ def extract(text: str) -> Extraction:
         confidence=confidence,
         missing_fields=missing,
         extractor="rules",
+        doc_type=doc_type,
     )

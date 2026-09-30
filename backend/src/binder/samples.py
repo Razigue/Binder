@@ -119,6 +119,20 @@ def build_samples(today: date | None = None) -> list[Sample]:
         issue_date=d(-25),
         reference="4521877 H",
     )
+    for name, issued in (("attestation-maif-ancienne.pdf", -375), ("attestation-maif.pdf", -8)):
+        add(
+            name,
+            f"""<h1>MAIF</h1><h2>Attestation d'assurance habitation</h2>
+            <p>N° de contrat : 4521877 H</p><p>Fait le {_fr(d(issued))}</p>
+            <p>La MAIF atteste que M. Martin est assuré en responsabilité civile pour le logement
+            situé 12 rue des Tilleuls, 69003 Lyon.</p>
+            <p>Attestation valable jusqu'au {_fr(d(issued + 365))}.</p>""",
+            category=Category.ASSURANCE,
+            amount=None,
+            due_date=None,
+            issue_date=d(issued),
+            reference="4521877 H",
+        )
     add(
         "facture-edf.pdf",
         f"""<h1>EDF</h1><h2>Votre facture d'électricité</h2>
