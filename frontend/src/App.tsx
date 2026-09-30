@@ -10,6 +10,7 @@ import { DocumentsPage } from "@/pages/Documents"
 import { HistoryPage } from "@/pages/History"
 import { HomePage } from "@/pages/Home"
 import { SearchPage } from "@/pages/Search"
+import { SettingsPage } from "@/pages/Settings"
 import { SortingPage } from "@/pages/Sorting"
 import { TrashPage } from "@/pages/Trash"
 
@@ -32,6 +33,7 @@ export default function App() {
                 <Route path="recherche" element={<SearchPage />} />
                 <Route path="historique" element={<HistoryPage />} />
                 <Route path="tri" element={<SortingPage />} />
+                <Route path="reglages" element={<SettingsPage />} />
                 <Route path="corbeille" element={<TrashPage />} />
                 <Route path="*" element={<HomePage />} />
               </Route>

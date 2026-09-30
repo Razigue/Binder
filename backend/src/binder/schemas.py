@@ -196,3 +196,49 @@ class ActivityOut(BaseModel):
     def from_model(cls, a: Activity) -> "ActivityOut":
         data = a.model_dump(exclude={"details"})
         return cls(**data, details=json.loads(a.details))
+
+
+class FolderSettings(BaseModel):
+    enabled: bool = False
+    path: str = ""
+    last_check: datetime | None = None
+    last_error: str | None = None
+
+
+class MailSettings(BaseModel):
+    enabled: bool = False
+    host: str = ""
+    port: int = 993
+    user: str = ""
+    folder: str = "INBOX"
+    since_days: int = 30
+    # Le mot de passe n'est jamais renvoyé par l'API.
+    password_set: bool = False
+    last_check: datetime | None = None
+    last_error: str | None = None
+
+
+class ImportSettings(BaseModel):
+    folder: FolderSettings
+    mail: MailSettings
+
+
+class FolderSettingsIn(BaseModel):
+    enabled: bool
+    path: str = ""
+
+
+class MailSettingsIn(BaseModel):
+    enabled: bool
+    host: str = ""
+    port: int = 993
+    user: str = ""
+    folder: str = "INBOX"
+    since_days: int = Field(default=30, ge=1, le=365)
+    # Absent : on garde le mot de passe enregistré.
+    password: str | None = None
+
+
+class ImportSettingsIn(BaseModel):
+    folder: FolderSettingsIn | None = None
+    mail: MailSettingsIn | None = None

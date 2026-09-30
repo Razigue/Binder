@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Bot, FolderInput, Sparkles, User } from "lucide-react"
+import { Bot, FolderInput, Mail, Sparkles, User } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { Activity, Actor } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -9,6 +9,7 @@ const ACTORS: Record<Actor, { label: string; icon: typeof User; tone: string }> 
   binder: { label: "Binder", icon: Sparkles, tone: "bg-primary/10 text-primary" },
   agent: { label: "Agent", icon: Bot, tone: "bg-violet-50 text-violet-600" },
   watcher: { label: "Dossier surveillé", icon: FolderInput, tone: "bg-sky-50 text-sky-600" },
+  mail: { label: "Boîte mail", icon: Mail, tone: "bg-sky-50 text-sky-600" },
   demo: { label: "Démonstration", icon: Sparkles, tone: "bg-slate-100 text-slate-500" },
 }
 

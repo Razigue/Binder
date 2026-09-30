@@ -90,7 +90,7 @@ export interface ChatResponse {
   engine: "llm" | "rules"
 }
 
-export type Actor = "user" | "binder" | "agent" | "watcher" | "demo"
+export type Actor = "user" | "binder" | "agent" | "watcher" | "mail" | "demo"
 
 export interface Activity {
   id: number
@@ -109,6 +109,36 @@ export interface Expiration {
   days_left: number
   state: "expired" | "renew" | "valid"
 }
+
+export interface ImportSettings {
+  folder: { enabled: boolean; path: string; last_check: string | null; last_error: string | null }
+  mail: {
+    enabled: boolean
+    host: string
+    port: number
+    user: string
+    folder: string
+    since_days: number
+    password_set: boolean
+    last_check: string | null
+    last_error: string | null
+  }
+}
+
+export interface ImportSettingsIn {
+  folder?: { enabled: boolean; path: string }
+  mail?: {
+    enabled: boolean
+    host: string
+    port: number
+    user: string
+    folder: string
+    since_days: number
+    password?: string | null
+  }
+}
+
+type ImportRun = { imported: number; error: string | null } | null
 
 export class ApiError extends Error {
   status: number
@@ -166,6 +196,9 @@ export const api = {
   expirations: () => request<Expiration[]>("/expirations"),
   retention: () => request<Doc[]>("/retention"),
   trashDeletable: (ids: number[]) => request<{ trashed: number }>("/retention/trash", json("POST", { ids })),
+  importSettings: () => request<ImportSettings>("/import/settings"),
+  saveImportSettings: (body: ImportSettingsIn) => request<ImportSettings>("/import/settings", json("PUT", body)),
+  runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),
   activity: (p: { document_id?: number; limit?: number; before?: number } = {}) =>
     request<Activity[]>(`/activity${query(p)}`),
   deadlines: (p: { start?: string; end?: string; include_done?: boolean } = {}) =>

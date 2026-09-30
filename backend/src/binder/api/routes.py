@@ -7,6 +7,7 @@ import re
 import unicodedata
 import zipfile
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
@@ -30,11 +31,24 @@ from binder.schemas import (
     DocumentOut,
     DocumentUpdate,
     ExpirationOut,
+    FolderSettings,
+    ImportSettings,
+    ImportSettingsIn,
+    MailSettings,
     Stats,
     SystemStatus,
     TrashRequest,
 )
-from binder.services import activity, deadlines, ingest, llm, organize, retention
+from binder.services import (
+    activity,
+    deadlines,
+    importers,
+    ingest,
+    llm,
+    organize,
+    retention,
+    settings_store,
+)
 from binder.services.text import render_page
 
 router = APIRouter(prefix="/api")
@@ -459,6 +473,62 @@ def delete_deadline(deadline_id: int, session: SessionDep) -> None:
     )
     session.delete(deadline)
     session.commit()
+
+
+# --- Import automatique -------------------------------------------------------------------
+
+
+def _import_settings(session: Session) -> ImportSettings:
+    folder = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
+    mail = settings_store.load(session, importers.MAIL_KEY, importers.MailConfig)
+    return ImportSettings(
+        folder=FolderSettings(**folder.model_dump()),
+        mail=MailSettings(
+            **mail.model_dump(exclude={"password"}), password_set=bool(mail.password)
+        ),
+    )
+
+
+@router.get("/import/settings")
+def get_import_settings(session: SessionDep) -> ImportSettings:
+    return _import_settings(session)
+
+
+@router.put("/import/settings")
+def update_import_settings(body: ImportSettingsIn, session: SessionDep) -> ImportSettings:
+    if body.folder is not None:
+        folder = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
+        path = body.folder.path.strip()
+        if body.folder.enabled and not Path(path).expanduser().is_dir():
+            raise HTTPException(400, f"Dossier introuvable : {path or '(vide)'}")
+        if (folder.enabled, folder.path) != (body.folder.enabled, path):
+            state = f"activé sur {path}" if body.folder.enabled else "désactivé"
+            activity.log(session, "settings", f"Dossier surveillé {state}", actor="user")
+        folder.enabled, folder.path, folder.last_error = body.folder.enabled, path, None
+        settings_store.save(session, importers.FOLDER_KEY, folder)
+    if body.mail is not None:
+        mail = settings_store.load(session, importers.MAIL_KEY, importers.MailConfig)
+        new = body.mail
+        if new.enabled and not (new.host and new.user and (new.password or mail.password)):
+            raise HTTPException(400, "Serveur, identifiant et mot de passe sont nécessaires")
+        if (mail.host, mail.user, mail.folder) != (new.host, new.user, new.folder):
+            mail.uidvalidity, mail.last_uid = None, 0
+        if mail.enabled != new.enabled:
+            state = f"activé ({new.user})" if new.enabled else "désactivé"
+            activity.log(session, "settings", f"Import depuis la boîte mail {state}", actor="user")
+        mail = mail.model_copy(update=new.model_dump(exclude={"password"}))
+        if new.password is not None:
+            mail.password = new.password
+        mail.last_error = None
+        settings_store.save(session, importers.MAIL_KEY, mail)
+    session.commit()
+    return _import_settings(session)
+
+
+@router.post("/import/run")
+def run_imports(session: SessionDep) -> dict[str, object]:
+    """Vérifie tout de suite le dossier et la boîte mail (sinon : toutes les 30 s / 5 min)."""
+    return importers.run(session)
 
 
 # --- Journal -------------------------------------------------------------------------------

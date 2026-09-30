@@ -11,7 +11,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from binder.api.routes import router
+from binder.config import get_settings
 from binder.db import get_engine
+from binder.services.importers import Scheduler
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -19,7 +21,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     get_engine()
+    scheduler = Scheduler() if get_settings().auto_import else None
+    if scheduler:
+        scheduler.start()
     yield
+    if scheduler:
+        scheduler.stop()
 
 
 def create_app() -> FastAPI:

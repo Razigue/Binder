@@ -36,7 +36,13 @@ def guess_mime(filename: str, declared: str | None) -> str:
 
 
 def store(
-    session: Session, data: bytes, filename: str, mime: str, *, actor: str = "user"
+    session: Session,
+    data: bytes,
+    filename: str,
+    mime: str,
+    *,
+    actor: str = "user",
+    origin: str = "",
 ) -> tuple[Document, bool]:
     """Enregistre le fichier chiffré. Retourne (document, créé) ; un doublon renvoie l'existant
     (et le sort de la corbeille s'il y était)."""
@@ -67,11 +73,11 @@ def store(
     )
     session.add(doc)
     session.flush()
-    source = {"watcher": "depuis le dossier surveillé", "demo": "(démonstration)"}.get(actor, "")
+    origin = origin or ("(démonstration)" if actor == "demo" else "")
     activity.log(
         session,
         "import",
-        f"« {filename} » importé {source}".strip(),
+        f"« {filename} » importé {origin}".strip(),
         actor=actor,
         document=doc,
         details={"taille": len(data)},
@@ -161,9 +167,9 @@ def analyze(session: Session, doc: Document) -> Document:
     apply_extraction(doc, ext)
     session.add(doc)
     session.flush()
-    _log_analysis(session, doc)
     organize.detect_duplicate(session, doc)
     refresh_status(doc)
+    _log_analysis(session, doc)
     sync_deadline(session, doc)
     index_document(session, doc)
     organize.reorganize(session, doc, previous_key)
@@ -176,8 +182,13 @@ def _log_analysis(session: Session, doc: Document) -> None:
     confidence = f"confiance {round(doc.confidence * 100)} %"
     if doc.status == DocumentStatus.TO_REVIEW:
         missing = json.loads(doc.missing_fields)
-        reasons = [activity.FIELD_NAMES.get(f, f) for f in missing if f != "text"]
-        if "text" in missing or not doc.text.strip():
+        reasons = [
+            activity.FIELD_NAMES.get(f, f) for f in missing if f not in ("text", "duplicate")
+        ]
+        original = session.get(Document, doc.duplicate_of) if doc.duplicate_of else None
+        if original is not None:
+            why = f"doublon probable de « {original.title} »"
+        elif "text" in missing or not doc.text.strip():
             why = "texte illisible"
         elif reasons:
             why = "manque " + ", ".join(reasons)
@@ -200,6 +211,7 @@ def _log_analysis(session: Session, doc: Document) -> None:
             "montant": doc.amount,
             "echeance": doc.due_date,
             "reference": doc.reference,
+            "doublon_de": doc.duplicate_of,
         },
     )
 

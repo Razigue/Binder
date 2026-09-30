@@ -104,14 +104,6 @@ def detect_duplicate(session: Session, doc: Document) -> None:
         return
     original = find_duplicate(session, doc)
     doc.duplicate_of = original.id if original else None
-    if original:
-        activity.log(
-            session,
-            "duplicate",
-            f"« {doc.title} » ressemble à « {original.title} » déjà présent : doublon probable",
-            document=doc,
-            details={"original": original.id},
-        )
 
 
 def release_duplicates(session: Session, original: Document) -> list[Document]:

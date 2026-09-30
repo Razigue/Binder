@@ -40,6 +40,12 @@ def test_near_duplicate_goes_to_review(client: TestClient, samples: list[Sample]
     assert copy["duplicate_of"] == original["id"]
     assert copy["status"] == "to_review"
     assert "duplicate" in copy["missing_fields"]
+    [analysis] = [
+        e
+        for e in client.get("/api/activity", params={"document_id": copy["id"]}).json()
+        if e["action"] == "analyze"
+    ]
+    assert analysis["summary"].endswith("(doublon probable de « Facture Orange »)")
     # L'échéance n'est comptée qu'une fois.
     assert [d["document_id"] for d in client.get("/api/deadlines").json()] == [original["id"]]
 

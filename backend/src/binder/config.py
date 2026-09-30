@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Large : sur CPU seul, un modèle 9B met 1 à 3 minutes par document.
     llm_timeout: float = 300.0
 
+    # Import automatique (dossier surveillé, boîte mail) en tâche de fond.
+    auto_import: bool = True
+
     host: str = "127.0.0.1"
     port: int = 8765
 

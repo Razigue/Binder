@@ -101,3 +101,10 @@ class Activity(SQLModel, table=True):
     document_id: int | None = Field(default=None, index=True)
     # Détails JSON (ancienne/nouvelle valeur d'un champ, confiance…).
     details: str = "{}"
+
+
+class Setting(SQLModel, table=True):
+    """Réglages modifiables depuis l'interface (valeur JSON). Stockés dans la base chiffrée."""
+
+    key: str = Field(primary_key=True)
+    value: str = "null"

@@ -16,6 +16,7 @@ TODAY = date(2026, 9, 30)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("BINDER_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BINDER_LLM_ENABLED", "false")
+    monkeypatch.setenv("BINDER_AUTO_IMPORT", "false")
     monkeypatch.delenv("BINDER_DB_KEY", raising=False)
     get_settings.cache_clear()
     reset_engine()
