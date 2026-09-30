@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Binder
+GenericName=Coffre-fort administratif
+Comment=Vos documents et vos échéances, 100 % local
+Exec=@BINDER_BIN@
+Icon=binder
+Terminal=false
+Categories=Office;
+StartupWMClass=Binder
