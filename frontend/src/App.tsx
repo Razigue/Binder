@@ -7,8 +7,10 @@ import { UploadProvider } from "@/components/upload"
 import { DeadlinesPage } from "@/pages/Deadlines"
 import { DocumentDetailPage } from "@/pages/DocumentDetail"
 import { DocumentsPage } from "@/pages/Documents"
+import { HistoryPage } from "@/pages/History"
 import { HomePage } from "@/pages/Home"
 import { SearchPage } from "@/pages/Search"
+import { TrashPage } from "@/pages/Trash"
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1, refetchOnWindowFocus: true } },
@@ -27,6 +29,8 @@ export default function App() {
                 <Route path="documents/:id" element={<DocumentDetailPage />} />
                 <Route path="echeances" element={<DeadlinesPage />} />
                 <Route path="recherche" element={<SearchPage />} />
+                <Route path="historique" element={<HistoryPage />} />
+                <Route path="corbeille" element={<TrashPage />} />
                 <Route path="*" element={<HomePage />} />
               </Route>
             </Routes>

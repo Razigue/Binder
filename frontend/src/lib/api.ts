@@ -27,6 +27,7 @@ export interface Doc {
   extractor: string
   page_count: number
   created_at: string
+  deleted_at: string | null
 }
 
 export interface DocDetail extends Doc {
@@ -54,6 +55,7 @@ export interface Stats {
   to_review: number
   classified_this_week: number
   total_documents: number
+  trashed: number
   by_category: Record<string, number>
 }
 
@@ -76,6 +78,18 @@ export interface ChatResponse {
   deadlines: Deadline[]
   tool_calls: { name: string; arguments: Record<string, unknown> }[]
   engine: "llm" | "rules"
+}
+
+export type Actor = "user" | "binder" | "agent" | "watcher" | "demo"
+
+export interface Activity {
+  id: number
+  created_at: string
+  actor: Actor
+  action: string
+  summary: string
+  document_id: number | null
+  details: Record<string, unknown>
 }
 
 export class ApiError extends Error {
@@ -128,6 +142,11 @@ export const api = {
   updateDocument: (id: number, patch: DocPatch) => request<DocDetail>(`/documents/${id}`, json("PATCH", patch)),
   reanalyze: (id: number) => request<DocDetail>(`/documents/${id}/reanalyze`, { method: "POST" }),
   deleteDocument: (id: number) => request<void>(`/documents/${id}`, { method: "DELETE" }),
+  trash: () => request<Doc[]>("/trash"),
+  restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
+  purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
+  activity: (p: { document_id?: number; limit?: number; before?: number } = {}) =>
+    request<Activity[]>(`/activity${query(p)}`),
   deadlines: (p: { start?: string; end?: string; include_done?: boolean } = {}) =>
     request<Deadline[]>(`/deadlines${query(p)}`),
   createDeadline: (body: { title: string; due_date: string; amount?: number | null; category?: Category }) =>

@@ -7,7 +7,12 @@ export function formatAmount(value: number | null | undefined): string {
 }
 
 export function parseDate(iso: string): Date {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number)
+  // Date-heure UTC (created_at, deleted_at…) : jour local, pas le jour UTC.
+  if (iso.length > 10) {
+    const local = new Date(iso)
+    return new Date(local.getFullYear(), local.getMonth(), local.getDate())
+  }
+  const [y, m, d] = iso.split("-").map(Number)
   return new Date(y, m - 1, d)
 }
 

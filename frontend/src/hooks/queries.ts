@@ -7,6 +7,8 @@ export const keys = {
   documents: (p: object) => ["documents", p] as const,
   document: (id: number) => ["document", id] as const,
   deadlines: (p: object) => ["deadlines", p] as const,
+  trash: ["trash"] as const,
+  activity: (p: object) => ["activity", p] as const,
 }
 
 export function useStatus() {
@@ -60,4 +62,22 @@ export function useToggleDeadline() {
     mutationFn: ({ id, done }: { id: number; done: boolean }) => api.updateDeadline(id, { done }),
     onSuccess: invalidate,
   })
+}
+
+export function useTrash() {
+  return useQuery({ queryKey: keys.trash, queryFn: api.trash })
+}
+
+export function useActivity(p: { document_id?: number; limit?: number } = {}) {
+  return useQuery({ queryKey: keys.activity(p), queryFn: () => api.activity(p) })
+}
+
+export function useRestoreDocument() {
+  const invalidate = useInvalidateAll()
+  return useMutation({ mutationFn: api.restoreDocument, onSuccess: invalidate })
+}
+
+export function usePurgeDocument() {
+  const invalidate = useInvalidateAll()
+  return useMutation({ mutationFn: api.purgeDocument, onSuccess: invalidate })
 }

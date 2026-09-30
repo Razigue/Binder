@@ -5,7 +5,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from binder.models import Category, Deadline, Document, DocumentStatus
+from binder.models import Activity, Category, Deadline, Document, DocumentStatus
 
 
 class Extraction(BaseModel):
@@ -41,6 +41,7 @@ class DocumentOut(BaseModel):
     extractor: str
     page_count: int
     created_at: datetime
+    deleted_at: datetime | None = None
 
     @classmethod
     def from_model(cls, doc: Document) -> "DocumentOut":
@@ -104,6 +105,7 @@ class Stats(BaseModel):
     to_review: int
     classified_this_week: int
     total_documents: int
+    trashed: int = 0
     by_category: dict[str, int]
 
 
@@ -136,3 +138,18 @@ class SystemStatus(BaseModel):
     ocr_engine: str | None
     encrypted: bool
     data_dir: str
+
+
+class ActivityOut(BaseModel):
+    id: int
+    created_at: datetime
+    actor: str
+    action: str
+    summary: str
+    document_id: int | None
+    details: dict[str, object]
+
+    @classmethod
+    def from_model(cls, a: Activity) -> "ActivityOut":
+        data = a.model_dump(exclude={"details"})
+        return cls(**data, details=json.loads(a.details))

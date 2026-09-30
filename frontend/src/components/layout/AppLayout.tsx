@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom"
-import { Bot, CalendarDays, FileText, Home, Lock, Search } from "lucide-react"
+import { Bot, CalendarDays, FileText, History, Home, Lock, Search, Trash2 } from "lucide-react"
 import { useAgent } from "@/components/agent"
 import { EngineInfo, LocalBadge } from "@/components/StatusDot"
 import { cn } from "@/lib/utils"
@@ -9,6 +9,8 @@ const NAV = [
   { to: "/documents", label: "Documents", icon: FileText },
   { to: "/echeances", label: "Échéances", icon: CalendarDays },
   { to: "/recherche", label: "Recherche", icon: Search },
+  { to: "/historique", label: "Historique", icon: History },
+  { to: "/corbeille", label: "Corbeille", icon: Trash2 },
 ]
 
 const itemClass = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"

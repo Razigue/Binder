@@ -16,7 +16,10 @@ import {
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { StatusBadge } from "@/components/DocumentList"
 import { LocalBadge } from "@/components/StatusDot"
-import { useDeleteDocument, useDocument, useInvalidateAll, useUpdateDocument } from "@/hooks/queries"
+import { ActivityList } from "@/components/ActivityList"
+import {
+  useActivity, useDeleteDocument, useDocument, useInvalidateAll, useRestoreDocument, useUpdateDocument,
+} from "@/hooks/queries"
 import { api, CATEGORIES, fileUrl, previewUrl, type Category, type DocDetail, type DocPatch } from "@/lib/api"
 import { FIELD_LABELS, formatAmount, formatDate, parseDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -105,6 +108,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(doc))
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
+  const restore = useRestoreDocument()
   const invalidate = useInvalidateAll()
   const reanalyze = useMutation({ mutationFn: () => api.reanalyze(doc.id), onSuccess: invalidate })
   const navigate = useNavigate()
@@ -179,17 +183,21 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => {
-                if (!confirm(`Supprimer « ${doc.title} » ? Cette action est définitive.`)) return
+              onClick={() =>
                 remove.mutate(doc.id, {
                   onSuccess: () => {
-                    toast.success("Document supprimé")
+                    toast.success("Document mis à la corbeille", {
+                      action: {
+                        label: "Annuler",
+                        onClick: () => restore.mutate(doc.id, { onSuccess: () => navigate(`/documents/${doc.id}`) }),
+                      },
+                    })
                     navigate("/documents")
                   },
                 })
-              }}
+              }
             >
-              <Trash2 /> Supprimer
+              <Trash2 /> Mettre à la corbeille
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -305,6 +313,21 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-muted/50 p-3 font-sans text-xs whitespace-pre-wrap">{doc.text}</pre>
         </details>
       )}
+      <DocumentHistory id={doc.id} />
     </Card>
+  )
+}
+
+function DocumentHistory({ id }: { id: number }) {
+  const history = useActivity({ document_id: id })
+  return (
+    <details className="border-t text-sm">
+      <summary className="cursor-pointer px-5 py-3 text-muted-foreground">
+        Historique{history.data ? ` (${history.data.length})` : ""}
+      </summary>
+      <div className="border-t">
+        <ActivityList entries={history.data} loading={history.isPending} linkDocuments={false} />
+      </div>
+    </details>
   )
 }

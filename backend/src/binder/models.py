@@ -55,6 +55,8 @@ class Document(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=_now, index=True)
     updated_at: datetime = Field(default_factory=_now)
+    # Corbeille : un document supprimé reste restaurable jusqu'à sa suppression définitive.
+    deleted_at: datetime | None = Field(default=None, index=True)
 
 
 class Deadline(SQLModel, table=True):
@@ -68,3 +70,20 @@ class Deadline(SQLModel, table=True):
     # "extracted" (déduite d'un document) ou "manual" (rappel créé par l'utilisateur/l'agent).
     source: str = "extracted"
     created_at: datetime = Field(default_factory=_now)
+
+
+class Activity(SQLModel, table=True):
+    """Journal lisible de tout ce que Binder (ou l'utilisateur) a fait.
+
+    Pas de clé étrangère vers le document : l'entrée survit à sa suppression définitive.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    # « user » (action dans l'interface), « binder » (automatique), « agent », « watcher ».
+    actor: str = "binder"
+    action: str = Field(index=True)
+    summary: str
+    document_id: int | None = Field(default=None, index=True)
+    # Détails JSON (ancienne/nouvelle valeur d'un champ, confiance…).
+    details: str = "{}"

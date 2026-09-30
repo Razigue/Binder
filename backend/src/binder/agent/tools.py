@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlmodel import Session, col, select
 
 from binder.models import Category, Deadline, Document, DocumentStatus
+from binder.services import activity
 from binder.services.rules import MONTHS, normalize
 
 STOP_WORDS = {
@@ -138,7 +139,7 @@ def search_documents(
 ) -> ToolResult:
     """Recherche plein texte (tous les mots, sinon au moins un), filtrable par catégorie et date."""
     terms = keywords(query)
-    stmt = select(Document)
+    stmt = select(Document).where(col(Document.deleted_at).is_(None))
     if terms:
         ids = _fts(session, terms, "AND", 200) or _fts(session, terms, "OR", 200)
         if not ids:
@@ -163,7 +164,7 @@ def search_documents(
 
 def read_document(session: Session, document_id: int) -> ToolResult:
     doc = session.get(Document, document_id)
-    if doc is None:
+    if doc is None or doc.deleted_at is not None:
         return ToolResult(payload={"erreur": f"Document {document_id} introuvable"})
     return ToolResult(payload={**_doc_summary(doc), "texte": doc.text[:4000]}, documents=[doc])
 
@@ -199,6 +200,12 @@ def create_reminder(
         return ToolResult(payload={"erreur": "Date invalide, format attendu AAAA-MM-JJ"})
     reminder = Deadline(title=title, due_date=when, amount=amount, source="manual")
     session.add(reminder)
+    activity.log(
+        session,
+        "reminder",
+        f"Rappel « {title} » créé pour le {activity.display(when)} à votre demande",
+        actor="agent",
+    )
     session.commit()
     session.refresh(reminder)
     return ToolResult(payload={"cree": _deadline_summary(reminder)}, deadlines=[reminder])
@@ -209,6 +216,7 @@ def documents_to_review(session: Session) -> ToolResult:
         session.exec(
             select(Document)
             .where(Document.status == DocumentStatus.TO_REVIEW)
+            .where(col(Document.deleted_at).is_(None))
             .order_by(col(Document.created_at).desc())
         )
     )
