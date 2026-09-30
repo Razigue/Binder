@@ -1,0 +1,61 @@
+[project]
+name = "binder"
+version = "0.1.0"
+description = "Coffre-fort administratif intelligent, 100 % local"
+authors = [
+    { name = "Razigue Ben Hmida", email = "razigue.benhmida@epitech.eu" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography>=50.0.2",
+    "fastapi>=0.142.2",
+    "httpx>=0.28.1",
+    "pillow>=12.3.0",
+    "pydantic-settings>=2.15.0",
+    "pymupdf>=1.28.2",
+    "python-multipart>=0.0.32",
+    "sqlcipher3-binary>=0.6.0",
+    "sqlmodel>=0.0.47",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.optional-dependencies]
+desktop = [
+    "pywebview[qt]>=6.2.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pyinstaller>=6.22.3",
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
+
+[project.scripts]
+binder = "binder.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# PyMuPDF n'est que partiellement typé.
+module = ["binder.samples", "binder.services.text"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
