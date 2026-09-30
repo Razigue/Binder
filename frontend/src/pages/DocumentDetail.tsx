@@ -89,7 +89,7 @@ function Preview({ doc }: { doc: DocDetail }) {
   )
 }
 
-type Draft = Required<Omit<DocPatch, "validated">>
+type Draft = Required<Omit<DocPatch, "validated" | "keep_forever">>
 
 function toDraft(doc: DocDetail): Draft {
   return {
@@ -99,6 +99,7 @@ function toDraft(doc: DocDetail): Draft {
     amount: doc.amount,
     issue_date: doc.issue_date,
     due_date: doc.due_date,
+    expiry_date: doc.expiry_date,
     reference: doc.reference,
     doc_type: doc.doc_type,
   }
@@ -138,6 +139,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
     { key: "amount", label: FIELD_LABELS.amount, type: "number", display: formatAmount(doc.amount) },
     { key: "issue_date", label: FIELD_LABELS.issue_date, type: "date", display: formatDate(doc.issue_date) },
     { key: "due_date", label: FIELD_LABELS.due_date, type: "date", display: formatDate(doc.due_date) },
+    { key: "expiry_date", label: FIELD_LABELS.expiry_date, type: "date", display: formatDate(doc.expiry_date) },
     { key: "reference", label: FIELD_LABELS.reference, type: "text", display: doc.reference ?? "—" },
     { key: "issuer", label: "Émetteur", type: "text", display: doc.issuer ?? "—" },
     { key: "doc_type", label: "Type", type: "text", display: doc.doc_type ?? "—" },
@@ -274,6 +276,8 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           </p>
         </div>
 
+        <RetentionInfo doc={doc} />
+
         <p className="mt-5 flex items-center gap-2 text-sm text-primary">
           <Folder className="size-4" />
           <Link to={`/documents?category=${encodeURIComponent(doc.category)}`} className="hover:underline">{doc.category}</Link>
@@ -399,4 +403,43 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
     )
 
   return null
+}
+
+function RetentionInfo({ doc }: { doc: DocDetail }) {
+  const update = useUpdateDocument(doc.id)
+  if (!doc.retention_rule) return null
+  const setKeep = (keep_forever: boolean) =>
+    update.mutate({ keep_forever }, { onSuccess: () => toast.success(keep_forever ? "Document conservé sans limite" : "Durée conseillée rétablie") })
+  return (
+    <div className="mt-5 rounded-lg border px-4 py-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">Conservation</p>
+          <p className="text-muted-foreground">
+            {doc.retention_rule}
+            {doc.keep_until && !doc.keep_forever ? ` · jusqu'au ${formatDate(doc.keep_until)}` : ""}
+          </p>
+          {doc.renew_from && !doc.superseded_by && (
+            <p className="mt-1 text-muted-foreground">À renouveler à partir du {formatDate(doc.renew_from)}</p>
+          )}
+        </div>
+        {doc.keep_forever ? (
+          <Button variant="ghost" size="sm" onClick={() => setKeep(false)} disabled={update.isPending}>
+            Rétablir
+          </Button>
+        ) : (
+          doc.deletable_reason && (
+            <Button variant="outline" size="sm" onClick={() => setKeep(true)} disabled={update.isPending}>
+              Garder
+            </Button>
+          )
+        )}
+      </div>
+      {doc.deletable_reason && (
+        <p className="mt-2 text-amber-700">
+          {doc.deletable_reason}. <Link to="/tri" className="underline">Voir les documents à trier</Link>
+        </p>
+      )}
+    </div>
+  )
 }

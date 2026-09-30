@@ -12,7 +12,7 @@ from binder.schemas import Extraction
 from binder.services import ingest, llm, rules
 from binder.services.text import read_document
 
-FIELDS = ["category", "amount", "issue_date", "due_date", "reference"]
+FIELDS = ["category", "amount", "issue_date", "due_date", "expiry_date", "reference"]
 
 
 def main() -> None:
@@ -32,12 +32,11 @@ def main() -> None:
             result = ingest.merge(result, llm.extract(text))
         errors = []
         for field in FIELDS:
-            if getattr(result, field) == sample.expected[field]:
+            expected = sample.expected.get(field)
+            if getattr(result, field) == expected:
                 hits[field] += 1
             else:
-                errors.append(
-                    f"{field}={getattr(result, field)!r} (attendu {sample.expected[field]!r})"
-                )
+                errors.append(f"{field}={getattr(result, field)!r} (attendu {expected!r})")
         print(f"{'✓' if not errors else '✗'} {sample.filename:28} {'; '.join(errors)}")
 
     elapsed = time.perf_counter() - started

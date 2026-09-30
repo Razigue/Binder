@@ -14,7 +14,7 @@ from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import activity, llm, organize, rules
+from binder.services import activity, deadlines, llm, organize, rules
 from binder.services.text import SUPPORTED_MIME, read_document
 
 log = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
     if by_llm is None:
         return by_rules
     merged = by_llm.model_copy()
-    for field in ("issuer", "amount", "issue_date", "due_date", "reference"):
+    for field in ("issuer", "amount", "issue_date", "due_date", "expiry_date", "reference"):
         if getattr(merged, field) in (None, ""):
             setattr(merged, field, getattr(by_rules, field))
     if merged.category == Category.AUTRE and by_rules.category != Category.AUTRE:
@@ -116,6 +116,7 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.amount = ext.amount
     doc.issue_date = ext.issue_date
     doc.due_date = ext.due_date
+    doc.expiry_date = ext.expiry_date
     doc.reference = ext.reference
     doc.doc_type = ext.doc_type
     doc.confidence = ext.confidence
@@ -142,21 +143,7 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
 
 
 def sync_deadline(session: Session, doc: Document) -> None:
-    """Une échéance « extraite » par document, alignée sur sa date limite."""
-    existing = session.exec(
-        select(Deadline).where(Deadline.document_id == doc.id, Deadline.source == "extracted")
-    ).first()
-    # Un doublon ou un document à la corbeille ne doit pas compter deux fois.
-    if doc.due_date is None or doc.duplicate_of is not None or doc.deleted_at is not None:
-        if existing:
-            session.delete(existing)
-        return
-    deadline = existing or Deadline(document_id=doc.id, title="", due_date=doc.due_date)
-    deadline.title = doc.title
-    deadline.category = doc.category
-    deadline.due_date = doc.due_date
-    deadline.amount = doc.amount
-    session.add(deadline)
+    deadlines.sync(session, doc)
 
 
 def analyze(session: Session, doc: Document) -> Document:
@@ -221,9 +208,7 @@ def trash(session: Session, doc: Document, *, actor: str = "user", reason: str =
     """Met le document à la corbeille : caché partout, restaurable, fichier conservé."""
     previous_key = organize.series_key(doc)
     doc.deleted_at = datetime.now(UTC)
-    for dl in session.exec(select(Deadline).where(Deadline.document_id == doc.id)):
-        if dl.source == "extracted":
-            session.delete(dl)
+    deadlines.sync(session, doc)
     if doc.id is not None:
         unindex_document(session, doc.id)
     session.add(doc)

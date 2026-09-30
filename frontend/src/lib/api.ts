@@ -1,10 +1,10 @@
 export type Category =
   | "Impôts" | "Énergie" | "Assurance" | "Banque" | "Logement"
-  | "Santé" | "Social" | "Travail" | "Télécom" | "Autre"
+  | "Santé" | "Social" | "Travail" | "Télécom" | "Identité" | "Véhicule" | "Autre"
 
 export const CATEGORIES: Category[] = [
   "Impôts", "Énergie", "Assurance", "Banque", "Logement",
-  "Santé", "Social", "Travail", "Télécom", "Autre",
+  "Santé", "Social", "Travail", "Télécom", "Identité", "Véhicule", "Autre",
 ]
 
 export type DocumentStatus = "processing" | "to_review" | "classified"
@@ -20,6 +20,7 @@ export interface Doc {
   amount: number | null
   issue_date: string | null
   due_date: string | null
+  expiry_date: string | null
   reference: string | null
   confidence: number
   status: DocumentStatus
@@ -32,6 +33,11 @@ export interface Doc {
   duplicate_of: number | null
   superseded_by: number | null
   standard_name: string
+  keep_forever: boolean
+  retention_rule: string | null
+  keep_until: string | null
+  deletable_reason: string | null
+  renew_from: string | null
 }
 
 export interface DocDetail extends Doc {
@@ -39,8 +45,8 @@ export interface DocDetail extends Doc {
 }
 
 export type DocPatch = Partial<
-  Pick<Doc, "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "reference" | "doc_type">
-> & { validated?: boolean }
+  Pick<Doc, "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "expiry_date" | "reference" | "doc_type">
+> & { validated?: boolean; keep_forever?: boolean }
 
 export interface Deadline {
   id: number
@@ -50,7 +56,7 @@ export interface Deadline {
   due_date: string
   amount: number | null
   done: boolean
-  source: "extracted" | "manual"
+  source: "extracted" | "expiry" | "manual"
   days_left: number
 }
 
@@ -94,6 +100,14 @@ export interface Activity {
   summary: string
   document_id: number | null
   details: Record<string, unknown>
+}
+
+export interface Expiration {
+  document: Doc
+  expiry_date: string
+  renew_from: string
+  days_left: number
+  state: "expired" | "renew" | "valid"
 }
 
 export class ApiError extends Error {
@@ -149,6 +163,9 @@ export const api = {
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
+  expirations: () => request<Expiration[]>("/expirations"),
+  retention: () => request<Doc[]>("/retention"),
+  trashDeletable: (ids: number[]) => request<{ trashed: number }>("/retention/trash", json("POST", { ids })),
   activity: (p: { document_id?: number; limit?: number; before?: number } = {}) =>
     request<Activity[]>(`/activity${query(p)}`),
   deadlines: (p: { start?: string; end?: string; include_done?: boolean } = {}) =>

@@ -11,12 +11,21 @@ from difflib import SequenceMatcher
 from sqlmodel import Session, col, select
 
 from binder.models import Document
-from binder.services import activity
+from binder.services import activity, deadlines
 from binder.services.rules import normalize
 
 # Documents dont seule la dernière version compte : la nouvelle remplace l'ancienne.
 # Les bulletins de paie n'en font pas partie : chacun est à conserver.
-VERSIONED_TYPES = {"Attestation", "Attestation d'assurance"}
+VERSIONED_TYPES = {
+    "Attestation",
+    "Attestation d'assurance",
+    "Carte d'identité",
+    "Passeport",
+    "Permis de conduire",
+    "Titre de séjour",
+    "Contrôle technique",
+    "Carte grise",
+}
 
 SIMILARITY_THRESHOLD = 0.92
 SIMILARITY_CHARS = 4000
@@ -143,6 +152,7 @@ def update_series(session: Session, *keys: tuple[str, str] | None) -> None:
                 continue
             d.superseded_by = target
             session.add(d)
+            deadlines.sync(session, d)
             if target is not None:
                 activity.log(
                     session,
@@ -160,5 +170,6 @@ def reorganize(session: Session, doc: Document, previous_key: tuple[str, str] | 
     if key is None and doc.superseded_by is not None:
         doc.superseded_by = None
         session.add(doc)
+        deadlines.sync(session, doc)
     session.flush()
     update_series(session, previous_key, key)

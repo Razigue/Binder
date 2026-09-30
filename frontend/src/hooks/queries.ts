@@ -8,6 +8,8 @@ export const keys = {
   document: (id: number) => ["document", id] as const,
   deadlines: (p: object) => ["deadlines", p] as const,
   trash: ["trash"] as const,
+  expirations: ["expirations"] as const,
+  retention: ["retention"] as const,
   activity: (p: object) => ["activity", p] as const,
 }
 
@@ -80,4 +82,12 @@ export function useRestoreDocument() {
 export function usePurgeDocument() {
   const invalidate = useInvalidateAll()
   return useMutation({ mutationFn: api.purgeDocument, onSuccess: invalidate })
+}
+
+export function useExpirations() {
+  return useQuery({ queryKey: keys.expirations, queryFn: api.expirations })
+}
+
+export function useRetention() {
+  return useQuery({ queryKey: keys.retention, queryFn: api.retention })
 }

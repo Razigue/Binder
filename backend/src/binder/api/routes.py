@@ -29,10 +29,12 @@ from binder.schemas import (
     DocumentDetail,
     DocumentOut,
     DocumentUpdate,
+    ExpirationOut,
     Stats,
     SystemStatus,
+    TrashRequest,
 )
-from binder.services import activity, ingest, llm, organize
+from binder.services import activity, deadlines, ingest, llm, organize, retention
 from binder.services.text import render_page
 
 router = APIRouter(prefix="/api")
@@ -171,6 +173,16 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
     diff = {k: (getattr(doc, k), v) for k, v in changes.items() if getattr(doc, k) != v}
     for key, value in changes.items():
         setattr(doc, key, value)
+    if "keep_forever" in diff:
+        keep = diff.pop("keep_forever")[1]
+        activity.log(
+            session,
+            "retention",
+            f"« {doc.title} » "
+            + ("gardé au-delà de la durée conseillée" if keep else "de nouveau soumis au tri"),
+            actor="user",
+            document=doc,
+        )
     if diff:
         doc.extractor = "manual" if doc.extractor == "rules" else doc.extractor
         activity.log(
@@ -319,6 +331,58 @@ def export(session: SessionDep, category: Category | None = None) -> StreamingRe
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# --- Expirations et conservation ---------------------------------------------------------
+
+
+@router.get("/expirations")
+def list_expirations(session: SessionDep) -> list[ExpirationOut]:
+    """Documents à date de validité (version en vigueur uniquement), du plus urgent au moins."""
+    today = date.today()
+    docs = session.exec(
+        select(Document)
+        .where(ACTIVE, col(Document.expiry_date).is_not(None))
+        .where(col(Document.superseded_by).is_(None), col(Document.duplicate_of).is_(None))
+        .order_by(col(Document.expiry_date))
+    )
+    out = []
+    for doc in docs:
+        assert doc.expiry_date is not None
+        renew = deadlines.renew_from(doc) or doc.expiry_date
+        state = "expired" if doc.expiry_date < today else "renew" if renew <= today else "valid"
+        out.append(
+            ExpirationOut(
+                document=DocumentOut.from_model(doc),
+                expiry_date=doc.expiry_date,
+                renew_from=renew,
+                days_left=(doc.expiry_date - today).days,
+                state=state,
+            )
+        )
+    return out
+
+
+@router.get("/retention")
+def list_deletable(session: SessionDep) -> list[DocumentOut]:
+    """Documents que l'on peut trier : durée de conservation dépassée ou version remplacée."""
+    docs = session.exec(select(Document).where(ACTIVE).order_by(col(Document.issue_date)))
+    return [DocumentOut.from_model(d) for d in docs if retention.deletion_reason(d)]
+
+
+@router.post("/retention/trash")
+def trash_deletable(body: TrashRequest, session: SessionDep) -> dict[str, int]:
+    """Met à la corbeille les documents choisis par l'utilisateur, s'ils sont bien à trier."""
+    trashed = 0
+    for doc_id in body.ids:
+        doc = session.get(Document, doc_id)
+        reason = retention.deletion_reason(doc) if doc else None
+        if doc is None or reason is None:
+            continue
+        ingest.trash(session, doc, reason=reason.lower())
+        trashed += 1
+    session.commit()
+    return {"trashed": trashed}
 
 
 # --- Échéances -----------------------------------------------------------------------------

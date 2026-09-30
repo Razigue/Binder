@@ -70,6 +70,22 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "banque populaire",
         "credit mutuel",
     ],
+    Category.IDENTITE: [
+        "carte nationale d'identite",
+        "carte d'identite",
+        "passeport",
+        "permis de conduire",
+        "titre de sejour",
+        "lieu de naissance",
+    ],
+    Category.VEHICULE: [
+        "controle technique",
+        "certificat d'immatriculation",
+        "carte grise",
+        "immatriculation",
+        "vehicule",
+        "kilometrage",
+    ],
     Category.LOGEMENT: [
         "quittance de loyer",
         "loyer",
@@ -128,6 +144,12 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
 
 # (motif, titre) — le premier motif trouvé donne le type de document.
 DOC_TYPES: list[tuple[str, str]] = [
+    (r"carte nationale d'identite|carte d'identite", "Carte d'identité"),
+    (r"passeport", "Passeport"),
+    (r"permis de conduire", "Permis de conduire"),
+    (r"titre de sejour", "Titre de séjour"),
+    (r"controle technique", "Contrôle technique"),
+    (r"certificat d'immatriculation|carte grise", "Carte grise"),
     (r"taxe fonciere", "Taxe foncière"),
     (r"taxe d'habitation", "Taxe d'habitation"),
     (r"avis d'impot|impot sur le revenu", "Avis d'imposition"),
@@ -174,6 +196,9 @@ ISSUERS: dict[str, str] = {
     "credit mutuel": "Crédit Mutuel",
     "france travail": "France Travail",
     "urssaf": "URSSAF",
+    "autosur": "Autosur",
+    "dekra": "Dekra",
+    "securitest": "Sécuritest",
 }
 
 # Champs attendus par catégorie : s'ils manquent, le document part en vérification.
@@ -187,6 +212,8 @@ REQUIRED_FIELDS: dict[Category, list[str]] = {
     Category.BANQUE: ["issue_date"],
     Category.SANTE: ["issue_date"],
     Category.SOCIAL: ["issue_date"],
+    Category.IDENTITE: ["expiry_date"],
+    Category.VEHICULE: [],
     Category.AUTRE: [],
 }
 
@@ -208,11 +235,16 @@ MONTHS = {
 DUE_KEYWORDS = (
     r"echeance|date limite|avant le|au plus tard|a payer (?:avant|le)|a regler (?:avant|le)"
     r"|preleve le|prelevement (?:le|du|effectue le)|date de prelevement|date d'exigibilite"
-    r"|date de paiement|limite de paiement|payable le|expire le|date d'expiration"
+    r"|date de paiement|limite de paiement|payable le"
+)
+EXPIRY_KEYWORDS = (
+    r"date d'expiration|expire le|valable jusqu'au|valide jusqu'au|fin de validite"
+    r"|prochain controle|a presenter avant le|date limite de validite"
 )
 ISSUE_KEYWORDS = (
     r"date d'emission|emis le|etabli le|date d'etablissement|date de (?:la )?facture"
-    r"|fait le|edite le|date du releve|date :|du \d"
+    r"|fait le|edite le|date du releve|date :|du \d|delivree? le|date de delivrance"
+    r"|date du controle"
 )
 AMOUNT_KEYWORDS = (
     r"montant|total|a payer|net a payer|somme|reste a payer|solde|cotisation|loyer|ttc|du :"
@@ -367,6 +399,9 @@ def detect_title(
     }
     if issuer and base in with_issuer:
         base = f"{base} {issuer}"
+    elif base == "Devis" and first_line and "devis" not in normalize(first_line):
+        # Émetteur inconnu (artisan, garage) : son nom est en général en tête du document.
+        base = f"Devis {first_line[:50]}"
     if year and base in {"Taxe foncière", "Taxe d'habitation", "Avis d'imposition"}:
         base = f"{base} {year}"
     return base
@@ -382,10 +417,20 @@ def detect_issuer(norm: str) -> str | None:
 
 
 # Documents sans montant ni échéance, quelle que soit leur catégorie.
-INFORMATIVE_TYPES = ("Attestation", "Relevé bancaire", "Contrat", "Devis")
+INFORMATIVE_TYPES = ("Attestation", "Relevé bancaire", "Contrat", "Devis", "Carte grise")
+# Documents dont la validité compte : sans date de fin, ils partent en vérification.
+EXPIRING_TYPES = (
+    "Carte d'identité",
+    "Passeport",
+    "Permis de conduire",
+    "Titre de séjour",
+    "Contrôle technique",
+)
 
 
 def required_fields(category: Category, doc_type: str | None) -> list[str]:
+    if doc_type in EXPIRING_TYPES:
+        return ["expiry_date"]
     if doc_type and doc_type.startswith(INFORMATIVE_TYPES):
         return ["issue_date"]
     return REQUIRED_FIELDS[category]
@@ -410,10 +455,14 @@ def extract(text: str) -> Extraction:
 
     category, confidence = classify(norm)
     issuer = detect_issuer(norm)
+    expiry = _date_after_keyword(lines, EXPIRY_KEYWORDS)
     due = _date_after_keyword(lines, DUE_KEYWORDS)
+    if due is not None and due == expiry:
+        # « Prochain contrôle à présenter avant le… » : une fin de validité, pas un paiement.
+        due = None
     issue = _date_after_keyword(lines, ISSUE_KEYWORDS)
     if issue is None:
-        others = [d for line in lines for d in find_dates(line) if d != due]
+        others = [d for line in lines for d in find_dates(line) if d not in (due, expiry)]
         issue = min(others) if others else None
     amount = extract_amount(lines)
     reference = extract_reference(lines, original_lines)
@@ -424,6 +473,7 @@ def extract(text: str) -> Extraction:
         "doc_type": doc_type,
         "amount": amount,
         "due_date": due,
+        "expiry_date": expiry,
         "issue_date": issue,
         "reference": reference,
     }
@@ -440,6 +490,7 @@ def extract(text: str) -> Extraction:
         amount=amount,
         issue_date=issue,
         due_date=due,
+        expiry_date=expiry,
         reference=reference,
         confidence=confidence,
         missing_fields=missing,

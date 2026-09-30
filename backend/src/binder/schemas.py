@@ -17,6 +17,7 @@ class Extraction(BaseModel):
     amount: float | None = None
     issue_date: date | None = None
     due_date: date | None = None
+    expiry_date: date | None = None
     reference: str | None = None
     confidence: float = Field(default=0.0, ge=0, le=1)
     missing_fields: list[str] = []
@@ -36,6 +37,8 @@ class DocumentOut(BaseModel):
     amount: float | None
     issue_date: date | None
     due_date: date | None
+    expiry_date: date | None = None
+    keep_forever: bool = False
     reference: str | None
     confidence: float
     status: DocumentStatus
@@ -49,16 +52,27 @@ class DocumentOut(BaseModel):
     superseded_by: int | None = None
     # Nom normalisé utilisé au téléchargement et à l'export (« 2026-09-18 Facture EDF.pdf »).
     standard_name: str = ""
+    # Conservation : règle applicable, date jusqu'à laquelle garder, raison de trier.
+    retention_rule: str | None = None
+    keep_until: date | None = None
+    deletable_reason: str | None = None
+    # Date à partir de laquelle renouveler un document qui expire.
+    renew_from: date | None = None
 
     @classmethod
     def from_model(cls, doc: Document) -> "DocumentOut":
-        from binder.services.organize import standard_name
+        from binder.services import deadlines, organize, retention
 
         data = doc.model_dump(exclude={"text", "missing_fields", "sha256", "stored_name"})
+        rule = retention.rule_for(doc)
         return cls(
             **data,
             missing_fields=json.loads(doc.missing_fields),
-            standard_name=standard_name(doc),
+            standard_name=organize.standard_name(doc),
+            retention_rule=rule.label if rule else None,
+            keep_until=retention.keep_until(doc),
+            deletable_reason=retention.deletion_reason(doc),
+            renew_from=deadlines.renew_from(doc),
         )
 
 
@@ -78,10 +92,25 @@ class DocumentUpdate(BaseModel):
     amount: float | None = None
     issue_date: date | None = None
     due_date: date | None = None
+    expiry_date: date | None = None
     reference: str | None = None
     doc_type: str | None = None
+    keep_forever: bool | None = None
     # Valider manuellement le document le sort de la file « à vérifier ».
     validated: bool | None = None
+
+
+class ExpirationOut(BaseModel):
+    document: DocumentOut
+    expiry_date: date
+    renew_from: date
+    days_left: int
+    # « expired », « renew » (dans le délai de renouvellement) ou « valid ».
+    state: str
+
+
+class TrashRequest(BaseModel):
+    ids: list[int]
 
 
 class DeadlineOut(BaseModel):

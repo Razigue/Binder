@@ -20,6 +20,8 @@ class Category(StrEnum):
     SOCIAL = "Social"
     TRAVAIL = "Travail"
     TELECOM = "Télécom"
+    IDENTITE = "Identité"
+    VEHICULE = "Véhicule"
     AUTRE = "Autre"
 
 
@@ -43,7 +45,11 @@ class Document(SQLModel, table=True):
     amount: float | None = None
     issue_date: date | None = None
     due_date: date | None = Field(default=None, index=True)
+    # Fin de validité (pièce d'identité, attestation, contrôle technique).
+    expiry_date: date | None = Field(default=None, index=True)
     reference: str | None = None
+    # L'utilisateur garde ce document au-delà de la durée de conservation conseillée.
+    keep_forever: bool = False
 
     confidence: float = 0.0
     status: DocumentStatus = Field(default=DocumentStatus.PROCESSING, index=True)
@@ -74,7 +80,8 @@ class Deadline(SQLModel, table=True):
     due_date: date = Field(index=True)
     amount: float | None = None
     done: bool = False
-    # "extracted" (déduite d'un document) ou "manual" (rappel créé par l'utilisateur/l'agent).
+    # "extracted" (paiement déduit d'un document), "expiry" (fin de validité d'un document)
+    # ou "manual" (rappel créé par l'utilisateur ou l'agent).
     source: str = "extracted"
     created_at: datetime = Field(default_factory=_now)
 
