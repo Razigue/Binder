@@ -5,6 +5,7 @@ uv run python scripts/evaluate.py --llm      # règles + modèle Ollama configur
 """
 
 import argparse
+import sys
 import time
 
 from binder.samples import build_samples
@@ -19,6 +20,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--llm", action="store_true")
     args = parser.parse_args()
+    # La console Windows (cp1252) ne sait pas afficher ✓ et ✗.
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     if args.llm and not llm.is_available():
         raise SystemExit("Modèle indisponible : vérifiez `ollama list` et BINDER_LLM_MODEL")
 
