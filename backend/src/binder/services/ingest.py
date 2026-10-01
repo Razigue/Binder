@@ -15,7 +15,20 @@ from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import activity, deadlines, embeddings, llm, organize, rules, subscriptions
+from binder.services import (
+    activity,
+    anomalies,
+    areas,
+    deadlines,
+    embeddings,
+    household,
+    learning,
+    llm,
+    organize,
+    rules,
+    subscriptions,
+    undo,
+)
 from binder.services.text import SUPPORTED_MIME, ReadResult, page_image, read_document
 
 log = logging.getLogger(__name__)
@@ -110,6 +123,7 @@ def store(
     *,
     actor: str = "user",
     origin: str | i18n.Msg = "",
+    batch: str | None = None,
 ) -> tuple[Document, bool]:
     """Saves the encrypted file. Returns (document, created); a duplicate returns the existing
     one (and takes it out of the trash if it was there).
@@ -140,7 +154,12 @@ def store(
     stored_name = f"{uuid.uuid4().hex}.bin"
     (files_dir / stored_name).write_bytes(security.encrypt(data))
     doc = Document(
-        filename=filename, mime_type=mime, size=len(data), sha256=digest, stored_name=stored_name
+        filename=filename,
+        mime_type=mime,
+        size=len(data),
+        sha256=digest,
+        stored_name=stored_name,
+        batch=batch,
     )
     session.add(doc)
     session.flush()
@@ -157,6 +176,11 @@ def store(
     return doc, True
 
 
+def new_batch(source: str) -> str:
+    """Identifier of an import batch: its source and when it started."""
+    return f"{source}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
+
+
 def load_file(doc: Document) -> bytes:
     return security.decrypt((get_settings().files_dir / doc.stored_name).read_bytes())
 
@@ -170,7 +194,9 @@ def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
     if by_llm is None:
         return by_rules
     merged = by_llm.model_copy()
-    for field in ("issuer", "amount", "issue_date", "due_date", "expiry_date", "reference"):
+    for field in (
+        "issuer", "amount", "issue_date", "due_date", "expiry_date", "reference", "person",
+    ):  # fmt: skip
         if getattr(merged, field) in (None, ""):
             setattr(merged, field, getattr(by_rules, field))
     if merged.category == Category.OTHER and by_rules.category != Category.OTHER:
@@ -195,6 +221,7 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.expiry_date = ext.expiry_date
     doc.reference = ext.reference
     doc.doc_type = ext.doc_type
+    doc.person = household.display(ext.person) if ext.person else None
     doc.confidence = ext.confidence
     doc.extractor = ext.extractor
     doc.explanation = None
@@ -210,6 +237,7 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
     if doc.duplicate_of is not None:
         missing.append("duplicate")
     doc.missing_fields = json.dumps(missing)
+    doc.area = areas.area_of(doc)
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
     elif missing or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.OTHER:
@@ -236,6 +264,8 @@ def analyze(session: Session, doc: Document) -> Document:
     by_rules = rules.extract(read.text)
     by_llm = llm.extract(read.text, images) if read.text.strip() and llm.is_available() else None
     ext = merge(by_rules, by_llm)
+    ext.person = ext.person or household.detect(read.text)
+    learned = learning.apply(session, read.text, ext)
     if not read.text.strip():
         ext.confidence = 0.0
         if ext.title == rules.T("untitled"):
@@ -246,12 +276,14 @@ def analyze(session: Session, doc: Document) -> Document:
     organize.detect_duplicate(session, doc)
     refresh_status(doc)
     _log_analysis(session, doc)
+    learning.log_applied(session, doc, learned)
     sync_deadline(session, doc)
     index_document(session, doc)
     embeddings.index(session, doc)
     organize.reorganize(session, doc, previous_key)
     session.flush()
     subscriptions.check_increase(session, doc)
+    anomalies.check_new(session, doc)
     session.commit()
     session.refresh(doc)
     return doc
@@ -319,6 +351,7 @@ def trash(
     `reason`: preferably a Msg (e.g. retention.deletion_msg(doc, inline=True)).
     """
     previous_key = organize.series_key(doc)
+    undo.push("trash", id=doc.id)
     doc.deleted_at = datetime.now(UTC)
     deadlines.sync(session, doc)
     if doc.id is not None:
@@ -336,6 +369,7 @@ def trash(
 def restore(
     session: Session, doc: Document, *, actor: str = "user", reason: str | i18n.Msg = ""
 ) -> None:
+    undo.push("restore", id=doc.id)
     doc.deleted_at = None
     session.add(doc)
     session.flush()
@@ -399,9 +433,10 @@ def seed_demo(session: Session) -> list[tuple[Document, bool]]:
     from binder.samples import build_samples
 
     results = []
+    batch = new_batch("demo")
     for sample in build_samples():
         doc, created = store(
-            session, sample.pdf(), sample.filename, "application/pdf", actor="demo"
+            session, sample.pdf(), sample.filename, "application/pdf", actor="demo", batch=batch
         )
         if created:
             analyze(session, doc)

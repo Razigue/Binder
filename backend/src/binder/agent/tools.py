@@ -18,21 +18,25 @@ from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.db import WITHOUT_TEXT
-from binder.models import Category, Deadline, DocType, Document, DocumentStatus
+from binder.models import Category, Deadline, DocType, Document, DocumentStatus, UndoEntry
 from binder.schemas import Letter
 from binder.services import (
     activity,
+    anomalies,
     deadlines,
     editing,
     embeddings,
     explain,
     folders,
+    household,
     ingest,
     letters,
     llm,
+    missing,
+    questions,
     retention,
-    settings_store,
     subscriptions,
+    undo,
 )
 from binder.services.rules import MONTHS, normalize
 from binder.services.text import page_count, page_image
@@ -89,6 +93,7 @@ class ToolResult:
     # JPEG pages shown to the model with the result (vision).
     images: list[bytes] = field(default_factory=list)
     letters: list[Letter] = field(default_factory=list)
+    packs: list[folders.FolderStatus] = field(default_factory=list)
     # Something was written (document, deadline…): the interface refreshes its data.
     changed: bool = False
 
@@ -458,6 +463,7 @@ def create_reminder(
     )
     # No commit here: it would expire the documents already found during this turn.
     session.flush()
+    undo.push("deadline_created", id=reminder.id)
     return ToolResult(
         payload={"created": _deadline_summary(reminder)}, deadlines=[reminder], changed=True
     )
@@ -580,10 +586,16 @@ def documents_to_review(session: Session) -> ToolResult:
             .order_by(col(Document.created_at).desc())
         )
     )
+    asked = {d.id: questions.question_for(session, d) for d in docs}
     return ToolResult(
         payload={
             "to_review": [
-                {**doc_summary(d), "to_check": json.loads(d.missing_fields)} for d in docs
+                {
+                    **doc_summary(d),
+                    "to_check": json.loads(d.missing_fields),
+                    "question": q.title if (q := asked.get(d.id)) else None,
+                }
+                for d in docs
             ]
         },
         documents=docs,
@@ -600,12 +612,10 @@ def explain_document(session: Session, document_id: int) -> ToolResult:
     return ToolResult(payload={"id": doc.id, **payload}, documents=[doc])
 
 
-def check_folder(session: Session, kind: str) -> ToolResult:
-    """Pieces of a standard application pack: found, to renew, missing."""
-    folder = folders.KINDS.get(kind)
-    if folder is None:
-        return _error(f"Unknown pack; one of {', '.join(folders.KINDS)}")
-    status = folders.evaluate(session, folder)
+def prepare_folder(session: Session, purpose: str) -> ToolResult:
+    """Pieces of a file for any purpose: the common packs (rental, mortgage, caf) or one put
+    together from the user's documents; found, to renew, missing."""
+    status = folders.prepare(session, purpose)
     ids = [i for piece in status.pieces for i in piece.document_ids]
     docs = [d for i in dict.fromkeys(ids) if (d := session.get(Document, i)) is not None]
     return ToolResult(
@@ -625,9 +635,11 @@ def check_folder(session: Session, kind: str) -> ToolResult:
                 }
                 for p in status.pieces
             ],
-            "export_link": f"/api/folders/{kind}/export",
+            "export_link": f"/api/folders/{status.key}/export",
+            "shown_to_user": True,
         },
         documents=docs,
+        packs=[status],
     )
 
 
@@ -710,28 +722,75 @@ def documents_to_sort_out(session: Session) -> ToolResult:
     )
 
 
-def draft_letter(
-    session: Session, kind: str, document_id: int | None = None, details: str = ""
+def write_letter(
+    session: Session,
+    purpose: str,
+    document_id: int | None = None,
+    kind: str | None = None,
 ) -> ToolResult:
-    """Drafts a letter (termination, complaint, request) filled from a document and the
-    user's profile; the interface shows it ready to copy."""
-    if kind not in letters.KINDS:
-        return _error(f"Unknown letter kind; one of {', '.join(letters.KINDS)}")
+    """Writes a complete letter for any purpose, filled from the related document and the
+    household's details; the interface shows it with its PDF and follows it up."""
+    if kind is not None and kind not in letters.KINDS:
+        kind = None
     doc = _document(session, document_id) if document_id else None
     if document_id and doc is None:
         return _not_found(document_id)
-    profile = settings_store.load(session, letters.PROFILE_KEY, letters.Profile)
-    letter = letters.write(kind, doc, profile, details)
-    activity.log(session, "letter", letters.written_msg(letter), actor="agent", document=doc)
+    letter = letters.compose(session, purpose, doc, kind=kind, actor="agent")
     payload: dict[str, Any] = {
         "subject": letter.subject,
         "recipient": letter.recipient,
         "registered_mail_advised": letter.registered,
         "shown_to_user": True,
     }
-    if not profile.name:
-        payload["note"] = "The user's name and address are not set (Letters page): placeholders."
-    return ToolResult(payload=payload, documents=[doc] if doc else [], letters=[letter])
+    if letter.blanks:
+        payload["note"] = f"{letter.blanks} detail(s) left in [brackets] for the user to fill in."
+    return ToolResult(
+        payload=payload, documents=[doc] if doc else [], letters=[letter], changed=True
+    )
+
+
+def list_alerts(session: Session) -> ToolResult:
+    """Anomalies (billed twice, catch-up bill, overpayment, price rise, lower pay) and documents
+    that should be there and are not."""
+    found = anomalies.detect(session)
+    absent = missing.detect(session)
+    ids = [i for a in found for i in a.document_ids]
+    docs = [d for i in dict.fromkeys(ids) if (d := session.get(Document, i)) is not None]
+    return ToolResult(
+        payload={
+            "anomalies": [
+                {
+                    "kind": a.kind,
+                    "title": a.title,
+                    "detail": a.detail,
+                    "amount": a.amount,
+                    "document_ids": a.document_ids,
+                    "letter_purpose": a.letter,
+                }
+                for a in found
+            ],
+            "missing_documents": [
+                {"title": m.title, "detail": m.detail, "letter_purpose": m.letter} for m in absent
+            ],
+        },
+        documents=docs,
+    )
+
+
+def undo_last_action(session: Session) -> ToolResult:
+    """Undoes the last change made in Binder (by the user or the agent) in the last hour."""
+    from datetime import UTC, datetime
+
+    entry = session.exec(
+        select(UndoEntry)
+        .where(UndoEntry.undone == False)  # noqa: E712
+        .where(col(UndoEntry.created_at) >= datetime.now(UTC) - timedelta(hours=1))
+        .order_by(col(UndoEntry.id).desc())
+    ).first()
+    if entry is None or not undo.undo(session, entry.token, actor="agent"):
+        return _error("Nothing recent to undo")
+    session.flush()
+    return ToolResult(payload={"undone": True}, changed=True)
 
 
 def export_folder(
@@ -774,7 +833,9 @@ def overview(session: Session) -> dict[str, Any]:
     to_review = session.exec(
         select(func.count()).where(active, Document.status == DocumentStatus.TO_REVIEW)
     ).one()
+    members = [m.name for m in household.members(session)[:6]]
     return {
+        "household": members or None,
         "documents": sum(by_category.values()),
         "by_category": {Category(c).value: n for c, n in by_category.items()},
         "deadlines_next_30_days": len(upcoming),
@@ -791,7 +852,8 @@ TOOLS: dict[str, Any] = {
     "list_deadlines": list_deadlines,
     "list_expirations": list_expirations,
     "list_subscriptions": list_subscriptions,
-    "check_folder": check_folder,
+    "prepare_folder": prepare_folder,
+    "list_alerts": list_alerts,
     "documents_to_review": documents_to_review,
     "documents_to_sort_out": documents_to_sort_out,
     "create_reminder": create_reminder,
@@ -799,8 +861,9 @@ TOOLS: dict[str, Any] = {
     "update_document": update_document,
     "validate_document": validate_document,
     "trash_document": trash_document,
-    "draft_letter": draft_letter,
+    "write_letter": write_letter,
     "export_folder": export_folder,
+    "undo_last_action": undo_last_action,
 }
 # Tools that change data (the interface refreshes after them).
 WRITE_TOOLS = {
@@ -809,6 +872,8 @@ WRITE_TOOLS = {
     "update_document",
     "validate_document",
     "trash_document",
+    "write_letter",
+    "undo_last_action",
 }
 
 
@@ -921,13 +986,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "Recurring bills and subscriptions, their yearly cost and price increases.",
     ),
     _tool(
-        "check_folder",
-        "Check a standard application pack: rental (landlord), mortgage (bank loan), caf "
-        "(housing benefit). Pieces found, to renew or missing.",
-        {"kind": {"type": "string", "enum": list(folders.KINDS)}},
-        ["kind"],
+        "prepare_folder",
+        "Put together a file of documents for any purpose (rental application, mortgage, CAF "
+        "housing benefit, nursery, school, visa…): pieces found, to renew or missing, with a "
+        "download link. The app shows it.",
+        {"purpose": {"type": "string", "description": "what the file is for, user's words"}},
+        ["purpose"],
     ),
-    _tool("documents_to_review", "Documents set aside because something must be checked."),
+    _tool(
+        "list_alerts",
+        "Anomalies (billed or debited twice, catch-up bill, overpayment claimed or owed, price "
+        "rise, lower pay) and documents that should be there but are missing.",
+    ),
+    _tool("documents_to_review", "Documents Binder has a question about (uncertain reading)."),
     _tool(
         "documents_to_sort_out",
         "Documents that can be thrown away (retention period over, or replaced).",
@@ -982,16 +1053,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         ["document_id"],
     ),
     _tool(
-        "draft_letter",
-        "Draft a letter shown to the user: termination (cancel a contract or subscription), "
-        "complaint (dispute a bill), request (ask for a document). Pass the related document.",
+        "write_letter",
+        "Write a complete letter for any purpose (cancel, dispute, ask for a refund, a "
+        "document, instalments, a follow-up…), shown to the user with its PDF. Pass the "
+        "related document.",
         {
-            "kind": {"type": "string", "enum": list(letters.KINDS)},
+            "purpose": {"type": "string", "description": "what the letter must obtain, with facts"},
             "document_id": {"type": "integer"},
-            "details": {"type": "string", "description": "facts to include, user's language"},
         },
-        ["kind"],
+        ["purpose"],
     ),
+    _tool("undo_last_action", "Undo the last change, when the user asks to cancel it."),
     _tool(
         "export_folder",
         "ZIP download link: all documents, one category, or a pack (rental, mortgage, caf).",

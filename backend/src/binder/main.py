@@ -13,12 +13,12 @@ from sqlmodel import Session
 from starlette.responses import Response
 
 from binder import __version__, guard
+from binder.api import assistant
 from binder.api import scan as scan_api
 from binder.api.routes import router
 from binder.config import get_settings
 from binder.db import get_engine
-from binder.services import llm_models, scan
-from binder.services.importers import Scheduler
+from binder.services import areas, background, llm_models, scan, setup
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -36,13 +36,16 @@ class HashedAssets(StaticFiles):
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     with Session(get_engine()) as session:
         llm_models.restore(session)
-    scheduler = Scheduler() if get_settings().auto_import else None
+        areas.backfill(session)
+    setup.start()
+    scheduler = background.Scheduler() if background.enabled() else None
     if scheduler:
         scheduler.start()
     yield
     scan.stop()
     if scheduler:
         scheduler.stop()
+    setup.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -51,6 +54,7 @@ def create_app() -> FastAPI:
     # No CORS: the interface (including through the Vite proxy) is served from the same origin.
     app.middleware("http")(guard.middleware(lambda: get_settings().access_token))
     app.include_router(router)
+    app.include_router(assistant.router)
     app.include_router(scan_api.router)
 
     if (STATIC_DIR / "index.html").exists():

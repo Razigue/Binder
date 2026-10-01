@@ -1,15 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import { useNavigate } from "react-router-dom"
-import { ArrowRight, CheckCircle2, CircleAlert, FileText, Loader2, Smartphone, Upload } from "lucide-react"
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react"
+import { CircleAlert, FileText, Loader2, Smartphone, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { useDocument, useInvalidateAll } from "@/hooks/queries"
+import { useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { phoneScan } from "@/i18n/messages/phoneScan"
 import { upload } from "@/i18n/messages/upload"
-import { api, previewUrl, type Doc } from "@/lib/api"
-import { categoryLabel, formatDate } from "@/lib/format"
+import { api, type Doc } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { ReportView } from "./panels"
 import { PhoneScanPanel } from "./PhoneScan"
 import { LocalBadge } from "./StatusDot"
 
@@ -40,6 +39,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const t = useT(upload)
   const [isOpen, setOpen] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
+  // Files dropped together form one import, reported together.
+  const [batch, setBatch] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const invalidate = useInvalidateAll()
   const scanT = useT(phoneScan)
@@ -49,11 +50,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const list = Array.from(files)
       if (!list.length) return
       setOpen(true)
+      const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16)
+      setBatch(`upload-${id}`)
       const fresh = list.map((file, i) => ({ key: `${Date.now()}-${i}-${file.name}`, name: file.name, file }))
-      setItems((prev) => [...fresh.map(({ key, name }) => ({ key, name })), ...prev])
+      setItems(fresh.map(({ key, name }) => ({ key, name })))
       for (const { file, ...item } of fresh) {
         api
-          .upload(file)
+          .upload(file, id)
           .then((doc) => setItems((prev) => prev.map((it) => (it.key === item.key ? { ...it, doc } : it))))
           .catch((err: Error) =>
             setItems((prev) => prev.map((it) => (it.key === item.key ? { ...it, error: err.message } : it))),
@@ -64,31 +67,27 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [invalidate],
   )
 
-  // Documents sent from the phone: followed like uploaded files.
+  // Documents sent from the phone: reported like uploaded files.
   const onScanned = useCallback(
     (ids: number[]) => {
       setScanning(false)
-      const fresh = ids.map((id) => ({ key: `scan-${id}`, name: scanT("title") }))
-      setItems((prev) => [...fresh, ...prev])
-      for (const [i, id] of ids.entries()) {
+      setItems([])
+      if (ids.length)
         api
-          .document(id)
-          .then((doc) =>
-            setItems((prev) => prev.map((it) => (it.key === fresh[i].key ? { ...it, name: doc.filename, doc } : it))),
-          )
-          .catch((err: Error) =>
-            setItems((prev) => prev.map((it) => (it.key === fresh[i].key ? { ...it, error: err.message } : it))),
-          )
-      }
+          .document(ids[0])
+          .then((doc) => setBatch(doc.batch))
+          .catch(() => setBatch(null))
       invalidate()
     },
-    [invalidate, scanT],
+    [invalidate],
   )
 
   const onOpenChange = (open: boolean) => {
     setOpen(open)
     if (!open) {
+      if (batch) api.reportSeen(batch).finally(invalidate)
       setItems([])
+      setBatch(null)
       setScanning(false)
     }
   }
@@ -98,13 +97,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setScanning(true)
   }, [])
 
+  const failed = items.filter((it) => it.error)
+  const sent = items.some((it) => it.doc)
+
   return (
     <UploadContext.Provider value={{ open: () => setOpen(true), uploadFiles, scanWithPhone }}>
       {children}
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className={cn("max-h-[90vh] gap-5 overflow-y-auto", scanning ? "sm:max-w-2xl" : "sm:max-w-xl")}>
           <DialogHeader>
-            <DialogTitle className="text-lg">{scanning ? scanT("title") : t("title")}</DialogTitle>
+            <DialogTitle className="text-lg">{scanning ? scanT("title") : batch ? t("reportTitle") : t("title")}</DialogTitle>
             <DialogDescription className="sr-only">
               {scanning ? scanT("description") : t("description")}
             </DialogDescription>
@@ -113,13 +115,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             <PhoneScanPanel onImported={onScanned} onCancel={() => setScanning(false)} />
           ) : (
             <>
-              <DropZone compact={items.length > 0} />
-              {items.length === 1 && <AnalysisCard item={items[0]} onDone={() => onOpenChange(false)} />}
-              {items.length > 1 && (
-                <div className="divide-y rounded-xl border">
-                  {items.map((item) => (
-                    <UploadRow key={item.key} item={item} onDone={() => onOpenChange(false)} />
-                  ))}
+              {!batch && <DropZone />}
+              {failed.map((it) => (
+                <ErrorBox key={it.key} message={`${it.name} · ${it.error}`} />
+              ))}
+              {batch && (sent || !items.length) && <ReportView batch={batch} onNavigate={() => onOpenChange(false)} />}
+              {batch && !sent && items.length > failed.length && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> {t("analysing")}
+                </p>
+              )}
+              {batch && (
+                <div className="flex justify-between gap-2">
+                  <DropZone compact className="flex-1" />
                 </div>
               )}
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -180,130 +188,6 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
           e.target.value = ""
         }}
       />
-    </div>
-  )
-}
-
-/** Tracks an uploaded document: polls the API until its analysis is done. */
-function useTrackedDoc(item: UploadItem) {
-  const { data } = useDocument(item.doc?.id ?? null)
-  const invalidate = useInvalidateAll()
-  const doc = data ?? item.doc
-  const done = !!doc && doc.status !== "processing"
-  // Analysis runs in the background: refresh counters and lists once it ends.
-  useEffect(() => {
-    if (done) invalidate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [done])
-  return doc
-}
-
-function AnalysisCard({ item, onDone }: { item: UploadItem; onDone: () => void }) {
-  const t = useT(upload)
-  const doc = useTrackedDoc(item)
-  const navigate = useNavigate()
-  const [textStep, setTextStep] = useState(false)
-  const finished = !!doc && doc.status !== "processing"
-
-  // Visual progress during analysis; the final steps wait for the real answer.
-  useEffect(() => {
-    if (finished) return
-    const timer = setTimeout(() => setTextStep(true), 700)
-    return () => clearTimeout(timer)
-  }, [finished])
-
-  if (item.error) return <ErrorBox message={item.error} />
-
-  const keyFields = doc ? [doc.amount, doc.issue_date, doc.due_date, doc.reference].filter((v) => v !== null).length : 0
-  const steps = [
-    { label: finished ? t("identified", { title: doc!.title }) : t("received"), done: !!doc },
-    { label: t("textExtracted"), done: finished || textStep },
-    { label: finished ? t("keyFound", { count: keyFields }) : t("keySearching"), done: finished },
-    { label: finished ? t("category", { category: categoryLabel(doc!.category) }) : t("classifying"), done: finished },
-    {
-      label: finished ? (doc!.due_date ? t("due", { date: formatDate(doc!.due_date) }) : t("noDeadline")) : t("deadlines"),
-      done: finished,
-    },
-  ]
-  const firstPending = steps.findIndex((s) => !s.done)
-
-  return (
-    <div className="grid gap-4 rounded-xl border p-5 sm:grid-cols-[1fr_140px]">
-      <div>
-        <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
-          <FileText className="size-4 text-primary" />
-          {finished ? t("finished") : t("analysing")}
-        </p>
-        <ul className="space-y-2.5">
-          {steps.map((s, i) => (
-            <li key={i} className={cn("flex items-center gap-2 text-sm", !s.done && "text-muted-foreground")}>
-              {s.done ? (
-                <CheckCircle2 className="size-4 shrink-0 fill-emerald-500 text-white dark:text-card" />
-              ) : i === firstPending ? (
-                <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-              ) : (
-                <span className="size-4 shrink-0 rounded-full border-2 border-border" />
-              )}
-              <span className="truncate">{s.label}</span>
-            </li>
-          ))}
-        </ul>
-        {finished && doc!.status === "to_review" && (
-          <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">{t("toCheck")}</p>
-        )}
-        <Button
-          className="mt-5"
-          disabled={!finished}
-          onClick={() => {
-            onDone()
-            navigate(`/documents/${doc!.id}`)
-          }}
-        >
-          <ArrowRight /> {t("seeResult")}
-        </Button>
-      </div>
-      <div className="hidden overflow-hidden rounded-lg border bg-muted/40 sm:block">
-        {doc && <img src={previewUrl(doc.id)} alt="" className="h-full w-full object-cover object-top" />}
-      </div>
-    </div>
-  )
-}
-
-function UploadRow({ item, onDone }: { item: UploadItem; onDone: () => void }) {
-  const t = useT(upload)
-  const doc = useTrackedDoc(item)
-  const navigate = useNavigate()
-  const processing = !item.error && (!doc || doc.status === "processing")
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 text-sm">
-      {item.error ? (
-        <CircleAlert className="size-4 text-destructive" />
-      ) : processing ? (
-        <Loader2 className="size-4 animate-spin text-primary" />
-      ) : (
-        <CheckCircle2 className="size-4 fill-emerald-500 text-white dark:text-card" />
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{doc && !processing ? doc.title : item.name}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {item.error ??
-            (processing
-              ? t("analysing")
-              : `${categoryLabel(doc!.category)}${doc!.status === "to_review" ? ` · ${t("toCheckShort")}` : ""}`)}
-        </p>
-      </div>
-      {doc && !processing && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            onDone()
-            navigate(`/documents/${doc.id}`)
-          }}
-        >
-          {t("open")}
-        </Button>
-      )}
     </div>
   )
 }

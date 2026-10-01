@@ -50,15 +50,21 @@ Each request is a loop of at most `MAX_STEPS` model turns (`_run_llm`):
 | `list_deadlines` | unpaid deadlines of a period, overdue ones, total |
 | `list_expirations` | every document with an end of validity and its state |
 | `list_subscriptions` | recurring bills, yearly cost, price increases |
-| `check_folder` | rental / mortgage / CAF application pack |
-| `documents_to_review`, `documents_to_sort_out` | review queue, documents that can go |
+| `prepare_folder` | file for any purpose: the rental / mortgage / CAF packs, or pieces picked by the model |
+| `list_alerts` | anomalies (billed twice, catch-up bill, overpayment, price rise, lower pay) and missing documents |
+| `documents_to_review`, `documents_to_sort_out` | documents Binder has a question about, documents that can go |
 | `create_reminder`, `mark_deadline_paid` | deadlines |
 | `update_document`, `validate_document`, `trash_document` | changes asked by the user |
-| `draft_letter` | termination, complaint or request letter, shown ready to copy |
+| `write_letter` | complete letter for any purpose, saved with its PDF and follow-up |
 | `export_folder` | ZIP link: everything, a category or a pack |
+| `undo_last_action` | undoes the latest change of the last hour |
 
 Write tools go through `services/editing.py`, `ingest.trash`… like the interface: logged with
-actor `agent`, reversible (trash, reopened deadline, old values in the activity log).
+actor `agent`, and each turn's changes are captured by `services/undo.py`: the response carries
+an `undo` token the interface offers right after the answer.
+
+The overview given before the first question also names the household members found in the
+documents.
 
 ## Search
 

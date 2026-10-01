@@ -1,20 +1,34 @@
-"""Document packs (rental, mortgage, CAF): expected pieces, pieces found, missing pieces.
+"""Document packs: expected pieces, pieces found, missing pieces.
+
+Any pack can be asked for in words ("the file for the nursery"): the three common ones (rental,
+mortgage, CAF) have their official list of pieces; for anything else the local model picks the
+pieces from the library, or, without a model, the documents whose type the request names.
 
 For each piece, the most recent documents in force are used (not in the trash, not
 superseded, not duplicates). A piece that is too old or expired is flagged as to be renewed
 rather than counted.
 """
 
+import json
+import logging
+import re
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
-from pydantic import BaseModel
+import httpx
+from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.db import WITHOUT_TEXT
 from binder.models import Category, DocType, Document
+from binder.services import llm, settings_store
+from binder.services.rules import normalize
+
+log = logging.getLogger(__name__)
 
 T = i18n.catalog(
     "folders",
@@ -127,6 +141,16 @@ T = i18n.catalog(
             "en": "{title} exported ({ready}/{total} documents)",
             "fr": "{title} exporté ({ready}/{total} pièces)",
         },
+        "custom_title": {"en": "File: {purpose}", "fr": "Dossier : {purpose}"},
+        "custom_description": {
+            "en": "Pieces Binder found in your documents for this request.",
+            "fr": "Pièces trouvées par Binder dans vos documents pour cette demande.",
+        },
+        "custom_missing_hint": {
+            "en": "Not found in your documents: add it if you have it.",
+            "fr": "Introuvable dans vos documents : ajoutez-le si vous l'avez.",
+        },
+        "found_hint": {"en": "Found in your documents.", "fr": "Trouvé dans vos documents."},
     },
 )
 
@@ -349,9 +373,165 @@ def readme(status: FolderStatus) -> str:
 
 def exported_msg(status: FolderStatus) -> i18n.Msg:
     """Activity log entry for an export (the pack title follows the display language)."""
-    return T.msg(
-        "exported",
-        title=T.msg(f"{status.key}_title"),
-        ready=status.ready,
-        total=status.total,
+    title: str | i18n.Msg = T.msg(f"{status.key}_title") if status.key in KINDS else status.title
+    return T.msg("exported", title=title, ready=status.ready, total=status.total)
+
+
+# --- Packs asked for in words -----------------------------------------------------------
+
+CUSTOM_KEY = "folders.custom"
+# Words naming the common packs (normalized).
+KIND_WORDS = {
+    "rental": r"locat|louer|bail|proprietaire|landlord|rent(?:al|ing)|flat|apartment|appartement",
+    "mortgage": r"pret|credit immobilier|emprunt|banque|mortgage|loan",
+    "caf": r"(?<![a-z])caf(?![a-z])|apl|aide au logement|allocation logement|housing benefit",
+}
+PICK_PROMPT = """The user needs to put together a file of documents: "{purpose}". Country: \
+{country}. Their documents (id, title, type, date, person):
+{documents}
+Return JSON: title (short, in {language}), pieces: the documents such a file usually requires, \
+each with label (in {language}), document_ids (the matching ids above, most recent first; empty \
+if none matches) and hint (in {language}: where to get it if missing). 3 to 8 pieces."""
+PICK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "pieces": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "document_ids": {"type": "array", "items": {"type": "integer"}},
+                    "hint": {"type": "string"},
+                },
+                "required": ["label", "document_ids", "hint"],
+            },
+        },
+    },
+    "required": ["title", "pieces"],
+}
+
+
+class _Picked(BaseModel):
+    title: str
+    pieces: list[dict[str, Any]]
+
+
+def kind_for(purpose: str) -> FolderKind | None:
+    """One of the common packs, when the request names it ("rental", "dossier de location")."""
+    if purpose in KINDS:
+        return KINDS[purpose]
+    norm = normalize(purpose)
+    return next((KINDS[k] for k, words in KIND_WORDS.items() if re.search(words, norm)), None)
+
+
+def _date_label(doc: Document) -> str:
+    return _date_of(doc).isoformat()
+
+
+def _pick_llm(purpose: str, docs: list[Document]) -> _Picked | None:
+    listing = "\n".join(
+        f"{d.id}; {d.title}; {d.doc_type or '-'}; {_date_label(d)}; {d.person or '-'}"
+        for d in docs[:200]
     )
+    prompt = PICK_PROMPT.format(
+        purpose=purpose,
+        documents=listing,
+        language=i18n.language_name(i18n.current_language()),
+        country=llm.user_context()["country"],
+    )
+    try:
+        message = llm.chat([{"role": "user", "content": prompt}], fmt=PICK_SCHEMA)
+        return _Picked.model_validate(json.loads(message.get("content") or "{}"))
+    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+        log.exception("Pack by the model failed, falling back to keywords")
+        return None
+
+
+def _pick_rules(purpose: str, docs: list[Document]) -> _Picked:
+    """Without a model: an identity document, then the types the request names."""
+    words = [w for w in re.findall(r"[a-z]{4,}", normalize(purpose))]
+    pieces: list[dict[str, Any]] = [
+        {
+            "label": IDENTITY.label,
+            "document_ids": [],
+            "hint": IDENTITY.hint,
+            "types": IDENTITY_TYPES,
+        }
+    ]
+    for doc_type in DocType:
+        names = normalize(" ".join(i18n.doc_type_label(doc_type, lang) for lang in i18n.LANGUAGES))
+        if any(w in names for w in words):
+            pieces.append(
+                {"label": i18n.doc_type_label(doc_type), "document_ids": [], "types": {doc_type}}
+            )
+    for piece in pieces:
+        types = piece.pop("types")
+        found = sorted((d for d in docs if d.doc_type in types), key=_date_of)
+        piece["document_ids"] = [d.id for d in reversed(found)][:3]
+    return _Picked(title=T("custom_title", purpose=purpose), pieces=pieces)
+
+
+def prepare(session: Session, purpose: str) -> FolderStatus:
+    """The pack for a request in words: a common pack, or one put together for it (saved so
+    that it can be exported)."""
+    kind = kind_for(purpose)
+    if kind is not None:
+        return evaluate(session, kind)
+    docs = current_documents(session)
+    picked = _pick_llm(purpose, docs) if llm.is_available() else None
+    picked = picked or _pick_rules(purpose, docs)
+    known = {d.id for d in docs}
+    pieces = []
+    for raw in picked.pieces:
+        ids = [i for i in raw.get("document_ids") or [] if i in known]
+        label = str(raw.get("label") or "").strip()
+        if not label:
+            continue
+        pieces.append(
+            PieceStatus(
+                key=re.sub(r"[^a-z0-9]+", "_", normalize(label)).strip("_")[:40],
+                label=label,
+                status="ok" if ids else "missing",
+                found=1 if ids else 0,
+                needed=1,
+                optional=False,
+                hint=str(raw.get("hint") or "")
+                or (T("found_hint") if ids else T("custom_missing_hint")),
+                document_ids=ids,
+            )
+        )
+    token = secrets.token_urlsafe(8)
+    ready = sum(p.status == "ok" for p in pieces)
+    status = FolderStatus(
+        key=f"custom-{token}",
+        title=picked.title.strip() or T("custom_title", purpose=purpose),
+        description=purpose,
+        complete=ready == len(pieces),
+        ready=ready,
+        total=len(pieces),
+        pieces=pieces,
+    )
+    saved = settings_store.load(session, CUSTOM_KEY, CustomFolders)
+    saved.folders = {**dict(list(saved.folders.items())[-19:]), status.key: status}
+    settings_store.save(session, CUSTOM_KEY, saved)
+    return status
+
+
+class CustomFolders(BaseModel):
+    folders: dict[str, FolderStatus] = {}
+
+
+def saved(session: Session, key: str) -> FolderStatus | None:
+    """A pack put together earlier, with its pieces checked again (trash, new versions)."""
+    status = settings_store.load(session, CUSTOM_KEY, CustomFolders).folders.get(key)
+    if status is None:
+        return None
+    active = {d.id for d in current_documents(session)}
+    for piece in status.pieces:
+        piece.document_ids = [i for i in piece.document_ids if i in active]
+        piece.status = "ok" if piece.document_ids else "missing"
+    status.ready = sum(p.status == "ok" for p in status.pieces)
+    status.complete = status.ready == status.total
+    return status

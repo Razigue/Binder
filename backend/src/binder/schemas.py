@@ -25,6 +25,8 @@ class Extraction(BaseModel):
     extractor: str = "rules"
     # Type detected by the rules (a DocType value: "invoice", "insurance_certificate"…).
     doc_type: str | None = None
+    # Person the document concerns (holder, employee, tenant, insured…).
+    person: str | None = None
 
 
 class DocumentOut(BaseModel):
@@ -59,6 +61,9 @@ class DocumentOut(BaseModel):
     deletable_reason: str | None = None
     # Date from which an expiring document should be renewed.
     renew_from: date | None = None
+    person: str | None = None
+    area: str | None = None
+    batch: str | None = None
 
     @classmethod
     def from_model(cls, doc: Document) -> "DocumentOut":
@@ -98,6 +103,7 @@ class DocumentUpdate(BaseModel):
     expiry_date: date | None = None
     reference: str | None = None
     doc_type: str | None = None
+    person: str | None = None
     keep_forever: bool | None = None
     # Validating the document manually takes it out of the "to review" queue.
     validated: bool | None = None
@@ -183,6 +189,15 @@ class Letter(BaseModel):
     registered: bool
     # Language the letter is written in ("en" or "fr"), may differ from the interface.
     language: Literal["en", "fr"]
+    # Saved letter (Correspondence): PDF, "sent", follow-up.
+    id: int | None = None
+    document_id: int | None = None
+    recipient_address: str = ""
+    sent_on: date | None = None
+    follow_up_on: date | None = None
+    answered: bool = False
+    # Words still to fill in ([to be completed]); none when Binder knew everything.
+    blanks: int = 0
 
 
 class ChatResponse(BaseModel):
@@ -197,6 +212,10 @@ class ChatResponse(BaseModel):
     # The agent changed data (reminder, deadline paid, document corrected or trashed).
     changed: bool = False
     engine: str
+    # Token to undo what the agent changed during this turn.
+    undo: str | None = None
+    # Packs put together during the turn.
+    folders: list[dict[str, object]] = []
 
 
 class SystemStatus(BaseModel):
@@ -322,9 +341,15 @@ class ImportSettingsIn(BaseModel):
 
 
 class LetterRequest(BaseModel):
-    kind: str
+    # A template kind ("termination"…) or, with `purpose`, any letter described in words.
+    kind: str | None = None
+    purpose: str = Field(default="", max_length=2000)
     document_id: int | None = None
-    details: str = ""
+    details: str = Field(default="", max_length=4000)
+
+
+class LetterEdit(BaseModel):
+    body: str = Field(max_length=20000)
 
 
 class PreferencesOut(BaseModel):

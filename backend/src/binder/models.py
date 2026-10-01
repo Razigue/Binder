@@ -137,6 +137,13 @@ class Document(SQLModel, table=True):
     # Former version of a renewed document (certificate, identity document…).
     superseded_by: int | None = Field(default=None, index=True)
     page_count: int = 0
+    # Import batch (one drop of files, one mailbox pass, one phone scan): the import report
+    # groups its documents.
+    batch: str | None = Field(default=None, index=True)
+    # Household member the document concerns, as written in it ("Camille Martin").
+    person: str | None = Field(default=None, index=True)
+    # Life area shown in the navigation (services/areas.py), kept in step with the category.
+    area: str | None = Field(default=None, index=True)
 
     created_at: datetime = Field(default_factory=_now, index=True)
     updated_at: datetime = Field(default_factory=_now)
@@ -204,3 +211,52 @@ class Embedding(SQLModel, table=True):
     model: str = Field(index=True)
     # Normalized float32 values.
     vector: bytes
+
+
+class UndoEntry(SQLModel, table=True):
+    """What an action changed, to put it back right after (services/undo.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    token: str = Field(index=True, unique=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    actor: str = "user"
+    # JSON list of steps, undone in reverse order.
+    steps: str = "[]"
+    undone: bool = False
+
+
+class Correspondence(SQLModel, table=True):
+    """A letter written by Binder, followed until it is answered."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    document_id: int | None = Field(default=None, index=True)
+    # Letter kind ("termination", "complaint", "request", "followup", "custom").
+    kind: str = "custom"
+    subject: str
+    recipient: str
+    recipient_address: str = ""
+    body: str
+    language: str = "fr"
+    registered: bool = False
+    sent_on: date | None = None
+    # Date at which a follow-up is suggested if no answer came.
+    follow_up_on: date | None = Field(default=None, index=True)
+    answered: bool = False
+    # Letter this one follows up.
+    follows: int | None = None
+
+
+class Learned(SQLModel, table=True):
+    """A correction the user made, applied again to the next documents of the same sender."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    # Normalized sender key (issuer, or the first line of the document).
+    sender: str = Field(index=True)
+    field: str
+    # Value set by the user (JSON).
+    value: str
+    # For amounts and dates: the label preceding the value in the document ("net a payer").
+    label: str = ""
+    count: int = 1
+    updated_at: datetime = Field(default_factory=_now)

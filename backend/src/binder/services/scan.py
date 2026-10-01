@@ -327,6 +327,7 @@ def import_documents(session: ScanSession) -> list[int]:
         documents = session.documents()
         stamp = dt.datetime.now().strftime("%Y-%m-%d %H.%M")
         ids: list[int] = []
+        batch = ingest.new_batch("scan")
         with Session(get_engine()) as db:
             for n, pages in enumerate(documents, start=1):
                 pdf = scan_image.build_pdf([p.page.image for p in pages])
@@ -337,6 +338,7 @@ def import_documents(session: ScanSession) -> list[int]:
                     f"{T('filename', stamp=stamp)}{suffix}.pdf",
                     "application/pdf",
                     origin=T("from_phone"),
+                    batch=batch,
                 )
                 if created and doc.id is not None:
                     ids.append(doc.id)

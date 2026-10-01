@@ -24,6 +24,7 @@ from sqlmodel import Session, col, select
 
 from binder import __version__, i18n
 from binder.agent import loop, tools
+from binder.api.assistant import folder_status, folder_zip, undoable
 from binder.config import get_settings
 from binder.db import WITHOUT_TEXT, get_engine, get_session
 from binder.models import Activity, Category, Deadline, Document, DocumentStatus
@@ -41,7 +42,6 @@ from binder.schemas import (
     FolderSettings,
     ImportSettings,
     ImportSettingsIn,
-    LetterRequest,
     MailSettings,
     ModelChoice,
     ModelsOverview,
@@ -66,6 +66,7 @@ from binder.services import (
     retention,
     settings_store,
     subscriptions,
+    undo,
 )
 from binder.services.text import ocr_engine, render_page
 
@@ -251,8 +252,17 @@ def stats(session: SessionDep) -> Stats:
 # --- Documents -----------------------------------------------------------------------------
 
 
+BATCH = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
 @router.post("/documents", status_code=201)
-async def upload(file: UploadFile, background: BackgroundTasks, session: SessionDep) -> DocumentOut:
+async def upload(
+    file: UploadFile,
+    background: BackgroundTasks,
+    session: SessionDep,
+    batch: str | None = None,
+) -> DocumentOut:
+    """`batch`: chosen by the interface for one drop of files (the import report groups them)."""
     data = await file.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, T("file_too_large"))
@@ -262,7 +272,15 @@ async def upload(file: UploadFile, background: BackgroundTasks, session: Session
         mime = ingest.guess_mime(file.filename or "document", file.content_type)
     except ingest.UnsupportedFile as exc:
         raise HTTPException(415, str(exc)) from exc
-    doc, created = ingest.store(session, data, file.filename or "document", mime)
+    if batch is not None and not BATCH.fullmatch(batch):
+        batch = None
+    doc, created = ingest.store(
+        session,
+        data,
+        file.filename or "document",
+        mime,
+        batch=f"upload-{batch}" if batch else ingest.new_batch("upload"),
+    )
     if created and doc.id is not None:
         background.add_task(ingest.analyze_in_background, doc.id)
     return DocumentOut.from_model(doc)
@@ -299,11 +317,14 @@ def get_document(doc_id: int, session: SessionDep) -> DocumentDetail:
 
 
 @router.patch("/documents/{doc_id}")
-def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> DocumentDetail:
+def update_document(
+    doc_id: int, patch: DocumentUpdate, session: SessionDep, response: Response
+) -> DocumentDetail:
     doc = _get_doc(session, doc_id)
     changes = patch.model_dump(exclude_unset=True)
     validated = bool(changes.pop("validated", False))
-    editing.update_document(session, doc, changes, validated=validated)
+    with undoable(session, response):
+        editing.update_document(session, doc, changes, validated=validated)
     session.commit()
     session.refresh(doc)
     return DocumentDetail.from_model(doc)
@@ -335,9 +356,10 @@ def explain_document(
 
 
 @router.delete("/documents/{doc_id}", status_code=204)
-def delete_document(doc_id: int, session: SessionDep) -> None:
+def delete_document(doc_id: int, session: SessionDep, response: Response) -> None:
     """Moves the document to the trash (reversible)."""
-    ingest.trash(session, _get_doc(session, doc_id))
+    with undoable(session, response):
+        ingest.trash(session, _get_doc(session, doc_id))
     session.commit()
 
 
@@ -353,11 +375,12 @@ def list_trash(session: SessionDep) -> list[DocumentOut]:
 
 
 @router.post("/documents/{doc_id}/restore")
-def restore_document(doc_id: int, session: SessionDep) -> DocumentDetail:
+def restore_document(doc_id: int, session: SessionDep, response: Response) -> DocumentDetail:
     doc = _get_doc(session, doc_id, trashed=True)
     if doc.deleted_at is None:
         raise HTTPException(409, T("not_in_trash"))
-    ingest.restore(session, doc)
+    with undoable(session, response):
+        ingest.restore(session, doc)
     session.commit()
     session.refresh(doc)
     return DocumentDetail.from_model(doc)
@@ -487,28 +510,22 @@ def list_deletable(session: SessionDep) -> list[DocumentOut]:
 
 
 @router.post("/retention/trash")
-def trash_deletable(body: TrashRequest, session: SessionDep) -> dict[str, int]:
+def trash_deletable(body: TrashRequest, session: SessionDep, response: Response) -> dict[str, int]:
     """Moves the documents chosen by the user to the trash, if they can indeed be sorted out."""
     trashed = 0
-    for doc_id in body.ids:
-        doc = session.get(Document, doc_id)
-        reason = retention.deletion_msg(doc, inline=True) if doc else None
-        if doc is None or reason is None:
-            continue
-        ingest.trash(session, doc, reason=reason)
-        trashed += 1
+    with undoable(session, response):
+        for doc_id in body.ids:
+            doc = session.get(Document, doc_id)
+            reason = retention.deletion_msg(doc, inline=True) if doc else None
+            if doc is None or reason is None:
+                continue
+            ingest.trash(session, doc, reason=reason)
+            trashed += 1
     session.commit()
     return {"trashed": trashed}
 
 
 # --- Folders (checklists) ------------------------------------------------------------------
-
-
-def _folder_kind(key: str) -> folders.FolderKind:
-    kind = folders.KINDS.get(key)
-    if kind is None:
-        raise HTTPException(404, T("unknown_folder"))
-    return kind
 
 
 @router.get("/folders")
@@ -519,35 +536,13 @@ def list_folders(session: SessionDep) -> list[folders.FolderStatus]:
 
 @router.get("/folders/{key}")
 def get_folder(key: str, session: SessionDep) -> folders.FolderStatus:
-    return folders.evaluate(session, _folder_kind(key))
+    return folder_status(session, key)
 
 
 @router.get("/folders/{key}/export")
 def export_folder(key: str, session: SessionDep) -> StreamingResponse:
     """ZIP of the documents found, numbered, with the list of what is still missing."""
-    kind = _folder_kind(key)
-    status = folders.evaluate(session, kind)
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for n, piece in enumerate(status.pieces, 1):
-            if piece.status == "outdated":
-                continue
-            for doc_id in piece.document_ids:
-                doc = session.get(Document, doc_id)
-                if doc is None:
-                    continue
-                path = f"{n:02d} {piece.label}/{organize.standard_name(doc)}"
-                archive.writestr(path, ingest.load_file(doc))
-        archive.writestr(T("readme_name"), folders.readme(status))
-    activity.log(session, "export", folders.exported_msg(status), actor="user")
-    session.commit()
-    buffer.seek(0)
-    name = f"binder-{kind.key}-{date.today()}.zip"
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name}"'},
-    )
+    return folder_zip(session, folder_status(session, key))
 
 
 # --- Subscriptions -------------------------------------------------------------------------
@@ -578,24 +573,6 @@ def letter_kinds() -> dict[str, str]:
     return letters.kind_titles()
 
 
-@router.post("/letters")
-def write_letter(body: LetterRequest, session: SessionDep) -> letters.Letter:
-    if body.kind not in letters.KINDS:
-        raise HTTPException(400, T("unknown_letter"))
-    doc = _get_doc(session, body.document_id) if body.document_id is not None else None
-    profile = settings_store.load(session, letters.PROFILE_KEY, letters.Profile)
-    letter = letters.write(body.kind, doc, profile, body.details)
-    activity.log(
-        session,
-        "letter",
-        letters.written_msg(letter),
-        actor="user",
-        document=doc,
-    )
-    session.commit()
-    return letter
-
-
 # --- Deadlines -----------------------------------------------------------------------------
 
 
@@ -621,9 +598,12 @@ def list_deadlines(
 
 
 @router.post("/deadlines", status_code=201)
-def create_deadline(body: DeadlineCreate, session: SessionDep) -> DeadlineOut:
+def create_deadline(body: DeadlineCreate, session: SessionDep, response: Response) -> DeadlineOut:
     deadline = Deadline(**body.model_dump(), source="manual")
     session.add(deadline)
+    session.flush()
+    with undoable(session, response):
+        undo.push("deadline_created", id=deadline.id)
     activity.log(
         session,
         "reminder",
@@ -637,21 +617,26 @@ def create_deadline(body: DeadlineCreate, session: SessionDep) -> DeadlineOut:
 
 
 @router.patch("/deadlines/{deadline_id}")
-def update_deadline(deadline_id: int, body: DeadlineUpdate, session: SessionDep) -> DeadlineOut:
+def update_deadline(
+    deadline_id: int, body: DeadlineUpdate, session: SessionDep, response: Response
+) -> DeadlineOut:
     deadline = session.get(Deadline, deadline_id)
     if deadline is None:
         raise HTTPException(404, T("deadline_not_found"))
-    editing.update_deadline(session, deadline, body.model_dump(exclude_unset=True))
+    with undoable(session, response):
+        editing.update_deadline(session, deadline, body.model_dump(exclude_unset=True))
     session.commit()
     session.refresh(deadline)
     return DeadlineOut.from_model(deadline, date.today())
 
 
 @router.delete("/deadlines/{deadline_id}", status_code=204)
-def delete_deadline(deadline_id: int, session: SessionDep) -> None:
+def delete_deadline(deadline_id: int, session: SessionDep, response: Response) -> None:
     deadline = session.get(Deadline, deadline_id)
     if deadline is None:
         raise HTTPException(404, T("deadline_not_found"))
+    with undoable(session, response):
+        undo.push("deadline_deleted", state=undo.deadline_state(deadline))
     activity.log(
         session,
         "deadline",
@@ -800,7 +785,9 @@ def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
         ingest.wait_for_analysis(session, _get_doc(session, doc_id))
         for doc_id in dict.fromkeys(body.attachments)
     ]
-    response = loop.run(session, body.message, body.history, attached)
+    with undo.capture() as cap:
+        response = loop.run(session, body.message, body.history, attached)
+    response.undo = undo.save(session, cap, actor="agent")
     session.commit()
     return response
 
@@ -832,7 +819,9 @@ def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
                 attached = [
                     ingest.wait_for_analysis(worker, _get_doc(worker, doc_id)) for doc_id in ids
                 ]
-                response = loop.run(worker, body.message, body.history, attached, emit)
+                with undo.capture() as cap:
+                    response = loop.run(worker, body.message, body.history, attached, emit)
+                response.undo = undo.save(worker, cap, actor="agent")
                 worker.commit()
                 events.put({"type": "done", "response": response.model_dump(mode="json")})
             except _Stopped:
@@ -859,6 +848,8 @@ def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
 
 
 @router.post("/demo")
-def seed_demo(session: SessionDep) -> dict[str, int]:
+def seed_demo(session: SessionDep) -> dict[str, object]:
     """Imports the fictitious demo documents."""
-    return {"imported": sum(created for _, created in ingest.seed_demo(session))}
+    results = ingest.seed_demo(session)
+    batch = next((doc.batch for doc, created in results if created), None)
+    return {"imported": sum(created for _, created in results), "batch": batch}

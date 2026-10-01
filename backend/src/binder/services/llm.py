@@ -63,6 +63,7 @@ issuer: issuing organisation
 amount: main amount to pay or received, e.g. total due, net pay, rent, refund (number)
 issue_date, due_date (payment or debit date), expiry_date (end of validity): YYYY-MM-DD
 reference: document, contract or customer reference, value only
+person: full name of the person it concerns (holder, employee, tenant, insured), not a company
 confidence: 0 to 1
 Use null for missing information; do not invent.
 Document:
@@ -97,11 +98,12 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
         "due_date": _nullable("string"),
         "expiry_date": _nullable("string"),
         "reference": _nullable("string"),
+        "person": _nullable("string"),
         "confidence": {"type": "number"},
     },
     "required": [
         "category", "title", "issuer", "amount", "issue_date", "due_date", "expiry_date",
-        "reference", "confidence",
+        "reference", "person", "confidence",
     ],
 }  # fmt: skip
 

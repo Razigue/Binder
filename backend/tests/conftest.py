@@ -19,6 +19,10 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setenv("BINDER_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BINDER_LLM_ENABLED", "false")
     monkeypatch.setenv("BINDER_AUTO_IMPORT", "false")
+    # No Ollama install, system notification or backup written by the tests themselves.
+    monkeypatch.setenv("BINDER_AUTO_SETUP", "false")
+    monkeypatch.setenv("BINDER_NOTIFICATIONS", "false")
+    monkeypatch.setenv("BINDER_AUTO_BACKUP", "false")
     monkeypatch.delenv("BINDER_DB_KEY", raising=False)
     # Deterministic language whatever the machine's locale; tests switch to fr_FR when needed.
     monkeypatch.setenv("BINDER_LOCALE", "en_US")

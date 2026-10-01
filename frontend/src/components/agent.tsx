@@ -12,7 +12,8 @@ import {
   type ReactNode,
   type Ref,
 } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
+import { useMutation } from "@tanstack/react-query"
 import {
   ArrowUp,
   Bot,
@@ -24,20 +25,18 @@ import {
   FileText,
   FileUp,
   Loader2,
-  Mail,
   Paperclip,
   Pencil,
   RotateCcw,
-  Search,
   Square,
   SquarePen,
+  Undo2,
   X,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { useInvalidateAll } from "@/hooks/queries"
 import {
   api,
@@ -45,7 +44,6 @@ import {
   type ChatMessage,
   type ChatResponse,
   type Doc,
-  type Letter,
   type ToolCall,
 } from "@/lib/api"
 import { useT } from "@/i18n"
@@ -53,10 +51,11 @@ import { agent as messages } from "@/i18n/messages/agent"
 import { categoryLabel, daysLabel, formatAmount, formatDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { CategoryIcon } from "./CategoryIcon"
+import { FolderView, LetterView } from "./panels"
 import { ACCEPT } from "./upload"
 
 // Suggested prompts, in the UI language (the agent understands both).
-const SUGGESTIONS = ["upcoming", "taxNotice", "october", "toReview", "edf"] as const
+const SUGGESTIONS = ["upcoming", "october", "alerts", "letter", "folder"] as const
 // Same limit as the backend (attachments per message).
 const MAX_ATTACHMENTS = 10
 
@@ -221,12 +220,10 @@ function AgentConversation({
   onNavigate: () => void
 }) {
   const t = useT(messages)
-  const [search, setSearch] = useState("")
   const [editing, setEditing] = useState<number | null>(null)
   const [dragging, setDragging] = useState(false)
   const composer = useRef<ComposerHandle>(null)
   const scroller = useRef<HTMLDivElement>(null)
-  const navigate = useNavigate()
 
   // Follows the conversation, unless the user scrolled up to read.
   const pinned = useRef(true)
@@ -271,27 +268,7 @@ function AgentConversation({
       >
         {turns.length === 0 && (
           <>
-            <div>
-              <p className="mb-2 text-sm font-medium">{t("prompt")}</p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  if (!search.trim()) return
-                  onNavigate()
-                  navigate(`/search?q=${encodeURIComponent(search.trim())}`)
-                }}
-                className="relative"
-              >
-                <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t("searchPlaceholder")}
-                  autoComplete="off"
-                  className="h-10 pl-9"
-                />
-              </form>
-            </div>
+            <p className="text-sm font-medium">{t("prompt")}</p>
             <div>
               <p className="mb-2 text-xs font-medium text-muted-foreground">{t("suggestions")}</p>
               <div className="flex flex-col items-start gap-2">
@@ -974,30 +951,6 @@ function Steps({ steps }: { steps: ToolCall[] }) {
   )
 }
 
-function LetterCard({ letter }: { letter: Letter }) {
-  const t = useT(messages)
-  return (
-    <div className="overflow-hidden rounded-lg border">
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-        <Mail className="size-4 text-muted-foreground" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{letter.subject}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {t("letterTo", { recipient: letter.recipient })}
-          </span>
-        </span>
-        <CopyButton text={letter.body} label={t("copyLetter")} />
-      </div>
-      <pre className="max-h-72 overflow-y-auto px-3 py-2.5 font-sans text-xs leading-relaxed whitespace-pre-wrap select-text">
-        {letter.body}
-      </pre>
-      {letter.registered && (
-        <p className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">{t("registered")}</p>
-      )}
-    </div>
-  )
-}
-
 /** Minimal rendering of the agent's text: links [text](url), citations [#id] and **bold**. */
 function RichText({ text, docs, onNavigate }: { text: string; docs: Doc[]; onNavigate: () => void }) {
   const t = useT(messages)
@@ -1044,6 +997,30 @@ function RichText({ text, docs, onNavigate }: { text: string; docs: Doc[]; onNav
   )
 }
 
+/** "Your documents have been updated", with a way back right after. */
+function Changed({ token }: { token: string | null }) {
+  const t = useT(messages)
+  const invalidate = useInvalidateAll()
+  const [undone, setUndone] = useState(false)
+  const undo = useMutation({
+    mutationFn: () => api.undo(token!),
+    onSuccess: () => {
+      setUndone(true)
+      invalidate()
+    },
+  })
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Check className="size-3.5 text-primary" /> {undone ? t("undone") : t("changed")}
+      {token && !undone && (
+        <Button variant="link" size="xs" className="h-auto px-1" onClick={() => undo.mutate()} disabled={undo.isPending}>
+          <Undo2 /> {t("undo")}
+        </Button>
+      )}
+    </p>
+  )
+}
+
 function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavigate: () => void }) {
   const t = useT(messages)
   const [expanded, setExpanded] = useState(response.documents.length <= 3)
@@ -1055,13 +1032,12 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
         <RichText text={response.answer} docs={docs} onNavigate={onNavigate} />
       </p>
       {response.letters.map((letter, i) => (
-        <LetterCard key={i} letter={letter} />
+        <LetterView key={letter.id ?? i} letter={letter} compact />
       ))}
-      {response.changed && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Check className="size-3.5 text-primary" /> {t("changed")}
-        </p>
-      )}
+      {response.folders.map((folder) => (
+        <FolderView key={folder.key} folder={folder} />
+      ))}
+      {response.changed && <Changed token={response.undo} />}
       {docs.length > 0 && (
         <div className="overflow-hidden rounded-lg border">
           {!expanded ? (

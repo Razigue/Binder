@@ -204,7 +204,7 @@ def test_llm_is_told_the_user_language(
     assert requests[0]["options"]["num_ctx"] == get_settings().llm_context
     # Without vision, the model is not offered a tool it cannot use.
     names = {t["function"]["name"] for t in requests[0]["tools"]}
-    assert "view_document" not in names and "draft_letter" in names
+    assert "view_document" not in names and "write_letter" in names
     # Tool results are compact JSON with English keys, without null fields.
     tool = requests[1]["messages"][-1]
     assert tool["role"] == "tool" and tool["content"].startswith('{"results":[{"id":')

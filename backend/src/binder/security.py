@@ -24,6 +24,11 @@ def _load_master_secret() -> bytes:
     return key_file.read_text().strip().encode()
 
 
+def master_secret() -> bytes:
+    """The secret every key derives from (backups wrap it with the recovery code)."""
+    return _load_master_secret()
+
+
 def _derive(purpose: str) -> bytes:
     return hashlib.sha256(_load_master_secret() + b":" + purpose.encode()).digest()
 

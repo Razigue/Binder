@@ -248,7 +248,7 @@ SCENARIOS = [
     Scenario(
         "dossier_location",
         ["Je veux louer un appartement : qu'est-ce qui me manque pour mon dossier ?"],
-        tools=["check_folder"],
+        tools=["prepare_folder"],
         answer=[r"contrat de travail|bulletins?|quittances?"],
     ),
     # Actions.
@@ -294,7 +294,7 @@ SCENARIOS = [
     Scenario(
         "resiliation_orange",
         ["Écris-moi une lettre pour résilier mon abonnement Orange."],
-        tools=["draft_letter"],
+        tools=["write_letter"],
         letter="facture-orange.pdf",
     ),
     Scenario(
