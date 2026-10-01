@@ -119,6 +119,21 @@ def build_samples(today: date | None = None) -> list[Sample]:
         issue_date=d(-25),
         reference="4521877 H",
     )
+    for name, issued in (("attestation-maif-ancienne.pdf", -375), ("attestation-maif.pdf", -8)):
+        add(
+            name,
+            f"""<h1>MAIF</h1><h2>Attestation d'assurance habitation</h2>
+            <p>N° de contrat : 4521877 H</p><p>Fait le {_fr(d(issued))}</p>
+            <p>La MAIF atteste que M. Martin est assuré en responsabilité civile pour le logement
+            situé 12 rue des Tilleuls, 69003 Lyon.</p>
+            <p>Attestation valable jusqu'au {_fr(d(issued + 365))}.</p>""",
+            category=Category.ASSURANCE,
+            amount=None,
+            due_date=None,
+            issue_date=d(issued),
+            expiry_date=d(issued + 365),
+            reference="4521877 H",
+        )
     add(
         "facture-edf.pdf",
         f"""<h1>EDF</h1><h2>Votre facture d'électricité</h2>
@@ -220,6 +235,33 @@ def build_samples(today: date | None = None) -> list[Sample]:
         amount=23.40,
         due_date=None,
         issue_date=d(-11),
+        reference=None,
+    )
+    add(
+        "carte-identite.pdf",
+        f"""<h1>RÉPUBLIQUE FRANÇAISE</h1><h2>Carte nationale d'identité</h2>
+        <p>Nom : MARTIN — Prénom : Camille</p><p>Lieu de naissance : Lyon (69)</p>
+        <p>Date de délivrance : {_fr(d(-3585))}</p><p>Date d'expiration : {_fr(d(65))}</p>""",
+        category=Category.IDENTITE,
+        amount=None,
+        due_date=None,
+        issue_date=d(-3585),
+        expiry_date=d(65),
+        reference=None,
+    )
+    add(
+        "controle-technique.pdf",
+        f"""<h1>Autosur — Centre de contrôle technique</h1>
+        <h2>Procès-verbal de contrôle technique</h2>
+        <p>Immatriculation : AB-123-CD — Kilométrage : 84 210 km</p>
+        <p>Date du contrôle : {_fr(d(-160))}</p><p>Résultat : favorable</p>
+        <table><tr><td>Montant TTC</td><td class="big">{_money(78)}</td></tr></table>
+        <p>Prochain contrôle à effectuer avant le {_fr(d(570))}</p>""",
+        category=Category.VEHICULE,
+        amount=78.0,
+        due_date=None,
+        issue_date=d(-160),
+        expiry_date=d(570),
         reference=None,
     )
     add(

@@ -11,10 +11,10 @@ from sqlmodel import Session, select
 
 from binder import security
 from binder.config import get_settings
-from binder.db import get_engine, index_document
+from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import llm, rules
+from binder.services import activity, deadlines, llm, organize, rules, subscriptions
 from binder.services.text import SUPPORTED_MIME, read_document
 
 log = logging.getLogger(__name__)
@@ -35,11 +35,34 @@ def guess_mime(filename: str, declared: str | None) -> str:
     return mime
 
 
-def store(session: Session, data: bytes, filename: str, mime: str) -> tuple[Document, bool]:
-    """Enregistre le fichier chiffré. Retourne (document, créé) ; un doublon renvoie l'existant."""
+def store(
+    session: Session,
+    data: bytes,
+    filename: str,
+    mime: str,
+    *,
+    actor: str = "user",
+    origin: str = "",
+) -> tuple[Document, bool]:
+    """Enregistre le fichier chiffré. Retourne (document, créé) ; un doublon renvoie l'existant
+    (et le sort de la corbeille s'il y était)."""
     digest = hashlib.sha256(data).hexdigest()
     existing = session.exec(select(Document).where(Document.sha256 == digest)).first()
     if existing:
+        if existing.deleted_at is not None:
+            restore(session, existing, actor=actor, reason="réimporté")
+            session.commit()
+        else:
+            known = existing.title or existing.filename
+            activity.log(
+                session,
+                "duplicate",
+                f"« {filename} » ignoré : déjà présent sous « {known} »",
+                actor=actor,
+                document=existing,
+            )
+            session.commit()
+        session.refresh(existing)
         return existing, False
     files_dir = get_settings().files_dir
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +72,16 @@ def store(session: Session, data: bytes, filename: str, mime: str) -> tuple[Docu
         filename=filename, mime_type=mime, size=len(data), sha256=digest, stored_name=stored_name
     )
     session.add(doc)
+    session.flush()
+    origin = origin or ("(démonstration)" if actor == "demo" else "")
+    activity.log(
+        session,
+        "import",
+        f"« {filename} » importé {origin}".strip(),
+        actor=actor,
+        document=doc,
+        details={"taille": len(data)},
+    )
     session.commit()
     session.refresh(doc)
     return doc, True
@@ -67,12 +100,13 @@ def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
     if by_llm is None:
         return by_rules
     merged = by_llm.model_copy()
-    for field in ("issuer", "amount", "issue_date", "due_date", "reference"):
+    for field in ("issuer", "amount", "issue_date", "due_date", "expiry_date", "reference"):
         if getattr(merged, field) in (None, ""):
             setattr(merged, field, getattr(by_rules, field))
     if merged.category == Category.AUTRE and by_rules.category != Category.AUTRE:
         merged.category = by_rules.category
     merged.title = merged.title or by_rules.title
+    merged.doc_type = by_rules.doc_type
     if by_rules.category == merged.category:
         merged.confidence = round(max(by_llm.confidence, by_rules.confidence), 2)
     else:
@@ -88,14 +122,23 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.amount = ext.amount
     doc.issue_date = ext.issue_date
     doc.due_date = ext.due_date
+    doc.expiry_date = ext.expiry_date
     doc.reference = ext.reference
+    doc.doc_type = ext.doc_type
     doc.confidence = ext.confidence
     doc.extractor = ext.extractor
+    doc.explanation = None
     refresh_status(doc)
 
 
 def refresh_status(doc: Document, validated: bool = False) -> None:
+    if validated and doc.duplicate_of is not None:
+        # Valider un doublon signalé, c'est décider de garder les deux.
+        doc.duplicate_of = None
+        doc.duplicate_dismissed = True
     missing = rules.missing_for(doc.category, doc.model_dump())
+    if doc.duplicate_of is not None:
+        missing.append("duplicate")
     doc.missing_fields = json.dumps(missing)
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
@@ -107,23 +150,12 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
 
 
 def sync_deadline(session: Session, doc: Document) -> None:
-    """Une échéance « extraite » par document, alignée sur sa date limite."""
-    existing = session.exec(
-        select(Deadline).where(Deadline.document_id == doc.id, Deadline.source == "extracted")
-    ).first()
-    if doc.due_date is None:
-        if existing:
-            session.delete(existing)
-        return
-    deadline = existing or Deadline(document_id=doc.id, title="", due_date=doc.due_date)
-    deadline.title = doc.title
-    deadline.category = doc.category
-    deadline.due_date = doc.due_date
-    deadline.amount = doc.amount
-    session.add(deadline)
+    deadlines.sync(session, doc)
 
 
 def analyze(session: Session, doc: Document) -> Document:
+    previous_key = organize.series_key(doc)
+    doc.duplicate_of = None
     read = read_document(load_file(doc), doc.mime_type)
     doc.text = read.text
     doc.page_count = read.page_count
@@ -136,11 +168,101 @@ def analyze(session: Session, doc: Document) -> Document:
     apply_extraction(doc, ext)
     session.add(doc)
     session.flush()
+    organize.detect_duplicate(session, doc)
+    refresh_status(doc)
+    _log_analysis(session, doc)
     sync_deadline(session, doc)
     index_document(session, doc)
+    organize.reorganize(session, doc, previous_key)
+    session.flush()
+    subscriptions.check_increase(session, doc)
     session.commit()
     session.refresh(doc)
     return doc
+
+
+def _log_analysis(session: Session, doc: Document) -> None:
+    confidence = f"confiance {round(doc.confidence * 100)} %"
+    if doc.status == DocumentStatus.TO_REVIEW:
+        missing = json.loads(doc.missing_fields)
+        reasons = [
+            activity.FIELD_NAMES.get(f, f) for f in missing if f not in ("text", "duplicate")
+        ]
+        original = session.get(Document, doc.duplicate_of) if doc.duplicate_of else None
+        if original is not None:
+            why = f"doublon probable de « {original.title} »"
+        elif "text" in missing or not doc.text.strip():
+            why = "texte illisible"
+        elif reasons:
+            why = "manque " + ", ".join(reasons)
+        elif doc.category == Category.AUTRE:
+            why = "catégorie inconnue"
+        else:
+            why = confidence
+        summary = f"« {doc.title} » mis de côté pour vérification ({why})"
+    else:
+        summary = f"« {doc.title} » classé dans {doc.category.value} ({confidence})"
+    activity.log(
+        session,
+        "analyze",
+        summary,
+        document=doc,
+        details={
+            "categorie": doc.category.value,
+            "confiance": doc.confidence,
+            "moteur": doc.extractor,
+            "montant": doc.amount,
+            "echeance": doc.due_date,
+            "reference": doc.reference,
+            "doublon_de": doc.duplicate_of,
+        },
+    )
+
+
+def trash(session: Session, doc: Document, *, actor: str = "user", reason: str = "") -> None:
+    """Met le document à la corbeille : caché partout, restaurable, fichier conservé."""
+    previous_key = organize.series_key(doc)
+    doc.deleted_at = datetime.now(UTC)
+    deadlines.sync(session, doc)
+    if doc.id is not None:
+        unindex_document(session, doc.id)
+    session.add(doc)
+    for freed in organize.release_duplicates(session, doc):
+        refresh_status(freed)
+        sync_deadline(session, freed)
+    organize.reorganize(session, doc, previous_key)
+    suffix = f" ({reason})" if reason else ""
+    activity.log(
+        session, "trash", f"« {doc.title} » mis à la corbeille{suffix}", actor=actor, document=doc
+    )
+
+
+def restore(session: Session, doc: Document, *, actor: str = "user", reason: str = "") -> None:
+    doc.deleted_at = None
+    session.add(doc)
+    session.flush()
+    sync_deadline(session, doc)
+    index_document(session, doc)
+    organize.reorganize(session, doc, None)
+    suffix = f" ({reason})" if reason else ""
+    activity.log(session, "restore", f"« {doc.title} » restauré{suffix}", actor=actor, document=doc)
+
+
+def purge(session: Session, doc: Document, *, actor: str = "user") -> None:
+    """Suppression définitive (fichier compris). Réservée aux documents déjà à la corbeille."""
+    if doc.deleted_at is None:
+        raise ValueError("Seul un document à la corbeille peut être supprimé définitivement")
+    for dl in session.exec(select(Deadline).where(Deadline.document_id == doc.id)):
+        session.delete(dl)
+    activity.log(
+        session,
+        "purge",
+        f"« {doc.title} » supprimé définitivement",
+        actor=actor,
+        document=doc,
+    )
+    delete_file(doc)
+    session.delete(doc)
 
 
 def analyze_in_background(doc_id: int) -> None:
@@ -159,6 +281,12 @@ def analyze_in_background(doc_id: int) -> None:
                 doc.title = doc.title or doc.filename
                 doc.missing_fields = json.dumps(["text"])
                 session.add(doc)
+                activity.log(
+                    session,
+                    "analyze",
+                    f"« {doc.title} » : analyse impossible, à vérifier à la main",
+                    document=doc,
+                )
                 session.commit()
 
 
@@ -168,7 +296,9 @@ def seed_demo(session: Session) -> list[tuple[Document, bool]]:
 
     results = []
     for sample in build_samples():
-        doc, created = store(session, sample.pdf(), sample.filename, "application/pdf")
+        doc, created = store(
+            session, sample.pdf(), sample.filename, "application/pdf", actor="demo"
+        )
         if created:
             analyze(session, doc)
         results.append((doc, created))

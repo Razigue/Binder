@@ -14,14 +14,17 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "pymupdf>=1.28.2",
     "python-multipart>=0.0.32",
-    "sqlcipher3-binary>=0.6.0",
+    # Wheels Linux, macOS (Intel, Apple Silicon) et Windows ; s'importe comme `sqlcipher3`.
+    "sqlcipher3-wheels>=0.5.7",
     "sqlmodel>=0.0.47",
     "uvicorn[standard]>=0.54.0",
 ]
 
 [project.optional-dependencies]
 desktop = [
-    "pywebview[qt]>=6.2.1",
+    # Moteur web natif sous Windows (Edge WebView2) et macOS (WebKit), Qt WebEngine sous Linux.
+    "pywebview>=6.2.1",
+    "pywebview[qt]>=6.2.1; sys_platform == 'linux'",
 ]
 
 [build-system]

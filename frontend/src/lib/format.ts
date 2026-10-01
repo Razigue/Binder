@@ -7,7 +7,12 @@ export function formatAmount(value: number | null | undefined): string {
 }
 
 export function parseDate(iso: string): Date {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number)
+  // Date-heure UTC (created_at, deleted_at…) : jour local, pas le jour UTC.
+  if (iso.length > 10) {
+    const local = new Date(iso)
+    return new Date(local.getFullYear(), local.getMonth(), local.getDate())
+  }
+  const [y, m, d] = iso.split("-").map(Number)
   return new Date(y, m - 1, d)
 }
 
@@ -58,12 +63,16 @@ export const FIELD_LABELS: Record<string, string> = {
   due_date: "Échéance",
   issue_date: "Date d'émission",
   reference: "Référence",
+  expiry_date: "Fin de validité",
   text: "Texte illisible",
+  duplicate: "Doublon probable",
 }
 
 export function missingLabel(fields: string[]): string {
   if (fields.includes("text")) return "Texte illisible"
+  if (fields.includes("duplicate")) return "Doublon probable"
   if (fields.length === 0) return "À confirmer"
   if (fields.length > 1) return "Document incomplet"
-  return `${FIELD_LABELS[fields[0]] ?? fields[0]} manquant${fields[0] === "due_date" ? "e" : ""}`
+  const feminine = fields[0] === "due_date" || fields[0] === "expiry_date"
+  return `${FIELD_LABELS[fields[0]] ?? fields[0]} manquant${feminine ? "e" : ""}`
 }

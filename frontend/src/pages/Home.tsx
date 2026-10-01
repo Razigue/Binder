@@ -1,13 +1,15 @@
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
-import { ArrowRight, CalendarClock, ChevronRight, FileCheck2, FileClock, Sparkles, Upload } from "lucide-react"
+import { Archive, ArrowRight, TrendingUp, CalendarClock, ChevronRight, FileCheck2, FileClock, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useUpload } from "@/components/upload"
-import { useDeadlines, useDocuments, useInvalidateAll, useStats } from "@/hooks/queries"
+import {
+  useDeadlines, useDocuments, useExpirations, useInvalidateAll, useRetention, useStats, useSubscriptions,
+} from "@/hooks/queries"
 import { api, type Category } from "@/lib/api"
 import { daysLabel, formatAmount, formatDate, missingLabel, toIso, urgency, urgencyStyles } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -45,6 +47,8 @@ export function HomePage() {
           to="/documents"
         />
       </div>
+      <IncreaseHint />
+      <SortingHint />
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AttentionList />
         <RecentDocuments />
@@ -118,8 +122,20 @@ function AttentionList() {
   const inAWeek = new Date(today.getTime() + 7 * 86_400_000)
   const deadlines = useDeadlines({ end: toIso(inAWeek) })
   const toReview = useDocuments({ status: "to_review", limit: 5 })
+  const expirations = useExpirations()
 
   const items: AttentionItem[] = [
+    ...(expirations.data ?? [])
+      .filter((e) => e.state !== "valid")
+      .map((e) => ({
+        key: `e${e.document.id}`,
+        to: `/documents/${e.document.id}`,
+        title: e.document.title,
+        category: e.document.category,
+        reason: e.state === "expired" ? "Expiré" : `À renouveler · expire dans ${e.days_left} j`,
+        reasonClass: e.state === "expired" ? "text-red-600" : "text-amber-600",
+        amount: null,
+      })),
     ...(deadlines.data ?? []).map((d) => ({
       key: `d${d.id}`,
       to: d.document_id ? `/documents/${d.document_id}` : "/echeances",
@@ -138,7 +154,7 @@ function AttentionList() {
       reasonClass: "text-amber-600",
       amount: d.amount,
     })),
-  ].slice(0, 4)
+  ].slice(0, 5)
 
   return (
     <SectionCard title="À vérifier" to="/documents?status=to_review">
@@ -167,6 +183,38 @@ function AttentionList() {
         </ul>
       )}
     </SectionCard>
+  )
+}
+
+function IncreaseHint() {
+  const { data } = useSubscriptions()
+  const rising = data?.filter((s) => s.increase) ?? []
+  if (!rising.length) return null
+  return (
+    <Link to="/abonnements" className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-sm hover:bg-amber-50">
+      <TrendingUp className="size-4 text-amber-600" />
+      <span className="flex-1">
+        Hausse détectée :{" "}
+        {rising.map((s) => `${s.label} (+${Math.round(s.change_pct)} %)`).join(", ")}
+      </span>
+      <ArrowRight className="size-4 text-muted-foreground" />
+    </Link>
+  )
+}
+
+function SortingHint() {
+  const { data } = useRetention()
+  if (!data?.length) return null
+  return (
+    <Link to="/tri" className="mt-4 flex items-center gap-3 rounded-xl border bg-card px-5 py-3 text-sm hover:bg-muted/40">
+      <Archive className="size-4 text-muted-foreground" />
+      <span className="flex-1">
+        {data.length > 1
+          ? `${data.length} documents peuvent être triés : leur durée de conservation est dépassée ou ils ont été remplacés.`
+          : "1 document peut être trié : sa durée de conservation est dépassée ou il a été remplacé."}
+      </span>
+      <ArrowRight className="size-4 text-muted-foreground" />
+    </Link>
   )
 }
 

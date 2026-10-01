@@ -2,11 +2,14 @@
 
 import io
 import json
+import os
 import re
 import unicodedata
 import zipfile
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -15,9 +18,10 @@ from sqlmodel import Session, col, select
 
 from binder.agent import loop, tools
 from binder.config import get_settings
-from binder.db import get_session, index_document, unindex_document
-from binder.models import Category, Deadline, Document, DocumentStatus
+from binder.db import get_session, index_document
+from binder.models import Activity, Category, Deadline, Document, DocumentStatus
 from binder.schemas import (
+    ActivityOut,
     ChatRequest,
     ChatResponse,
     DeadlineCreate,
@@ -26,10 +30,30 @@ from binder.schemas import (
     DocumentDetail,
     DocumentOut,
     DocumentUpdate,
+    ExpirationOut,
+    FolderSettings,
+    ImportSettings,
+    ImportSettingsIn,
+    LetterRequest,
+    MailSettings,
     Stats,
     SystemStatus,
+    TrashRequest,
 )
-from binder.services import ingest, llm
+from binder.services import (
+    activity,
+    deadlines,
+    explain,
+    folders,
+    importers,
+    ingest,
+    letters,
+    llm,
+    organize,
+    retention,
+    settings_store,
+    subscriptions,
+)
 from binder.services.text import render_page
 
 router = APIRouter(prefix="/api")
@@ -37,11 +61,15 @@ SessionDep = Annotated[Session, Depends(get_session)]
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
-def _get_doc(session: Session, doc_id: int) -> Document:
+def _get_doc(session: Session, doc_id: int, *, trashed: bool = False) -> Document:
+    """Document actif (ou, avec `trashed`, y compris ceux de la corbeille)."""
     doc = session.get(Document, doc_id)
-    if doc is None:
+    if doc is None or (doc.deleted_at is not None and not trashed):
         raise HTTPException(404, "Document introuvable")
     return doc
+
+
+ACTIVE = col(Document.deleted_at).is_(None)
 
 
 # --- Système -------------------------------------------------------------------------------
@@ -83,20 +111,24 @@ def stats(session: SessionDep) -> Stats:
         .where(Deadline.due_date <= today + timedelta(days=30))
     ).one()
     to_review = session.exec(
-        select(func.count()).where(Document.status == DocumentStatus.TO_REVIEW)
+        select(func.count()).where(Document.status == DocumentStatus.TO_REVIEW, ACTIVE)
     ).one()
     classified = session.exec(
         select(func.count())
-        .where(Document.status == DocumentStatus.CLASSIFIED)
+        .where(Document.status == DocumentStatus.CLASSIFIED, ACTIVE)
         .where(Document.created_at >= week_ago)
     ).one()
-    total = session.exec(select(func.count()).select_from(Document)).one()
-    rows = session.exec(select(Document.category, func.count()).group_by(Document.category)).all()
+    total = session.exec(select(func.count()).select_from(Document).where(ACTIVE)).one()
+    trashed = session.exec(select(func.count()).select_from(Document).where(~ACTIVE)).one()
+    rows = session.exec(
+        select(Document.category, func.count()).where(ACTIVE).group_by(Document.category)
+    ).all()
     return Stats(
         upcoming_deadlines=upcoming,
         to_review=to_review,
         classified_this_week=classified,
         total_documents=total,
+        trashed=trashed,
         by_category={Category(cat).value: n for cat, n in rows},
     )
 
@@ -137,7 +169,7 @@ def list_documents(
         if status:
             docs = [d for d in docs if d.status == status]
     else:
-        stmt = select(Document)
+        stmt = select(Document).where(ACTIVE)
         if category:
             stmt = stmt.where(Document.category == category)
         if status:
@@ -156,14 +188,48 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
     doc = _get_doc(session, doc_id)
     changes = patch.model_dump(exclude_unset=True)
     validated = bool(changes.pop("validated", False))
+    previous_key = organize.series_key(doc)
+    diff = {k: (getattr(doc, k), v) for k, v in changes.items() if getattr(doc, k) != v}
     for key, value in changes.items():
         setattr(doc, key, value)
-    if changes:
+    if "keep_forever" in diff:
+        keep = diff.pop("keep_forever")[1]
+        activity.log(
+            session,
+            "retention",
+            f"« {doc.title} » "
+            + ("gardé au-delà de la durée conseillée" if keep else "de nouveau soumis au tri"),
+            actor="user",
+            document=doc,
+        )
+    if diff:
+        doc.explanation = None
         doc.extractor = "manual" if doc.extractor == "rules" else doc.extractor
+        activity.log(
+            session,
+            "update",
+            activity.changes_summary(doc.title, diff),
+            actor="user",
+            document=doc,
+            details={k: {"avant": old, "apres": new} for k, (old, new) in diff.items()},
+        )
+    was_review = doc.status == DocumentStatus.TO_REVIEW
+    was_duplicate = doc.duplicate_of is not None
     ingest.refresh_status(doc, validated=validated)
+    if validated and was_duplicate:
+        activity.log(
+            session,
+            "keep_duplicate",
+            f"« {doc.title} » conservé : ce n'est pas un doublon",
+            actor="user",
+            document=doc,
+        )
+    elif validated and was_review:
+        activity.log(session, "validate", f"« {doc.title} » validé", actor="user", document=doc)
     session.add(doc)
     ingest.sync_deadline(session, doc)
     index_document(session, doc)
+    organize.reorganize(session, doc, previous_key)
     session.commit()
     session.refresh(doc)
     return DocumentDetail.from_model(doc)
@@ -171,34 +237,82 @@ def update_document(doc_id: int, patch: DocumentUpdate, session: SessionDep) -> 
 
 @router.post("/documents/{doc_id}/reanalyze")
 def reanalyze(doc_id: int, session: SessionDep) -> DocumentDetail:
-    doc = ingest.analyze(session, _get_doc(session, doc_id))
+    doc = _get_doc(session, doc_id)
+    activity.log(
+        session,
+        "reanalyze",
+        f"Nouvelle analyse de « {doc.title} » demandée",
+        actor="user",
+        document=doc,
+    )
+    doc = ingest.analyze(session, doc)
     return DocumentDetail.from_model(doc)
+
+
+@router.get("/documents/{doc_id}/explanation")
+def explain_document(
+    doc_id: int, session: SessionDep, refresh: bool = False
+) -> explain.Explanation:
+    """Explication en langage simple et actions à mener (mise en cache sur le document)."""
+    doc = _get_doc(session, doc_id)
+    if doc.explanation and not refresh:
+        return explain.Explanation.model_validate_json(doc.explanation)
+    result = explain.explain(doc)
+    doc.explanation = result.model_dump_json()
+    session.add(doc)
+    session.commit()
+    return result
 
 
 @router.delete("/documents/{doc_id}", status_code=204)
 def delete_document(doc_id: int, session: SessionDep) -> None:
-    doc = _get_doc(session, doc_id)
-    for dl in session.exec(select(Deadline).where(Deadline.document_id == doc_id)):
-        session.delete(dl)
-    unindex_document(session, doc_id)
-    ingest.delete_file(doc)
-    session.delete(doc)
+    """Met le document à la corbeille (réversible)."""
+    ingest.trash(session, _get_doc(session, doc_id))
+    session.commit()
+
+
+@router.get("/trash")
+def list_trash(session: SessionDep) -> list[DocumentOut]:
+    docs = session.exec(select(Document).where(~ACTIVE).order_by(col(Document.deleted_at).desc()))
+    return [DocumentOut.from_model(d) for d in docs]
+
+
+@router.post("/documents/{doc_id}/restore")
+def restore_document(doc_id: int, session: SessionDep) -> DocumentDetail:
+    doc = _get_doc(session, doc_id, trashed=True)
+    if doc.deleted_at is None:
+        raise HTTPException(409, "Ce document n'est pas à la corbeille")
+    ingest.restore(session, doc)
+    session.commit()
+    session.refresh(doc)
+    return DocumentDetail.from_model(doc)
+
+
+@router.delete("/documents/{doc_id}/purge", status_code=204)
+def purge_document(doc_id: int, session: SessionDep, confirm: bool = False) -> None:
+    """Suppression définitive : exige un document à la corbeille et `confirm=true`."""
+    doc = _get_doc(session, doc_id, trashed=True)
+    if doc.deleted_at is None:
+        raise HTTPException(409, "Mettez d'abord le document à la corbeille")
+    if not confirm:
+        raise HTTPException(428, "Suppression définitive : confirmation requise (confirm=true)")
+    ingest.purge(session, doc)
     session.commit()
 
 
 @router.get("/documents/{doc_id}/file")
 def download(doc_id: int, session: SessionDep) -> Response:
-    doc = _get_doc(session, doc_id)
+    doc = _get_doc(session, doc_id, trashed=True)
     return Response(
         ingest.load_file(doc),
         media_type=doc.mime_type,
-        headers={"Content-Disposition": f'inline; filename="{_safe(doc.filename)}"'},
+        headers={"Content-Disposition": _disposition("inline", organize.standard_name(doc))},
     )
 
 
 @router.get("/documents/{doc_id}/preview")
 def preview(doc_id: int, session: SessionDep, page: int = 0) -> Response:
-    doc = _get_doc(session, doc_id)
+    doc = _get_doc(session, doc_id, trashed=True)
     png = render_page(ingest.load_file(doc), doc.mime_type, page)
     return Response(png, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
@@ -209,18 +323,39 @@ def _safe(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9.\- ]", "_", ascii_name)
 
 
+def _disposition(kind: str, name: str) -> str:
+    """En-tête Content-Disposition : repli ASCII + nom UTF-8 complet (RFC 6266)."""
+    return f"{kind}; filename=\"{_safe(name)}\"; filename*=UTF-8''{quote(name)}"
+
+
 @router.get("/export")
 def export(session: SessionDep, category: Category | None = None) -> StreamingResponse:
     """Archive ZIP des documents déchiffrés, rangés par catégorie, avec un index JSON."""
-    stmt = select(Document)
+    stmt = select(Document).where(ACTIVE)
     if category:
         stmt = stmt.where(Document.category == category)
     docs = list(session.exec(stmt))
+    activity.log(
+        session,
+        "export",
+        f"Export de {len(docs)} document{'s' if len(docs) > 1 else ''}"
+        + (f" ({category.value})" if category else ""),
+        actor="user",
+    )
+    session.commit()
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         index = []
+        used: set[str] = set()
         for doc in docs:
-            path = f"{_safe(doc.category.value)}/{doc.id}-{_safe(doc.filename)}"
+            # Rangé par catégorie puis par année, sous son nom normalisé.
+            year = (doc.issue_date or doc.due_date or doc.created_at.date()).year
+            folder = f"{doc.category.value}/{year}"
+            stem, ext = os.path.splitext(organize.standard_name(doc))
+            path, n = f"{folder}/{stem}{ext}", 2
+            while path in used:
+                path, n = f"{folder}/{stem} ({n}){ext}", n + 1
+            used.add(path)
             archive.writestr(path, ingest.load_file(doc))
             index.append({**DocumentOut.from_model(doc).model_dump(mode="json"), "fichier": path})
         archive.writestr("index.json", json.dumps(index, ensure_ascii=False, indent=2))
@@ -231,6 +366,166 @@ def export(session: SessionDep, category: Category | None = None) -> StreamingRe
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# --- Expirations et conservation ---------------------------------------------------------
+
+
+@router.get("/expirations")
+def list_expirations(session: SessionDep) -> list[ExpirationOut]:
+    """Documents à date de validité (version en vigueur uniquement), du plus urgent au moins."""
+    today = date.today()
+    docs = session.exec(
+        select(Document)
+        .where(ACTIVE, col(Document.expiry_date).is_not(None))
+        .where(col(Document.superseded_by).is_(None), col(Document.duplicate_of).is_(None))
+        .order_by(col(Document.expiry_date))
+    )
+    out = []
+    for doc in docs:
+        assert doc.expiry_date is not None
+        renew = deadlines.renew_from(doc) or doc.expiry_date
+        state = "expired" if doc.expiry_date < today else "renew" if renew <= today else "valid"
+        out.append(
+            ExpirationOut(
+                document=DocumentOut.from_model(doc),
+                expiry_date=doc.expiry_date,
+                renew_from=renew,
+                days_left=(doc.expiry_date - today).days,
+                state=state,
+            )
+        )
+    return out
+
+
+@router.get("/retention")
+def list_deletable(session: SessionDep) -> list[DocumentOut]:
+    """Documents que l'on peut trier : durée de conservation dépassée ou version remplacée."""
+    docs = session.exec(select(Document).where(ACTIVE).order_by(col(Document.issue_date)))
+    return [DocumentOut.from_model(d) for d in docs if retention.deletion_reason(d)]
+
+
+@router.post("/retention/trash")
+def trash_deletable(body: TrashRequest, session: SessionDep) -> dict[str, int]:
+    """Met à la corbeille les documents choisis par l'utilisateur, s'ils sont bien à trier."""
+    trashed = 0
+    for doc_id in body.ids:
+        doc = session.get(Document, doc_id)
+        reason = retention.deletion_reason(doc) if doc else None
+        if doc is None or reason is None:
+            continue
+        ingest.trash(session, doc, reason=reason.lower())
+        trashed += 1
+    session.commit()
+    return {"trashed": trashed}
+
+
+# --- Dossiers types ------------------------------------------------------------------------
+
+
+def _folder_kind(key: str) -> folders.FolderKind:
+    kind = folders.KINDS.get(key)
+    if kind is None:
+        raise HTTPException(404, "Dossier inconnu")
+    return kind
+
+
+@router.get("/folders")
+def list_folders(session: SessionDep) -> list[folders.FolderStatus]:
+    return [folders.evaluate(session, kind) for kind in folders.KINDS.values()]
+
+
+@router.get("/folders/{key}")
+def get_folder(key: str, session: SessionDep) -> folders.FolderStatus:
+    return folders.evaluate(session, _folder_kind(key))
+
+
+@router.get("/folders/{key}/export")
+def export_folder(key: str, session: SessionDep) -> StreamingResponse:
+    """ZIP des pièces trouvées, numérotées, avec la liste de ce qui manque encore."""
+    kind = _folder_kind(key)
+    status = folders.evaluate(session, kind)
+    buffer = io.BytesIO()
+    missing = []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for n, piece in enumerate(status.pieces, 1):
+            if piece.status != "ok":
+                extra = f" ({piece.note})" if piece.note else ""
+                optional = " [facultatif]" if piece.optional else ""
+                missing.append(f"- {piece.label}{optional}{extra}. {piece.hint}")
+            if piece.status == "outdated":
+                continue
+            for doc_id in piece.document_ids:
+                doc = session.get(Document, doc_id)
+                if doc is None:
+                    continue
+                path = f"{n:02d} {piece.label}/{organize.standard_name(doc)}"
+                archive.writestr(path, ingest.load_file(doc))
+        lines = [kind.title, "", kind.description, ""]
+        lines += ["Pièces à ajouter :", *missing] if missing else ["Dossier complet."]
+        archive.writestr("A_LIRE.txt", "\n".join(lines) + "\n")
+    activity.log(
+        session,
+        "export",
+        f"{kind.title} exporté ({status.ready}/{status.total} pièces)",
+        actor="user",
+    )
+    session.commit()
+    buffer.seek(0)
+    name = f"binder-{kind.key}-{date.today()}.zip"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- Abonnements ---------------------------------------------------------------------------
+
+
+@router.get("/subscriptions")
+def list_subscriptions(session: SessionDep) -> list[subscriptions.Subscription]:
+    return subscriptions.detect(session)
+
+
+# --- Courriers types -----------------------------------------------------------------------
+
+PROFILE_KEY = "profile"
+
+
+@router.get("/profile")
+def get_profile(session: SessionDep) -> letters.Profile:
+    return settings_store.load(session, PROFILE_KEY, letters.Profile)
+
+
+@router.put("/profile")
+def update_profile(body: letters.Profile, session: SessionDep) -> letters.Profile:
+    settings_store.save(session, PROFILE_KEY, body)
+    session.commit()
+    return body
+
+
+@router.get("/letters/kinds")
+def letter_kinds() -> dict[str, str]:
+    return letters.KINDS
+
+
+@router.post("/letters")
+def write_letter(body: LetterRequest, session: SessionDep) -> letters.Letter:
+    if body.kind not in letters.KINDS:
+        raise HTTPException(400, "Type de courrier inconnu")
+    doc = _get_doc(session, body.document_id) if body.document_id is not None else None
+    profile = settings_store.load(session, PROFILE_KEY, letters.Profile)
+    letter = letters.write(body.kind, doc, profile, body.details)
+    activity.log(
+        session,
+        "letter",
+        f"Courrier rédigé : {letter.subject.lower()} ({letter.recipient})",
+        actor="user",
+        document=doc,
+    )
+    session.commit()
+    return letter
 
 
 # --- Échéances -----------------------------------------------------------------------------
@@ -261,6 +556,13 @@ def list_deadlines(
 def create_deadline(body: DeadlineCreate, session: SessionDep) -> DeadlineOut:
     deadline = Deadline(**body.model_dump(), source="manual")
     session.add(deadline)
+    activity.log(
+        session,
+        "reminder",
+        f"Rappel « {deadline.title} » créé pour le {activity.display(deadline.due_date)}",
+        actor="user",
+        document_id=deadline.document_id,
+    )
     session.commit()
     session.refresh(deadline)
     return DeadlineOut.from_model(deadline, date.today())
@@ -271,8 +573,15 @@ def update_deadline(deadline_id: int, body: DeadlineUpdate, session: SessionDep)
     deadline = session.get(Deadline, deadline_id)
     if deadline is None:
         raise HTTPException(404, "Échéance introuvable")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    for key, value in changes.items():
         setattr(deadline, key, value)
+    if "done" in changes:
+        state = "marquée réglée" if deadline.done else "rouverte"
+        summary = f"Échéance « {deadline.title} » {state}"
+    else:
+        summary = f"Échéance « {deadline.title} » modifiée"
+    activity.log(session, "deadline", summary, actor="user", document_id=deadline.document_id)
     session.add(deadline)
     session.commit()
     session.refresh(deadline)
@@ -284,8 +593,90 @@ def delete_deadline(deadline_id: int, session: SessionDep) -> None:
     deadline = session.get(Deadline, deadline_id)
     if deadline is None:
         raise HTTPException(404, "Échéance introuvable")
+    activity.log(
+        session,
+        "deadline",
+        f"Échéance « {deadline.title} » supprimée",
+        actor="user",
+        document_id=deadline.document_id,
+    )
     session.delete(deadline)
     session.commit()
+
+
+# --- Import automatique -------------------------------------------------------------------
+
+
+def _import_settings(session: Session) -> ImportSettings:
+    folder = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
+    mail = settings_store.load(session, importers.MAIL_KEY, importers.MailConfig)
+    return ImportSettings(
+        folder=FolderSettings(**folder.model_dump()),
+        mail=MailSettings(
+            **mail.model_dump(exclude={"password"}), password_set=bool(mail.password)
+        ),
+    )
+
+
+@router.get("/import/settings")
+def get_import_settings(session: SessionDep) -> ImportSettings:
+    return _import_settings(session)
+
+
+@router.put("/import/settings")
+def update_import_settings(body: ImportSettingsIn, session: SessionDep) -> ImportSettings:
+    if body.folder is not None:
+        folder = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
+        path = body.folder.path.strip()
+        if body.folder.enabled and not Path(path).expanduser().is_dir():
+            raise HTTPException(400, f"Dossier introuvable : {path or '(vide)'}")
+        if (folder.enabled, folder.path) != (body.folder.enabled, path):
+            state = f"activé sur {path}" if body.folder.enabled else "désactivé"
+            activity.log(session, "settings", f"Dossier surveillé {state}", actor="user")
+        folder.enabled, folder.path, folder.last_error = body.folder.enabled, path, None
+        settings_store.save(session, importers.FOLDER_KEY, folder)
+    if body.mail is not None:
+        mail = settings_store.load(session, importers.MAIL_KEY, importers.MailConfig)
+        new = body.mail
+        if new.enabled and not (new.host and new.user and (new.password or mail.password)):
+            raise HTTPException(400, "Serveur, identifiant et mot de passe sont nécessaires")
+        if (mail.host, mail.user, mail.folder) != (new.host, new.user, new.folder):
+            mail.uidvalidity, mail.last_uid = None, 0
+        if mail.enabled != new.enabled:
+            state = f"activé ({new.user})" if new.enabled else "désactivé"
+            activity.log(session, "settings", f"Import depuis la boîte mail {state}", actor="user")
+        mail = mail.model_copy(update=new.model_dump(exclude={"password"}))
+        if new.password is not None:
+            mail.password = new.password
+        mail.last_error = None
+        settings_store.save(session, importers.MAIL_KEY, mail)
+    session.commit()
+    return _import_settings(session)
+
+
+@router.post("/import/run")
+def run_imports(session: SessionDep) -> dict[str, object]:
+    """Vérifie tout de suite le dossier et la boîte mail (sinon : toutes les 30 s / 5 min)."""
+    return importers.run(session)
+
+
+# --- Journal -------------------------------------------------------------------------------
+
+
+@router.get("/activity")
+def list_activity(
+    session: SessionDep,
+    document_id: int | None = None,
+    limit: Annotated[int, Query(le=500)] = 100,
+    before: int | None = None,
+) -> list[ActivityOut]:
+    stmt = select(Activity)
+    if document_id is not None:
+        stmt = stmt.where(Activity.document_id == document_id)
+    if before is not None:
+        stmt = stmt.where(col(Activity.id) < before)
+    rows = session.exec(stmt.order_by(col(Activity.id).desc()).limit(limit))
+    return [ActivityOut.from_model(a) for a in rows]
 
 
 # --- Agent ---------------------------------------------------------------------------------
@@ -293,7 +684,9 @@ def delete_deadline(deadline_id: int, session: SessionDep) -> None:
 
 @router.post("/agent/chat")
 def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
-    return loop.run(session, body.message, body.history)
+    response = loop.run(session, body.message, body.history)
+    session.commit()
+    return response
 
 
 @router.post("/demo")

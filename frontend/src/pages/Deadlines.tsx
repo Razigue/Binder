@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { CategoryIcon } from "@/components/CategoryIcon"
+import { ExpirationSection } from "@/components/Expirations"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useDeadlines, useInvalidateAll, useToggleDeadline } from "@/hooks/queries"
 import { api, type Deadline } from "@/lib/api"
@@ -33,7 +34,7 @@ export function DeadlinesPage() {
     <>
       <PageHeader
         title="Échéances"
-        subtitle="Vos prochaines échéances, déduites de vos documents."
+        subtitle="Paiements et fins de validité, déduits de vos documents."
         actions={<ReminderDialog />}
       />
       <MonthTimeline
@@ -46,6 +47,7 @@ export function DeadlinesPage() {
       {!!overdue.data?.length && (
         <DeadlineSection title="En retard" deadlines={overdue.data} />
       )}
+      <ExpirationSection />
       <DeadlineSection
         title="Prochaines échéances"
         deadlines={upcoming.data}

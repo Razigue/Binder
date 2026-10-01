@@ -25,7 +25,9 @@ Réponds uniquement en JSON avec les clés :
 - issuer : organisme émetteur ou null
 - amount : montant principal à payer ou perçu, en euros (nombre) ou null
 - issue_date : date d'émission AAAA-MM-JJ ou null
-- due_date : date limite de paiement, d'échéance ou d'expiration AAAA-MM-JJ ou null
+- due_date : date limite de paiement ou d'échéance AAAA-MM-JJ ou null
+- expiry_date : date de fin de validité (pièce d'identité, attestation, contrôle technique)
+  AAAA-MM-JJ ou null
 - reference : référence du document, du contrat ou du client, ou null
 - confidence : ta confiance entre 0 et 1
 N'invente rien : si une information est absente, mets null.
@@ -85,7 +87,7 @@ def chat(
 def extract(text: str) -> Extraction | None:
     """Extraction par le modèle local. None en cas d'échec : le pipeline garde les règles."""
     schema = Extraction.model_json_schema()
-    for key in ("missing_fields", "extractor"):
+    for key in ("missing_fields", "extractor", "doc_type"):
         schema["properties"].pop(key, None)
     prompt = EXTRACTION_PROMPT.format(
         categories=", ".join(c.value for c in Category), text=text[:MAX_CHARS]
@@ -94,6 +96,7 @@ def extract(text: str) -> Extraction | None:
         message = chat([{"role": "user", "content": prompt}], fmt=schema)
         data = json.loads(message.get("content") or "{}")
         data.pop("missing_fields", None)
+        data.pop("doc_type", None)
         # Les petits modèles recopient parfois l'étiquette : « N° client : 6012… » → « 6012… ».
         if isinstance(data.get("reference"), str) and ":" in data["reference"]:
             data["reference"] = data["reference"].split(":", 1)[1].strip() or None

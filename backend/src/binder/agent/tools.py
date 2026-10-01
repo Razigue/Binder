@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlmodel import Session, col, select
 
 from binder.models import Category, Deadline, Document, DocumentStatus
+from binder.services import activity, explain
 from binder.services.rules import MONTHS, normalize
 
 STOP_WORDS = {
@@ -138,7 +139,7 @@ def search_documents(
 ) -> ToolResult:
     """Recherche plein texte (tous les mots, sinon au moins un), filtrable par catégorie et date."""
     terms = keywords(query)
-    stmt = select(Document)
+    stmt = select(Document).where(col(Document.deleted_at).is_(None))
     if terms:
         ids = _fts(session, terms, "AND", 200) or _fts(session, terms, "OR", 200)
         if not ids:
@@ -163,7 +164,7 @@ def search_documents(
 
 def read_document(session: Session, document_id: int) -> ToolResult:
     doc = session.get(Document, document_id)
-    if doc is None:
+    if doc is None or doc.deleted_at is not None:
         return ToolResult(payload={"erreur": f"Document {document_id} introuvable"})
     return ToolResult(payload={**_doc_summary(doc), "texte": doc.text[:4000]}, documents=[doc])
 
@@ -199,8 +200,14 @@ def create_reminder(
         return ToolResult(payload={"erreur": "Date invalide, format attendu AAAA-MM-JJ"})
     reminder = Deadline(title=title, due_date=when, amount=amount, source="manual")
     session.add(reminder)
-    session.commit()
-    session.refresh(reminder)
+    activity.log(
+        session,
+        "reminder",
+        f"Rappel « {title} » créé pour le {activity.display(when)} à votre demande",
+        actor="agent",
+    )
+    # Pas de commit ici : il expirerait les documents déjà trouvés dans ce tour.
+    session.flush()
     return ToolResult(payload={"cree": _deadline_summary(reminder)}, deadlines=[reminder])
 
 
@@ -209,6 +216,7 @@ def documents_to_review(session: Session) -> ToolResult:
         session.exec(
             select(Document)
             .where(Document.status == DocumentStatus.TO_REVIEW)
+            .where(col(Document.deleted_at).is_(None))
             .order_by(col(Document.created_at).desc())
         )
     )
@@ -216,6 +224,20 @@ def documents_to_review(session: Session) -> ToolResult:
         payload={"a_verifier": [{**_doc_summary(d), "manquant": d.missing_fields} for d in docs]},
         documents=docs,
     )
+
+
+def explain_document(session: Session, document_id: int) -> ToolResult:
+    doc = session.get(Document, document_id)
+    if doc is None or doc.deleted_at is not None:
+        return ToolResult(payload={"erreur": f"Document {document_id} introuvable"})
+    if doc.explanation:
+        result = explain.Explanation.model_validate_json(doc.explanation)
+    else:
+        result = explain.explain(doc)
+        doc.explanation = result.model_dump_json()
+        session.add(doc)
+        session.flush()
+    return ToolResult(payload={"id": doc.id, **result.model_dump(mode="json")}, documents=[doc])
 
 
 def export_folder(session: Session, category: str | None = None) -> ToolResult:
@@ -233,6 +255,7 @@ TOOLS: dict[str, Any] = {
     "list_deadlines": list_deadlines,
     "create_reminder": create_reminder,
     "documents_to_review": documents_to_review,
+    "explain_document": explain_document,
     "export_folder": export_folder,
 }
 
@@ -306,6 +329,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "name": "documents_to_review",
             "description": "Liste les documents incomplets ou à vérifier.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_document",
+            "description": "Explique un courrier en langage simple et dit s'il demande une action.",
+            "parameters": {
+                "type": "object",
+                "properties": {"document_id": {"type": "integer"}},
+                "required": ["document_id"],
+            },
         },
     },
     {

@@ -5,6 +5,7 @@ uv run python scripts/evaluate.py --llm      # règles + modèle Ollama configur
 """
 
 import argparse
+import sys
 import time
 
 from binder.samples import build_samples
@@ -12,13 +13,15 @@ from binder.schemas import Extraction
 from binder.services import ingest, llm, rules
 from binder.services.text import read_document
 
-FIELDS = ["category", "amount", "issue_date", "due_date", "reference"]
+FIELDS = ["category", "amount", "issue_date", "due_date", "expiry_date", "reference"]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--llm", action="store_true")
     args = parser.parse_args()
+    # La console Windows (cp1252) ne sait pas afficher ✓ et ✗.
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     if args.llm and not llm.is_available():
         raise SystemExit("Modèle indisponible : vérifiez `ollama list` et BINDER_LLM_MODEL")
 
@@ -32,12 +35,11 @@ def main() -> None:
             result = ingest.merge(result, llm.extract(text))
         errors = []
         for field in FIELDS:
-            if getattr(result, field) == sample.expected[field]:
+            expected = sample.expected.get(field)
+            if getattr(result, field) == expected:
                 hits[field] += 1
             else:
-                errors.append(
-                    f"{field}={getattr(result, field)!r} (attendu {sample.expected[field]!r})"
-                )
+                errors.append(f"{field}={getattr(result, field)!r} (attendu {expected!r})")
         print(f"{'✓' if not errors else '✗'} {sample.filename:28} {'; '.join(errors)}")
 
     elapsed = time.perf_counter() - started

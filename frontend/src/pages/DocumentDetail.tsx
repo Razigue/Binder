@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
-  CalendarDays, Check, ChevronLeft, ChevronRight, Download, Folder, Loader2, MoreHorizontal, Pencil,
-  RefreshCw, Trash2, X,
+  CalendarDays, Check, Mail, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
+  Pencil, RefreshCw, Trash2, X,
 } from "lucide-react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,10 @@ import {
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { StatusBadge } from "@/components/DocumentList"
 import { LocalBadge } from "@/components/StatusDot"
-import { useDeleteDocument, useDocument, useInvalidateAll, useUpdateDocument } from "@/hooks/queries"
+import { ActivityList } from "@/components/ActivityList"
+import {
+  useActivity, useDeleteDocument, useDocument, useInvalidateAll, useRestoreDocument, useUpdateDocument,
+} from "@/hooks/queries"
 import { api, CATEGORIES, fileUrl, previewUrl, type Category, type DocDetail, type DocPatch } from "@/lib/api"
 import { FIELD_LABELS, formatAmount, formatDate, parseDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -86,7 +89,7 @@ function Preview({ doc }: { doc: DocDetail }) {
   )
 }
 
-type Draft = Required<Omit<DocPatch, "validated">>
+type Draft = Required<Omit<DocPatch, "validated" | "keep_forever">>
 
 function toDraft(doc: DocDetail): Draft {
   return {
@@ -96,7 +99,9 @@ function toDraft(doc: DocDetail): Draft {
     amount: doc.amount,
     issue_date: doc.issue_date,
     due_date: doc.due_date,
+    expiry_date: doc.expiry_date,
     reference: doc.reference,
+    doc_type: doc.doc_type,
   }
 }
 
@@ -105,6 +110,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(doc))
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
+  const restore = useRestoreDocument()
   const invalidate = useInvalidateAll()
   const reanalyze = useMutation({ mutationFn: () => api.reanalyze(doc.id), onSuccess: invalidate })
   const navigate = useNavigate()
@@ -133,8 +139,10 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
     { key: "amount", label: FIELD_LABELS.amount, type: "number", display: formatAmount(doc.amount) },
     { key: "issue_date", label: FIELD_LABELS.issue_date, type: "date", display: formatDate(doc.issue_date) },
     { key: "due_date", label: FIELD_LABELS.due_date, type: "date", display: formatDate(doc.due_date) },
+    { key: "expiry_date", label: FIELD_LABELS.expiry_date, type: "date", display: formatDate(doc.expiry_date) },
     { key: "reference", label: FIELD_LABELS.reference, type: "text", display: doc.reference ?? "—" },
     { key: "issuer", label: "Émetteur", type: "text", display: doc.issuer ?? "—" },
+    { key: "doc_type", label: "Type", type: "text", display: doc.doc_type ?? "—" },
   ]
   const year = (doc.issue_date ?? doc.due_date ?? doc.created_at).slice(0, 4)
 
@@ -173,27 +181,37 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
             <DropdownMenuItem onClick={() => reanalyze.mutate()}>
               <RefreshCw /> Relancer l'analyse
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate(`/courriers?document=${doc.id}`)}>
+              <Mail /> Rédiger un courrier
+            </DropdownMenuItem>
             <DropdownMenuItem render={<a href={fileUrl(doc.id)} target="_blank" rel="noreferrer" />}>
               <Download /> Ouvrir l'original
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => {
-                if (!confirm(`Supprimer « ${doc.title} » ? Cette action est définitive.`)) return
+              onClick={() =>
                 remove.mutate(doc.id, {
                   onSuccess: () => {
-                    toast.success("Document supprimé")
+                    toast.success("Document mis à la corbeille", {
+                      action: {
+                        label: "Annuler",
+                        onClick: () => restore.mutate(doc.id, { onSuccess: () => navigate(`/documents/${doc.id}`) }),
+                      },
+                    })
                     navigate("/documents")
                   },
                 })
-              }}
+              }
             >
-              <Trash2 /> Supprimer
+              <Trash2 /> Mettre à la corbeille
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <OrganizeNotices doc={doc} />
+      {!processing && <InShort doc={doc} />}
 
       <div className="p-5">
         <h2 className="mb-2 font-semibold">Informations extraites</h2>
@@ -262,10 +280,13 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           </p>
         </div>
 
+        <RetentionInfo doc={doc} />
+
         <p className="mt-5 flex items-center gap-2 text-sm text-primary">
           <Folder className="size-4" />
           <Link to={`/documents?category=${encodeURIComponent(doc.category)}`} className="hover:underline">{doc.category}</Link>
           <ChevronRight className="size-3" /> {year}
+          <ChevronRight className="size-3" /> <span className="truncate text-muted-foreground" title="Nom utilisé au téléchargement et à l'export">{doc.standard_name}</span>
         </p>
       </div>
 
@@ -292,7 +313,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
                 <Check /> Valider
               </Button>
             )}
-            <Button variant="outline" render={<a href={fileUrl(doc.id)} download={doc.filename} />} nativeButton={false}>
+            <Button variant="outline" render={<a href={fileUrl(doc.id)} download={doc.standard_name} />} nativeButton={false}>
               <Download /> Exporter
             </Button>
           </>
@@ -305,6 +326,193 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-muted/50 p-3 font-sans text-xs whitespace-pre-wrap">{doc.text}</pre>
         </details>
       )}
+      <DocumentHistory id={doc.id} />
     </Card>
+  )
+}
+
+function DocumentHistory({ id }: { id: number }) {
+  const history = useActivity({ document_id: id })
+  return (
+    <details className="border-t text-sm">
+      <summary className="cursor-pointer px-5 py-3 text-muted-foreground">
+        Historique{history.data ? ` (${history.data.length})` : ""}
+      </summary>
+      <div className="border-t">
+        <ActivityList entries={history.data} loading={history.isPending} linkDocuments={false} />
+      </div>
+    </details>
+  )
+}
+
+/** Doublon probable ou ancienne version : Binder signale, vous décidez. */
+function OrganizeNotices({ doc }: { doc: DocDetail }) {
+  const original = useDocument(doc.duplicate_of)
+  const latest = useDocument(doc.superseded_by)
+  const update = useUpdateDocument(doc.id)
+  const remove = useDeleteDocument()
+  const restore = useRestoreDocument()
+  const navigate = useNavigate()
+
+  if (doc.duplicate_of !== null)
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-b bg-amber-50/70 px-5 py-3 text-sm">
+        <Copy className="size-4 shrink-0 text-amber-600" />
+        <p className="min-w-0 flex-1">
+          Doublon probable de{" "}
+          <Link to={`/documents/${doc.duplicate_of}`} className="font-medium underline">
+            « {original.data?.title ?? "…"} »
+          </Link>
+          . Son échéance n'est pas comptée deux fois.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={update.isPending}
+          onClick={() => update.mutate({ validated: true }, { onSuccess: () => toast.success("Les deux documents sont conservés") })}
+        >
+          Garder les deux
+        </Button>
+        <Button
+          size="sm"
+          disabled={remove.isPending}
+          onClick={() =>
+            remove.mutate(doc.id, {
+              onSuccess: () => {
+                toast.success("Doublon mis à la corbeille", {
+                  action: { label: "Annuler", onClick: () => restore.mutate(doc.id) },
+                })
+                navigate(`/documents/${doc.duplicate_of}`)
+              },
+            })
+          }
+        >
+          <Trash2 /> Mettre le doublon à la corbeille
+        </Button>
+      </div>
+    )
+
+  if (doc.superseded_by !== null)
+    return (
+      <div className="flex items-center gap-3 border-b bg-muted/60 px-5 py-3 text-sm">
+        <History className="size-4 shrink-0 text-muted-foreground" />
+        <p>
+          Ancienne version. La plus récente est{" "}
+          <Link to={`/documents/${doc.superseded_by}`} className="font-medium underline">
+            « {latest.data?.title ?? "…"} »
+          </Link>
+          {latest.data?.issue_date ? ` du ${formatDate(latest.data.issue_date)}` : ""}.
+        </p>
+      </div>
+    )
+
+  return null
+}
+
+function RetentionInfo({ doc }: { doc: DocDetail }) {
+  const update = useUpdateDocument(doc.id)
+  if (!doc.retention_rule) return null
+  const setKeep = (keep_forever: boolean) =>
+    update.mutate({ keep_forever }, { onSuccess: () => toast.success(keep_forever ? "Document conservé sans limite" : "Durée conseillée rétablie") })
+  return (
+    <div className="mt-5 rounded-lg border px-4 py-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">Conservation</p>
+          <p className="text-muted-foreground">
+            {doc.retention_rule}
+            {doc.keep_until && !doc.keep_forever ? ` · jusqu'au ${formatDate(doc.keep_until)}` : ""}
+          </p>
+          {doc.renew_from && !doc.superseded_by && (
+            <p className="mt-1 text-muted-foreground">À renouveler à partir du {formatDate(doc.renew_from)}</p>
+          )}
+        </div>
+        {doc.keep_forever ? (
+          <Button variant="ghost" size="sm" onClick={() => setKeep(false)} disabled={update.isPending}>
+            Rétablir
+          </Button>
+        ) : (
+          doc.deletable_reason && (
+            <Button variant="outline" size="sm" onClick={() => setKeep(true)} disabled={update.isPending}>
+              Garder
+            </Button>
+          )
+        )}
+      </div>
+      {doc.deletable_reason && (
+        <p className="mt-2 text-amber-700">
+          {doc.deletable_reason}. <Link to="/tri" className="underline">Voir les documents à trier</Link>
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Le courrier expliqué simplement, et ce qu'il y a à faire. */
+function InShort({ doc }: { doc: DocDetail }) {
+  const qc = useQueryClient()
+  const key = ["explanation", doc.id, doc.amount, doc.due_date, doc.expiry_date, doc.title]
+  const ex = useQuery({ queryKey: key, queryFn: () => api.explanation(doc.id), staleTime: Infinity })
+  const refresh = useMutation({
+    mutationFn: () => api.explanation(doc.id, true),
+    onSuccess: (data) => qc.setQueryData(key, data),
+  })
+  return (
+    <div className="border-b px-5 py-4 text-sm">
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="font-semibold">En bref</h2>
+        {ex.data &&
+          (ex.data.action_required ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Action requise</span>
+          ) : (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Rien à faire</span>
+          ))}
+        {ex.data && (
+          <button
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            className="ml-auto text-muted-foreground hover:text-foreground"
+            aria-label="Réexpliquer"
+            title="Réexpliquer"
+          >
+            <RefreshCw className={cn("size-3.5", refresh.isPending && "animate-spin")} />
+          </button>
+        )}
+      </div>
+      {ex.isPending ? (
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Lecture du courrier…
+        </p>
+      ) : ex.isError ? (
+        <p className="text-muted-foreground">Explication indisponible.</p>
+      ) : (
+        <>
+          <p className="leading-relaxed">{ex.data.summary}</p>
+          {ex.data.actions.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {ex.data.actions.map((a) => (
+                <li key={a.label} className="flex items-start gap-2 font-medium">
+                  <Check className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                  <span>
+                    {a.label}
+                    {a.due_date && <span className="font-normal text-muted-foreground"> · avant le {formatDate(a.due_date)}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {ex.data.key_points.length > 0 && (
+            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
+              {ex.data.key_points.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {ex.data.engine === "llm" ? "Rédigé par le modèle local" : "Rédigé par les règles locales"}
+          </p>
+        </>
+      )}
+    </div>
   )
 }

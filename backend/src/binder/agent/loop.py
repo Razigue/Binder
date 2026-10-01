@@ -17,7 +17,7 @@ from sqlmodel import Session
 from binder.agent import tools
 from binder.models import Category, Deadline, Document
 from binder.schemas import ChatMessage, ChatResponse, DeadlineOut, DocumentOut, ToolCallTrace
-from binder.services import llm
+from binder.services import activity, llm
 from binder.services.rules import MONTHS, find_dates, normalize
 
 log = logging.getLogger(__name__)
@@ -28,7 +28,12 @@ SYSTEM_PROMPT = """Tu es l'agent de Binder, un coffre-fort administratif 100 % l
 Tu aides l'utilisateur à retrouver ses documents, suivre ses échéances et créer des rappels.
 Nous sommes le {today}. Utilise toujours les outils pour obtenir des faits ; n'invente jamais
 un document, un montant ou une date. Réponds en français, en une à trois phrases, sans répéter
-la liste détaillée : l'interface affiche déjà les documents et échéances trouvés."""
+la liste détaillée : l'interface affiche déjà les documents et échéances trouvés.
+Cite ta source après chaque information tirée d'un document, avec son identifiant entre
+crochets : « La taxe foncière est de 1 240 € [#3]. » Ne cite que des documents renvoyés par
+les outils. Pour expliquer un courrier ou dire s'il faut agir, utilise explain_document."""
+
+CITATION = re.compile(r"\s?\[#(\d+)\]")
 
 
 class _Collector:
@@ -56,8 +61,21 @@ class _Collector:
 
     def response(self, answer: str, engine: str) -> ChatResponse:
         today = date.today()
+        # Une citation vers un document que les outils n'ont pas renvoyé est retirée.
+        cited: list[int] = []
+
+        def keep(m: re.Match[str]) -> str:
+            doc_id = int(m[1])
+            if doc_id not in self.documents:
+                return ""
+            if doc_id not in cited:
+                cited.append(doc_id)
+            return m[0]
+
+        answer = CITATION.sub(keep, answer)
         return ChatResponse(
             answer=answer,
+            citations=cited,
             documents=[DocumentOut.from_model(d) for d in self.documents.values()],
             deadlines=[DeadlineOut.from_model(d, today) for d in self.deadlines.values()],
             tool_calls=self.calls,
@@ -128,6 +146,59 @@ def _category_in(norm: str) -> Category | None:
     return None
 
 
+# (motif de la question, champ du document, libellé)
+QUESTION_FIELDS: list[tuple[str, str, str]] = [
+    (r"\bexpire|valable|validite", "expiry_date", "Fin de validité"),
+    (r"\bcombien|montant|\bprix\b|\bcout", "amount", "Montant"),
+    (r"\bquand\b|date limite|avant quand|payer avant", "due_date", "Échéance"),
+    (r"reference|\bnumero\b", "reference", "Référence"),
+]
+EXPLAIN = (
+    r"expliqu|que dois-je faire|dois-je (?:faire|payer|repondre|agir)|c'est quoi"
+    r"|qu'est-ce que|ca veut dire|je dois faire|faut-il"
+)
+QUESTION_WORDS = {
+    "combien", "montant", "prix", "cout", "coute", "quand", "date", "limite", "payer",
+    "paye", "reference", "numero", "expire", "valable", "validite", "fin", "explique",
+    "expliquer", "explication", "dois", "doi", "faire", "faut", "il", "quoi", "est", "veut",
+    "dire", "courrier", "lettre", "ca", "c", "qu", "agir", "repondre", "ai", "mon", "ma",
+    "quelque", "chose", "rien",
+}  # fmt: skip
+
+
+def _answer_question(session: Session, collector: _Collector, message: str) -> ChatResponse | None:
+    """Question sur un document précis : répond avec le champ demandé et cite la source."""
+    norm = normalize(message)
+    explain = re.search(EXPLAIN, norm)
+    field = next((f for f in QUESTION_FIELDS if re.search(f[0], norm)), None)
+    if not explain and not field:
+        return None
+    terms = [t for t in tools.keywords(message) if t not in QUESTION_WORDS]
+    if not terms:
+        return None
+    result = collector.run(session, "search_documents", {"query": " ".join(terms), "limit": 3})
+    if not result.documents:
+        return None
+    doc = result.documents[0]
+    if explain:
+        payload = collector.run(session, "explain_document", {"document_id": doc.id}).payload
+        todo = "; ".join(
+            a["label"]
+            + (f" avant le {date.fromisoformat(a['due_date']):%d/%m/%Y}" if a["due_date"] else "")
+            for a in payload["actions"]
+        )
+        answer = f"{payload['summary']} [#{doc.id}]" + (f" À faire : {todo}." if todo else "")
+        return collector.response(answer, "rules")
+    assert field is not None
+    _, name, label = field
+    value = getattr(doc, name)
+    if value in (None, ""):
+        answer = f"{label} : je ne l'ai pas trouvé dans « {doc.title} » [#{doc.id}]."
+    else:
+        answer = f"{label} de « {doc.title} » : {activity.display(value)} [#{doc.id}]."
+    return collector.response(answer, "rules")
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'s' if n > 1 else ''}"
 
@@ -155,6 +226,10 @@ def _run_rules(session: Session, message: str) -> ChatResponse:
         return collector.response(
             f"C'est noté : rappel « {title} » le {dates[0].strftime('%d/%m/%Y')}.", "rules"
         )
+
+    answered = _answer_question(session, collector, message)
+    if answered:
+        return answered
 
     if re.search(r"echeance|a payer|arrive|bientot|expire|date limite", norm):
         month = _month_range(norm, today)

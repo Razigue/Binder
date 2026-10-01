@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import sqlcipher3
-from sqlalchemy import Engine, text
+from sqlalchemy import Column, Engine, text
 from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -40,8 +40,51 @@ def reset_engine() -> None:
     security.reset_caches()
 
 
+def _column_default(column: Column[Any]) -> str:
+    """Valeur par défaut SQL d'une colonne ajoutée à une table existante."""
+    default = getattr(column.default, "arg", None)
+    if isinstance(default, bool):
+        return "1" if default else "0"
+    if isinstance(default, int | float):
+        return str(default)
+    if isinstance(default, str):
+        return "'" + default.replace("'", "''") + "'"
+    if column.nullable:
+        return "NULL"
+    python_type = column.type.python_type
+    return "0" if python_type in (int, float, bool) else "''"
+
+
+def migrate(engine: Engine) -> None:
+    """Ajoute les colonnes apparues depuis la création de la base (pas de suppression ni de
+    renommage : les bases des versions précédentes restent lisibles)."""
+    with engine.begin() as conn:
+        for table in SQLModel.metadata.sorted_tables:
+            existing = {row[1] for row in conn.execute(text(f'PRAGMA table_info("{table.name}")'))}
+            if not existing:
+                continue
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                ddl = column.type.compile(dialect=conn.dialect)
+                conn.execute(
+                    text(
+                        f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {ddl} '
+                        f"DEFAULT {_column_default(column)}"
+                    )
+                )
+                if column.index:
+                    conn.execute(
+                        text(
+                            f'CREATE INDEX IF NOT EXISTS "ix_{table.name}_{column.name}" '
+                            f'ON "{table.name}" ("{column.name}")'
+                        )
+                    )
+
+
 def init_db(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
+    migrate(engine)
     with engine.begin() as conn:
         conn.execute(
             text(

@@ -15,6 +15,7 @@ export function StatusBadge({ doc }: { doc: Doc }) {
     )
   if (doc.status === "to_review")
     return <Badge className="bg-amber-50 text-amber-700">{missingLabel(doc.missing_fields)}</Badge>
+  if (doc.superseded_by !== null) return <Badge variant="secondary">Ancienne version</Badge>
   return <Badge className="bg-emerald-50 text-emerald-700">Classé</Badge>
 }
 
