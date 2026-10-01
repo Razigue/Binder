@@ -135,8 +135,9 @@ i18n catalogs; never all-caps outside the sidebar overline.
 
 ## Layout
 
-Fixed 240px sidebar (`md`+) with grouped nav (essentials, Tracking, Paperwork, Upkeep, Settings
-pinned bottom); below `md` it becomes a horizontal scrolling tab strip. Content in a centred
+Fixed 240px sidebar (`md`+): Today, then the six life areas (with a count of cards that need
+attention), "Ask Binder", and small Mailbox / History / Trash links pinned bottom; below `md` it
+becomes a horizontal scrolling tab strip. An ask bar (Ctrl K) is fixed at the bottom of every page. Content in a centred
 `max-w-6xl` column, `px-4 py-6` mobile, `px-10 py-8` desktop. Page header then content, `mb-7`.
 Grids: `sm:grid-cols-3` stats, `lg:grid-cols-2` sections, gaps 16-24px. Lists are full-width rows
 (`px-5 py-3`) divided by hairlines inside a card.
@@ -168,7 +169,11 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
   turns red or amber only when it is non-zero and calls for action.
 - **Badges:** 20px pill, 12px/500.
 - **Navigation:** 14px/500 rows with 16px Lucide icon, `gap-3`; active = `sidebar-accent` fill.
-- **Agent:** opened from the nav as a side sheet, not a route.
+- **Agent:** opened from the nav or the ask bar as a side sheet, not a route.
+- **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
+  (the urgency in words), amount right-aligned, then its actions as buttons: one primary,
+  outline for the others, ghost for dismiss.
+- **Undo:** every change ends with a Sonner toast carrying "Undo".
 - **Toasts:** Sonner. Destructive confirmations: `ConfirmDialog`.
 
 ## Do's and Don'ts

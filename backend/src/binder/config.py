@@ -47,6 +47,15 @@ class Settings(BaseSettings):
 
     # Background automatic import (watched folder, mailbox).
     auto_import: bool = True
+    # Local AI with no steps: Ollama installed and started, model downloaded at first launch.
+    auto_setup: bool = True
+    ollama_release_url: str = "https://api.github.com/repos/ollama/ollama/releases/latest"
+    # System notifications (deadlines, anomalies, weekly briefing).
+    notifications: bool = True
+    # Daily encrypted backup, restorable elsewhere with the recovery code.
+    auto_backup: bool = True
+    # Default: Documents/Binder backups (or DATA_DIR/backups without a Documents folder).
+    backup_dir: Path | None = None
 
     # Desktop app update at launch, from GitHub releases.
     auto_update: bool = True

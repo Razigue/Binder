@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from binder import i18n
-from binder.db import get_engine
 from binder.models import Document
 from binder.services import activity, ingest, settings_store
 
@@ -91,7 +90,13 @@ class MailConfig(BaseModel):
 
 
 def import_bytes(
-    session: Session, data: bytes, filename: str, *, actor: str, origin: i18n.Msg
+    session: Session,
+    data: bytes,
+    filename: str,
+    *,
+    actor: str,
+    origin: i18n.Msg,
+    batch: str | None = None,
 ) -> Document | None:
     """Imports and analyses a file. None if it is unsupported or already known."""
     try:
@@ -101,7 +106,9 @@ def import_bytes(
     digest = hashlib.sha256(data).hexdigest()
     if session.exec(select(Document.id).where(Document.sha256 == digest)).first() is not None:
         return None
-    doc, created = ingest.store(session, data, filename, mime, actor=actor, origin=origin)
+    doc, created = ingest.store(
+        session, data, filename, mime, actor=actor, origin=origin, batch=batch
+    )
     if not created:
         return None
     try:
@@ -123,6 +130,7 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
         raise FileNotFoundError(T("folder_not_found", path=folder))
     imported = []
     now = time.time()
+    batch = ingest.new_batch("folder")
     for path in sorted(folder.rglob("*")):
         if path.suffix.lower() not in EXTENSIONS or any(p.startswith(".") for p in path.parts):
             continue
@@ -139,6 +147,7 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
             path.name,
             actor="watcher",
             origin=T.msg("from_folder", path=path.relative_to(folder).as_posix()),
+            batch=batch,
         )
         _seen[path] = key
         if doc:
@@ -193,6 +202,7 @@ def fetch_mail(
 ) -> list[Document]:
     """Imports the attachments of new messages. Updates `cfg.last_uid`."""
     imported: list[Document] = []
+    batch = ingest.new_batch("mail")
     imap: Any = (factory or _connect)(cfg.host, cfg.port)
     try:
         imap.login(cfg.user, cfg.password)
@@ -216,7 +226,9 @@ def fetch_mail(
             if raw:
                 origin, files = attachments(raw)
                 for name, content in files:
-                    doc = import_bytes(session, content, name, actor="mail", origin=origin)
+                    doc = import_bytes(
+                        session, content, name, actor="mail", origin=origin, batch=batch
+                    )
                     if doc:
                         imported.append(doc)
             cfg.last_uid = uid
@@ -269,30 +281,3 @@ def _run_source[C: FolderConfig | MailConfig](
     settings_store.save(session, key, fresh)
     session.commit()
     return {"imported": len(docs), "error": error}
-
-
-class Scheduler:
-    """Background thread: folder every 30 s, mailbox every 5 min."""
-
-    def __init__(self) -> None:
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, name="binder-import", daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=5)
-
-    def _loop(self) -> None:
-        last_mail = 0.0
-        while not self._stop.wait(FOLDER_INTERVAL):
-            check_mail = time.monotonic() - last_mail >= MAIL_INTERVAL
-            try:
-                with Session(get_engine()) as session:
-                    run(session, mail=check_mail)
-            except Exception:
-                log.exception("Automatic import")
-            if check_mail:
-                last_mail = time.monotonic()

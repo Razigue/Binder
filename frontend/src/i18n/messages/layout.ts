@@ -1,45 +1,25 @@
 import { defineMessages } from "@/i18n/core"
 
-// App shell: sidebar, mobile navigation.
+// App shell: sidebar, mobile navigation, the ask bar.
 export const layout = defineMessages({
   en: {
     navigation: "Navigation",
-
-    "section.tracking": "Tracking",
-    "section.paperwork": "Paperwork",
-    "section.upkeep": "Upkeep",
-
-    "nav.home": "Home",
-    "nav.documents": "Documents",
-    "nav.search": "Search",
-    "nav.agent": "Agent",
-    "nav.deadlines": "Deadlines",
-    "nav.subscriptions": "Subscriptions",
-    "nav.folders": "Folders",
-    "nav.letters": "Letters",
-    "nav.sorting": "Sorting",
+    "nav.today": "Today",
+    "nav.ask": "Ask Binder",
+    "nav.mail": "Mailbox",
     "nav.history": "History",
     "nav.trash": "Trash",
-    "nav.settings": "Settings",
+    askPlaceholder: "Ask Binder anything about your papers…",
+    askShortcut: "Ctrl K",
   },
   fr: {
     navigation: "Navigation",
-
-    "section.tracking": "Suivi",
-    "section.paperwork": "Démarches",
-    "section.upkeep": "Entretien",
-
-    "nav.home": "Accueil",
-    "nav.documents": "Documents",
-    "nav.search": "Recherche",
-    "nav.agent": "Agent",
-    "nav.deadlines": "Échéances",
-    "nav.subscriptions": "Abonnements",
-    "nav.folders": "Dossiers",
-    "nav.letters": "Courriers",
-    "nav.sorting": "Tri",
+    "nav.today": "Aujourd'hui",
+    "nav.ask": "Demander à Binder",
+    "nav.mail": "Boîte mail",
     "nav.history": "Historique",
     "nav.trash": "Corbeille",
-    "nav.settings": "Réglages",
+    askPlaceholder: "Demandez à Binder ce que vous voulez sur vos papiers…",
+    askShortcut: "Ctrl K",
   },
 })

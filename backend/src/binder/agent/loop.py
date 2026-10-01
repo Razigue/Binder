@@ -45,7 +45,10 @@ passages often answer; otherwise read_document{vision}.
 yourself from tool figures only.
 - Change data (reminder, paid, correction, validation, trash) only when the user asks, then \
 say what you did. A reminder needs no document: create it with the date given (next \
-occurrence of that date). For a letter, call draft_letter: the app shows it, do not rewrite it.
+occurrence of that date). For any letter, call write_letter with what it must obtain: the \
+app shows it with its PDF, do not rewrite it. For a file of documents (rental, CAF, nursery…), \
+call prepare_folder. Problems (billed twice, overpayment, price rise) and missing documents: \
+list_alerts.
 - Ask the user a question only when the request itself is ambiguous, never for what a tool \
 can find.
 - French paperwork: net salary is "net à payer" (not "net imposable"); a document's `amount` \
@@ -249,6 +252,17 @@ T = i18n.catalog(
             "en": "I couldn't find an unpaid deadline for that document.",
             "fr": "Je n'ai pas trouvé d'échéance à régler pour ce document.",
         },
+        "alerts_none": {
+            "en": "Nothing unusual, and no document seems to be missing.",
+            "fr": "Rien d'anormal, et aucun document ne semble manquer.",
+        },
+        "alerts_found": {"en": "To check: {items}.", "fr": "À vérifier : {items}."},
+        "missing_found": {"en": " Missing: {items}.", "fr": " Il manque : {items}."},
+        "undone": {"en": "Done: I undid the last change.", "fr": "C'est annulé."},
+        "nothing_to_undo": {
+            "en": "There is no recent change to undo.",
+            "fr": "Il n'y a pas de modification récente à annuler.",
+        },
     },
 )
 
@@ -260,6 +274,7 @@ class _Collector:
         self.earlier: dict[int, Document] = {}
         self.deadlines: dict[int, Deadline] = {}
         self.letters: list[letters.Letter] = []
+        self.folders: list[dict[str, Any]] = []
         self.calls: list[ToolCallTrace] = []
         self.changed = False
         self.emit = emit or (lambda _: None)
@@ -279,6 +294,7 @@ class _Collector:
             if dl.id is not None:
                 self.deadlines[dl.id] = dl
         self.letters += result.letters
+        self.folders += [f.model_dump(mode="json") for f in result.packs]
         self.changed = self.changed or result.changed
         return result
 
@@ -353,6 +369,7 @@ class _Collector:
             documents=[DocumentOut.from_model(d) for d in shown.values()],
             deadlines=[DeadlineOut.from_model(d, today) for d in self.deadlines.values()],
             letters=self.letters,
+            folders=self.folders,
             tool_calls=self.calls,
             changed=self.changed,
             engine=engine,
@@ -662,6 +679,18 @@ FOLDER_KINDS = [
     (r"\bcaf\b|aide au logement|\bapl\b|housing benefit", "caf"),
 ]
 FOLDER = r"dossier|pieces?|manque|application|documents? (?:do i )?need|what do i need"
+# "Prépare le dossier pour la crèche": a file for any purpose.
+PREPARE = (
+    r"(?:prepare|constitue|monte|rassemble|put together|assemble|make)\b.{0,30}"
+    r"\b(?:dossier|file|pack)"
+)
+ALERTS = (
+    r"anomal|deux fois|double|trop[- ]percu|regularisation|bizarre|anormal|probleme|souci"
+    r"|twice|overpa|catch[- ]up|anything (?:wrong|odd|unusual)|manque[- ]t[- ]il|missing"
+)
+UNDO = r"\bannule|\bdefais|\bundo\b|revert|cancel (?:that|what you did|it)\b"
+# Words before what a letter must obtain: "écris à la CAF pour …", "write to EDF to …".
+LETTER_PURPOSE = re.compile(r"^.*?\b(?:pour|afin de|to ask|in order to|asking|to)\s+", re.I)
 SUBSCRIPTIONS = r"abonnement|recurrent|subscription|recurring|hausse|augment|price rise|increase"
 RENEW = r"renouvel|perime|plus valable|papiers|renew|expired|still valid"
 SORT_OUT = r"jeter|trier|faire le tri|me debarrasser|throw (?:away|out)|sort out|get rid"
@@ -734,18 +763,25 @@ def _router_intents(session: Session, collector: _Collector, message: str, norm:
         if "error" in result.payload:
             return T("paid_not_found")
         return T("paid_done", title=doc.title) + f" [#{doc.id}]"
+    if re.search(UNDO, norm):
+        result = collector.run(session, "undo_last_action", {})
+        return T("nothing_to_undo") if "error" in result.payload else T("undone")
     if re.search(LETTER, norm):
-        kind = next((k for pattern, k in LETTER_KINDS if re.search(pattern, norm)), "request")
+        kind = next((k for pattern, k in LETTER_KINDS if re.search(pattern, norm)), None)
         doc = _document_named(session, collector, message, LETTER_WORDS)
-        args: dict[str, Any] = {"kind": kind}
+        purpose = LETTER_PURPOSE.sub("", message, count=1).strip(" .?!") or message
+        args: dict[str, Any] = {"purpose": purpose}
+        if kind:
+            args["kind"] = kind
         if doc is not None:
             args["document_id"] = doc.id
-        letter = collector.run(session, "draft_letter", args).letters[0]
+        letter = collector.run(session, "write_letter", args).letters[0]
         cite = f" [#{doc.id}]" if doc is not None else ""
         return T("letter_ready", subject=letter.subject, recipient=letter.recipient) + cite
     pack = next((k for pattern, k in FOLDER_KINDS if re.search(pattern, norm)), None)
-    if pack and re.search(FOLDER, norm):
-        payload = collector.run(session, "check_folder", {"kind": pack}).payload
+    custom = re.search(PREPARE, norm)
+    if (pack and re.search(FOLDER, norm)) or custom:
+        payload = collector.run(session, "prepare_folder", {"purpose": pack or message}).payload
         answer = T(
             "folder_status",
             title=payload["title"],
@@ -763,6 +799,16 @@ def _router_intents(session: Session, collector: _Collector, message: str, norm:
         if renew:
             answer += T("folder_renew", pieces=sep.join(renew))
         return answer + T("folder_link", link=payload["export_link"])
+    if re.search(ALERTS, norm):
+        payload = collector.run(session, "list_alerts", {}).payload
+        found = [a["title"] for a in payload["anomalies"]]
+        absent = [m["title"] for m in payload["missing_documents"]]
+        if not found and not absent:
+            return T("alerts_none")
+        answer = T("alerts_found", items=sep.join(found)) if found else ""
+        if absent:
+            answer += T("missing_found", items=sep.join(absent))
+        return answer.strip()
     if re.search(SORT_OUT, norm):
         payload = collector.run(session, "documents_to_sort_out", {}).payload
         found = payload["can_be_thrown_away"]

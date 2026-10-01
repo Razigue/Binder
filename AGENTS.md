@@ -41,7 +41,8 @@ shell-specific calls, UTF-8 I/O).
 ## Rules
 
 - **Local only.** Never add network calls that send document data off the machine. Ollama
-  (`localhost`) and the update check are the only outbound traffic.
+  (`localhost`), the update check and the first-run download of Ollama and its models are the
+  only outbound traffic.
 - **AI first, rules as fallback.** Binder is sold as an AI agent; never present the no-model mode
   as a feature in user-facing text. Every feature still needs a rules path so demos and tests run
   with `BINDER_LLM_ENABLED=false`.

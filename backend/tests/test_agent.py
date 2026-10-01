@@ -165,14 +165,25 @@ def test_agent_actions_are_logged_and_reversible(library: dict[str, int], sessio
 def test_letter_and_folder(library: dict[str, int], session: Session) -> None:
     letter = tools.call(
         session,
-        "draft_letter",
-        {"kind": "termination", "document_id": library["facture-orange.pdf"]},
+        "write_letter",
+        {
+            "purpose": "cancel my subscription",
+            "kind": "termination",
+            "document_id": library["facture-orange.pdf"],
+        },
     )
-    assert letter.letters and "Orange" in letter.letters[0].body
-    assert letter.payload["note"].startswith("The user's name")
-    folder = tools.call(session, "check_folder", {"kind": "rental"})
+    body = letter.letters[0].body
+    assert letter.letters and "Orange" in body and letter.changed
+    # The sender comes from the documents: the ID card's holder, the address on the certificates.
+    assert "Camille Martin" in body and "12 rue des Tilleuls" in body
+    assert letter.letters[0].id is not None
+    folder = tools.call(session, "prepare_folder", {"purpose": "rental"})
     assert folder.payload["export_link"] == "/api/folders/rental/export"
     assert {p["status"] for p in folder.payload["pieces"]} & {"missing", "ok"}
+    # Any purpose: a pack put together from the documents, saved for its export link.
+    custom = tools.call(session, "prepare_folder", {"purpose": "inscription en crèche"})
+    assert custom.payload["export_link"].startswith("/api/folders/custom-")
+    assert custom.packs and custom.packs[0].pieces
 
 
 def test_view_document_shows_the_page(library: dict[str, int], session: Session) -> None:
@@ -300,7 +311,7 @@ def test_earlier_documents_stay_citable(
 def test_stream_endpoint(client: TestClient, library: dict[str, int], model: FakeModel) -> None:
     doc_id = library["facture-orange.pdf"]
     model.replies = [
-        call("draft_letter", kind="termination", document_id=doc_id),
+        call("write_letter", purpose="cancel", kind="termination", document_id=doc_id),
         answer(f"Here is your letter [#{doc_id}]."),
     ]
     with client.stream("POST", "/api/agent/chat/stream", json={"message": "Cancel Orange"}) as r:
@@ -308,8 +319,8 @@ def test_stream_endpoint(client: TestClient, library: dict[str, int], model: Fak
         events = [json.loads(line) for line in r.iter_lines() if line]
     assert events[0] == {
         "type": "tool",
-        "name": "draft_letter",
-        "arguments": {"kind": "termination", "document_id": doc_id},
+        "name": "write_letter",
+        "arguments": {"purpose": "cancel", "kind": "termination", "document_id": doc_id},
     }
     assert "".join(e["text"] for e in events if e["type"] == "token").strip() == (
         f"Here is your letter [#{doc_id}]."

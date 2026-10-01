@@ -85,6 +85,33 @@ def _rapid(image: Image.Image) -> str:
     return join_lines(fragments)
 
 
+def ocr_boxes(image: Image.Image) -> list[tuple[float, float, float, float, str]]:
+    """Text fragments with their position, as fractions of the page: (x0, y0, x1, y1, text).
+
+    RapidOCR only: used to show where a figure comes from, never needed to read a document."""
+    import numpy as np
+
+    image = _prepare(image)
+    try:
+        result = _rapidocr()(np.array(image.convert("RGB")))
+    except Exception:  # pragma: no cover - depends on the local engine
+        log.exception("OCR boxes failed")
+        return []
+    if result.boxes is None:
+        return []
+    width, height = image.size
+    return [
+        (
+            float(box[:, 0].min()) / width,
+            float(box[:, 1].min()) / height,
+            float(box[:, 0].max()) / width,
+            float(box[:, 1].max()) / height,
+            str(text),
+        )
+        for box, text in zip(result.boxes, result.txts, strict=True)
+    ]
+
+
 def ocr_engine() -> str | None:
     """Name of the OCR engine in use, None when no engine is available."""
     for module, name in (("rapidocr", "RapidOCR"), ("doctr", "docTR")):
@@ -185,3 +212,20 @@ def page_count(data: bytes, mime_type: str) -> int:
         return 1
     with pymupdf.open(stream=data, filetype="pdf") as doc:
         return len(doc)
+
+
+def html_to_pdf(html: str, css: str, margin: float = 64) -> bytes:
+    """A4 PDF of a small HTML document (letters), over as many pages as needed."""
+    story = pymupdf.Story(html=html, user_css=css)
+    buffer = io.BytesIO()
+    writer = pymupdf.DocumentWriter(buffer)
+    page = pymupdf.paper_rect("a4")
+    where = page + (margin, margin, -margin, -margin)
+    more = True
+    while more:
+        device = writer.begin_page(page)
+        more, _ = story.place(where)
+        story.draw(device)
+        writer.end_page()
+    writer.close()
+    return buffer.getvalue()

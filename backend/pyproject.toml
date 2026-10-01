@@ -23,6 +23,8 @@ dependencies = [
     "sqlcipher3-wheels>=0.5.7",
     "sqlmodel>=0.0.47",
     "uvicorn[standard]>=0.54.0",
+    # Ollama for Linux ships as .tar.zst (installed automatically, services/setup.py).
+    "zstandard>=0.23",
 ]
 
 [project.optional-dependencies]
@@ -67,7 +69,12 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 # PyMuPDF is only partially typed.
-module = ["binder.samples", "binder.services.text", "binder.services.scan_image"]
+module = [
+    "binder.samples",
+    "binder.services.text",
+    "binder.services.scan_image",
+    "binder.services.sources",
+]
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]

@@ -18,9 +18,12 @@ import { StatusBadge } from "@/components/DocumentList"
 import { LocalBadge } from "@/components/StatusDot"
 import { ActivityList } from "@/components/ActivityList"
 import {
-  useActivity, useDeleteDocument, useDocument, useInvalidateAll, useRestoreDocument, useUpdateDocument,
+  useActivity, useDeleteDocument, useDocument, useFeed, useInvalidateAll, useUpdateDocument,
 } from "@/hooks/queries"
+import { useAgent } from "@/components/agent"
+import { FeedCard } from "@/components/feed"
 import { useT } from "@/i18n"
+import { area as areaMessages } from "@/i18n/messages/area"
 import { common } from "@/i18n/messages/common"
 import { documentDetail } from "@/i18n/messages/documentDetail"
 import {
@@ -33,14 +36,17 @@ const selectClass = "h-8 w-full rounded-md border bg-background px-2 text-sm"
 
 export function DocumentDetailPage() {
   const t = useT(documentDetail)
+  const ta = useT(areaMessages)
   const id = Number(useParams().id)
   const { data: doc, isPending, isError } = useDocument(id)
+  // Field hovered in the panel: its source is highlighted on the page.
+  const [active, setActive] = useState<string | null>(null)
 
   if (isError)
     return (
       <div className="py-20 text-center text-sm text-muted-foreground">
         {t("notFound")}{" "}
-        <Link to="/documents" className="text-primary underline">
+        <Link to="/" className="text-primary underline">
           {t("backToDocuments")}
         </Link>
       </div>
@@ -50,8 +56,8 @@ export function DocumentDetailPage() {
     <>
       <div className="mb-5 flex items-center justify-between gap-4 text-sm">
         <nav className="flex min-w-0 items-center gap-2 text-muted-foreground">
-          <Link to="/documents" className="hover:text-foreground">
-            {t("breadcrumb")}
+          <Link to={doc?.area ? `/area/${doc.area}` : "/"} className="hover:text-foreground">
+            {doc?.area ? ta(`area.${doc.area}`) : t("breadcrumb")}
           </Link>
           <ChevronRight className="size-3.5" />
           <span className="truncate font-medium text-foreground">{doc?.title ?? "…"}</span>
@@ -65,29 +71,62 @@ export function DocumentDetailPage() {
         </div>
       ) : (
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <Preview doc={doc} />
-          <InfoPanel doc={doc} />
+          <Preview doc={doc} active={active} />
+          <InfoPanel doc={doc} onActive={setActive} />
         </div>
       )}
     </>
   )
 }
 
-function Preview({ doc }: { doc: DocDetail }) {
+function Preview({ doc, active }: { doc: DocDetail; active: string | null }) {
   const t = useT(documentDetail)
   const [page, setPage] = useState(0)
   const [zoom, setZoom] = useState(false)
   const pages = Math.max(doc.page_count, 1)
+  const sources = useQuery({
+    queryKey: ["sources", doc.id, doc.amount, doc.due_date, doc.issue_date, doc.expiry_date, doc.reference, doc.issuer],
+    queryFn: () => api.sources(doc.id),
+    enabled: doc.status !== "processing",
+    staleTime: Infinity,
+  })
+  const boxes = (sources.data ?? []).flatMap((s) =>
+    s.boxes.filter((b) => b.page === page).map((b) => ({ ...b, field: s.field })),
+  )
+  // The active field's page comes into view.
+  useEffect(() => {
+    const target = sources.data?.find((s) => s.field === active)?.boxes[0]
+    if (target && target.page !== page) setPage(target.page)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
   return (
     <Card className="gap-0 overflow-hidden p-0">
       <div className={cn("bg-muted/50 p-4", zoom ? "overflow-auto" : "")}>
         {/* White backing on purpose: it is a picture of a paper page, in both themes. */}
-        <img
-          src={previewUrl(doc.id, page)}
-          alt={t("previewAlt", { title: doc.title, page: page + 1 })}
-          onClick={() => setZoom((z) => !z)}
-          className={cn("mx-auto rounded bg-white shadow-sm dark:brightness-[0.88]", zoom ? "max-w-none cursor-zoom-out" : "w-full cursor-zoom-in")}
-        />
+        <div className={cn("relative mx-auto", zoom ? "w-max" : "w-full")}>
+          <img
+            src={previewUrl(doc.id, page)}
+            alt={t("previewAlt", { title: doc.title, page: page + 1 })}
+            onClick={() => setZoom((z) => !z)}
+            className={cn("block rounded bg-white shadow-sm dark:brightness-[0.88]", zoom ? "max-w-none cursor-zoom-out" : "w-full cursor-zoom-in")}
+          />
+          {boxes.map((b, i) => (
+            <span
+              key={i}
+              title={`${fieldLabel(b.field)} · ${t("sourceHint")}`}
+              className={cn(
+                "pointer-events-none absolute rounded-sm transition-colors",
+                b.field === active ? "bg-amber-300/40 ring-2 ring-amber-500" : "bg-primary/5 ring-1 ring-primary/25",
+              )}
+              style={{
+                left: `${b.x0 * 100 - 0.4}%`,
+                top: `${b.y0 * 100 - 0.3}%`,
+                width: `${(b.x1 - b.x0) * 100 + 0.8}%`,
+                height: `${(b.y1 - b.y0) * 100 + 0.6}%`,
+              }}
+            />
+          ))}
+        </div>
       </div>
       <div className="flex items-center justify-center gap-3 border-t py-2 text-sm">
         <Button
@@ -129,17 +168,20 @@ function toDraft(doc: DocDetail): Draft {
     expiry_date: doc.expiry_date,
     reference: doc.reference,
     doc_type: doc.doc_type,
+    person: doc.person,
   }
 }
 
-function InfoPanel({ doc }: { doc: DocDetail }) {
+function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string | null) => void }) {
   const t = useT(documentDetail)
+  const agent = useAgent()
+  const feed = useFeed()
+  const question = feed.data?.items.find((i) => i.kind === "question" && i.document_ids.includes(doc.id))
   const tc = useT(common)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Draft>(() => toDraft(doc))
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
-  const restore = useRestoreDocument()
   const invalidate = useInvalidateAll()
   const reanalyze = useMutation({ mutationFn: () => api.reanalyze(doc.id), onSuccess: invalidate })
   const navigate = useNavigate()
@@ -171,6 +213,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
     { key: "expiry_date", type: "date", display: formatDate(doc.expiry_date) },
     { key: "reference", type: "text", display: doc.reference ?? "—" },
     { key: "issuer", type: "text", display: doc.issuer ?? "—" },
+    { key: "person", type: "text", display: doc.person ?? "—" },
     { key: "doc_type", type: "docType", display: docTypeLabel(doc.doc_type) },
   ]
   const year = (doc.issue_date ?? doc.due_date ?? doc.created_at).slice(0, 4)
@@ -221,7 +264,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
             <DropdownMenuItem onClick={() => reanalyze.mutate()}>
               <RefreshCw /> {t("reanalyze")}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate(`/letters?document=${doc.id}`)}>
+            <DropdownMenuItem onClick={() => agent.open(t("letterAbout", { title: doc.title, id: doc.id }))}>
               <Mail /> {t("writeLetter")}
             </DropdownMenuItem>
             <DropdownMenuItem render={<a href={fileUrl(doc.id)} target="_blank" rel="noreferrer" />}>
@@ -231,17 +274,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
             <DropdownMenuItem
               variant="destructive"
               onClick={() =>
-                remove.mutate(doc.id, {
-                  onSuccess: () => {
-                    toast.success(t("trashed"), {
-                      action: {
-                        label: t("undo"),
-                        onClick: () => restore.mutate(doc.id, { onSuccess: () => navigate(`/documents/${doc.id}`) }),
-                      },
-                    })
-                    navigate("/documents")
-                  },
-                })
+                remove.mutate(doc.id, { onSuccess: () => navigate(doc.area ? `/area/${doc.area}` : "/") })
               }
             >
               <Trash2 /> {t("trash")}
@@ -250,6 +283,11 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
         </DropdownMenu>
       </div>
 
+      {question && (
+        <ul className="border-b bg-amber-50/50 dark:bg-amber-500/5">
+          <FeedCard item={question} />
+        </ul>
+      )}
       <OrganizeNotices doc={doc} />
       {!processing && <InShort doc={doc} />}
 
@@ -268,6 +306,8 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
               return (
                 <div
                   key={row.key}
+                  onMouseEnter={() => onActive(row.key)}
+                  onMouseLeave={() => onActive(null)}
                   className={cn(
                     "grid grid-cols-[140px_1fr] items-center gap-3 px-2 py-2.5",
                     highlight && "rounded-md bg-red-50/70 text-red-600 dark:bg-red-500/10 dark:text-red-400",
@@ -348,7 +388,7 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
 
         <p className="mt-5 flex items-center gap-2 text-sm text-primary">
           <Folder className="size-4" />
-          <Link to={`/documents?category=${encodeURIComponent(doc.category)}`} className="hover:underline">
+          <Link to={doc.area ? `/area/${doc.area}` : "/"} className="hover:underline">
             {categoryLabel(doc.category)}
           </Link>
           <ChevronRight className="size-3" /> {year}
@@ -422,7 +462,6 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
   const latest = useDocument(doc.superseded_by)
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
-  const restore = useRestoreDocument()
   const navigate = useNavigate()
 
   if (doc.duplicate_of !== null)
@@ -448,14 +487,7 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
           size="sm"
           disabled={remove.isPending}
           onClick={() =>
-            remove.mutate(doc.id, {
-              onSuccess: () => {
-                toast.success(t("duplicateTrashed"), {
-                  action: { label: t("undo"), onClick: () => restore.mutate(doc.id) },
-                })
-                navigate(`/documents/${doc.duplicate_of}`)
-              },
-            })
+            remove.mutate(doc.id, { onSuccess: () => navigate(`/documents/${doc.duplicate_of}`) })
           }
         >
           <Trash2 /> {t("trashDuplicate")}
@@ -515,14 +547,7 @@ function RetentionInfo({ doc }: { doc: DocDetail }) {
           )
         )}
       </div>
-      {doc.deletable_reason && (
-        <p className="mt-2 text-amber-700 dark:text-amber-400">
-          {doc.deletable_reason}.{" "}
-          <Link to="/sorting" className="underline">
-            {t("seeSorting")}
-          </Link>
-        </p>
-      )}
+      {doc.deletable_reason && <p className="mt-2 text-amber-700 dark:text-amber-400">{doc.deletable_reason}.</p>}
     </div>
   )
 }

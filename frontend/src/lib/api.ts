@@ -67,6 +67,9 @@ export interface Doc {
   keep_until: string | null
   deletable_reason: string | null
   renew_from: string | null
+  person: string | null
+  area: Area | null
+  batch: string | null
 }
 
 export interface DocDetail extends Doc {
@@ -74,8 +77,15 @@ export interface DocDetail extends Doc {
 }
 
 export type DocPatch = Partial<
-  Pick<Doc, "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "expiry_date" | "reference" | "doc_type">
+  Pick<
+    Doc,
+    "title" | "category" | "issuer" | "amount" | "issue_date" | "due_date" | "expiry_date" | "reference" | "doc_type" | "person"
+  >
 > & { validated?: boolean; keep_forever?: boolean }
+
+/** The six life areas of the navigation. */
+export type Area = "housing" | "money" | "work" | "health" | "identity" | "vehicle"
+export const AREAS: Area[] = ["housing", "money", "work", "health", "identity", "vehicle"]
 
 export interface Deadline {
   id: number
@@ -85,7 +95,7 @@ export interface Deadline {
   due_date: string
   amount: number | null
   done: boolean
-  source: "extracted" | "expiry" | "manual"
+  source: "extracted" | "expiry" | "manual" | "followup"
   days_left: number
 }
 
@@ -158,6 +168,10 @@ export interface ChatResponse {
   /** The agent changed data (reminder, deadline paid, document corrected or trashed). */
   changed: boolean
   engine: "llm" | "rules"
+  /** Undoes what the agent changed during this turn. */
+  undo: string | null
+  /** Packs of documents put together during the turn. */
+  folders: Folder[]
 }
 
 /** Progress of an answer: tools as they start, text as it is written. */
@@ -261,7 +275,7 @@ export const LETTER_KINDS = ["termination", "complaint", "request"] as const
 export type LetterKind = (typeof LETTER_KINDS)[number]
 
 export interface Letter {
-  kind: LetterKind
+  kind: LetterKind | "custom" | "followup"
   subject: string
   recipient: string
   body: string
@@ -269,6 +283,115 @@ export interface Letter {
   registered: boolean
   /** Language of the letter: the recipient's (French for FR/BE/LU/MC), not necessarily the UI's. */
   language: "en" | "fr"
+  /** Saved letter: PDF, "sent", follow-up. */
+  id: number | null
+  document_id: number | null
+  recipient_address: string
+  sent_on: string | null
+  follow_up_on: string | null
+  answered: boolean
+  /** Details left in [brackets] for the user to fill in. */
+  blanks: number
+}
+
+export type Tone = "urgent" | "soon" | "info"
+
+/** One-tap action of a Today card. Server actions go through POST /actions; the others are
+ * handled by the interface (open, agent, upload, report, pdf). */
+export interface FeedAction {
+  type: string
+  label: string
+  primary: boolean
+  params: Record<string, unknown>
+}
+
+export interface FeedItem {
+  key: string
+  kind:
+    | "recovery" | "report" | "briefing" | "question" | "deadline" | "expiry" | "anomaly"
+    | "missing" | "letter" | "suggestion" | "household"
+  tone: Tone
+  title: string
+  detail: string
+  area: Area | null
+  category: Category | null
+  amount: number | null
+  when: string | null
+  document_ids: number[]
+  actions: FeedAction[]
+  extra: Record<string, unknown>
+}
+
+export interface SetupStatus {
+  phase: "disabled" | "checking" | "installing" | "starting" | "downloading" | "ready" | "error"
+  completed: number
+  total: number
+  model: string | null
+  error: string | null
+}
+
+export interface Feed {
+  items: FeedItem[]
+  documents: number
+  setup: SetupStatus
+}
+
+export interface ActResult {
+  message: string
+  letter: Letter | null
+}
+
+export interface ReportItem {
+  document: Doc
+  facts: string[]
+  events: string[]
+  question: { key: string; title: string; detail: string; choices: { id: string; label: string; primary: boolean }[] } | null
+}
+
+export interface ImportReport {
+  batch: string
+  source: string
+  processing: number
+  items: ReportItem[]
+  summary: string
+  to_pay: number
+}
+
+export interface Member {
+  name: string
+  documents: number
+  areas: Area[]
+}
+
+export interface AreaSummary {
+  area: Area
+  label: string
+  documents: number
+  attention: number
+}
+
+export interface AreaDetail {
+  area: Area
+  label: string
+  documents: Doc[]
+  deadlines: Deadline[]
+  subscriptions: Subscription[]
+  items: FeedItem[]
+  members: Member[]
+  yearly_cost: number
+}
+
+export interface FieldSource {
+  field: string
+  boxes: { page: number; x0: number; y0: number; x1: number; y1: number }[]
+}
+
+export interface BackupInfo {
+  code: string | null
+  confirmed: boolean
+  folder: string
+  last_backup: string | null
+  last_error: string | null
 }
 
 export interface Subscription {
@@ -300,10 +423,21 @@ function genericError(): string {
   return translate(common, language)("state.error")
 }
 
+/** Called after every change the backend can undo (X-Undo header): the app offers "Undo". */
+type UndoListener = (token: string, body: unknown) => void
+let undoListener: UndoListener | null = null
+
+export function onUndoable(listener: UndoListener | null) {
+  undoListener = listener
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, init)
   await check(res)
-  return res.status === 204 ? (undefined as T) : res.json()
+  const body = res.status === 204 ? (undefined as T) : await res.json()
+  const token = res.headers.get("X-Undo")
+  if (token && undoListener) undoListener(token, body)
+  return body
 }
 
 async function check(res: Response) {
@@ -389,10 +523,10 @@ export const api = {
   documents: (p: { q?: string; category?: Category; status?: DocumentStatus; limit?: number } = {}) =>
     request<Doc[]>(`/documents${query(p)}`),
   document: (id: number) => request<DocDetail>(`/documents/${id}`),
-  upload: (file: File) => {
+  upload: (file: File, batch?: string) => {
     const form = new FormData()
     form.append("file", file)
-    return request<Doc>("/documents", { method: "POST", body: form })
+    return request<Doc>(`/documents${query({ batch })}`, { method: "POST", body: form })
   },
   updateDocument: (id: number, patch: DocPatch) => request<DocDetail>(`/documents/${id}`, json("PATCH", patch)),
   reanalyze: (id: number) => request<DocDetail>(`/documents/${id}/reanalyze`, { method: "POST" }),
@@ -402,8 +536,31 @@ export const api = {
   folders: () => request<Folder[]>("/folders"),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: Profile) => request<Profile>("/profile", json("PUT", body)),
-  writeLetter: (body: { kind: LetterKind; document_id?: number | null; details?: string }) =>
+  writeLetter: (body: { kind?: LetterKind; purpose?: string; document_id?: number | null; details?: string }) =>
     request<Letter>("/letters", json("POST", body)),
+  editLetter: (id: number, body: string) => request<Letter>(`/letters/${id}`, json("PUT", { body })),
+  letterSent: (id: number) => request<Letter>(`/letters/${id}/sent`, { method: "POST" }),
+  letterAnswered: (id: number) => request<Letter>(`/letters/${id}/answered`, { method: "POST" }),
+  feed: () => request<Feed>("/feed"),
+  act: (action: Pick<FeedAction, "type" | "params">) =>
+    request<ActResult>("/actions", json("POST", { type: action.type, params: action.params })),
+  undo: (token: string) => request<void>(`/undo/${encodeURIComponent(token)}`, { method: "POST" }),
+  report: (batch: string) => request<ImportReport>(`/reports/${encodeURIComponent(batch)}`),
+  reportSeen: (batch: string) => request<void>(`/reports/${encodeURIComponent(batch)}/seen`, { method: "POST" }),
+  areas: () => request<AreaSummary[]>("/areas"),
+  area: (area: Area) => request<AreaDetail>(`/areas/${area}`),
+  household: () => request<Member[]>("/household"),
+  sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
+  prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),
+  setup: () => request<SetupStatus>("/setup"),
+  retrySetup: () => request<SetupStatus>("/setup/retry", { method: "POST" }),
+  backup: () => request<BackupInfo>("/backup"),
+  restoreBackup: (file: File, code: string) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("code", code)
+    return request<void>("/backup/restore", { method: "POST", body: form })
+  },
   subscriptions: () => request<Subscription[]>("/subscriptions"),
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
@@ -433,7 +590,7 @@ export const api = {
   importScan: () => request<ScanSession>("/scan/session/import", { method: "POST" }),
   closeScan: () => request<void>("/scan/session", { method: "DELETE" }),
   deleteScanPage: (id: string) => request<void>(`/scan/pages/${id}`, { method: "DELETE" }),
-  seedDemo: () => request<{ imported: number }>("/demo", { method: "POST" }),
+  seedDemo: () => request<{ imported: number; batch: string | null }>("/demo", { method: "POST" }),
   chat: (message: string, history: ChatMessage[], attachments: number[] = [], signal?: AbortSignal) =>
     request<ChatResponse>("/agent/chat", { ...json("POST", { message, history, attachments }), signal }),
   chatStream: (
@@ -450,3 +607,4 @@ export const previewUrl = (id: number, page = 0) => `/api/documents/${id}/previe
 export const exportUrl = (category?: Category) => `/api/export${query({ category })}`
 export const scanThumbUrl = (id: string) => `/api/scan/pages/${id}/thumb`
 export const folderExportUrl = (key: string) => `/api/folders/${key}/export`
+export const letterPdfUrl = (id: number) => `/api/letters/${id}/pdf`

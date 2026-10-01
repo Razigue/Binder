@@ -11,8 +11,15 @@ backend/   Python 3.12, FastAPI, SQLModel on SQLCipher, PyMuPDF, Ollama
     services/llm.py      Ollama client: JSON extraction, tool calls, streaming, vision
     services/embeddings.py  semantic search (local embedding model, vectors in the database)
     services/ingest.py   pipeline: encrypted storage → reading → extraction → deadlines → index
+    services/feed.py     Today feed: cards and their one-tap actions (questions.py, anomalies.py,
+                         missing.py, reports.py, briefing.py, letters.py feed it)
+    services/undo.py     undo steps captured around every change
+    services/learning.py corrections applied again to the next documents of a sender
+    services/areas.py, household.py   life areas, household members and address
+    services/setup.py, backup.py, notify.py, background.py   AI setup, backups, notifications,
+                         background scheduler
     agent/               tools + home-made agent loop (see agent.md)
-    api/routes.py        REST API
+    api/routes.py        REST API; api/assistant.py feed, actions, undo, reports, areas, letters
 frontend/  React, TypeScript, Vite, Tailwind CSS, shadcn/ui, TanStack Query
 ```
 
@@ -64,6 +71,5 @@ set of 100 annotated documents is still to be built.
 ## Roadmap
 
 - Evaluation set of 100 documents, comparison of local models and APIs
-- System notifications for deadlines and price rises
 - Signed installers for Windows (MSI) and macOS (notarised DMG)
 - Key protected by the system keychain or a passphrase

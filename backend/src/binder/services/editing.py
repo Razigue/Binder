@@ -8,7 +8,7 @@ from sqlmodel import Session
 from binder import i18n
 from binder.db import index_document
 from binder.models import Deadline, Document, DocumentStatus
-from binder.services import activity, embeddings, ingest, organize
+from binder.services import activity, embeddings, ingest, learning, organize, undo
 
 # Namespace "api": these entries were logged from the routes, the keys must stay the same.
 T = i18n.catalog(
@@ -55,7 +55,11 @@ def update_document(
 
     Returns the fields that actually changed (old, new). Does not commit."""
     previous_key = organize.series_key(doc)
+    undo.document_changed(doc, undo.snapshot(doc))
     diff = {k: (getattr(doc, k), v) for k, v in changes.items() if getattr(doc, k) != v}
+    if actor == "user":
+        # The user corrected Binder: the next documents of this sender get the same treatment.
+        learning.remember(session, doc, diff)
     for key, value in changes.items():
         setattr(doc, key, value)
     if "keep_forever" in diff:
@@ -106,6 +110,7 @@ def update_deadline(
     session: Session, deadline: Deadline, changes: dict[str, Any], *, actor: str = "user"
 ) -> None:
     """Applies the changes (e.g. done=True when paid) and logs them. Does not commit."""
+    undo.push("deadline", id=deadline.id, state=undo.deadline_state(deadline))
     for key, value in changes.items():
         setattr(deadline, key, value)
     if "done" in changes:

@@ -95,3 +95,17 @@ export function useExpirations() {
 export function useRetention() {
   return useQuery({ queryKey: keys.retention, queryFn: api.retention })
 }
+
+export const feedKey = ["feed"] as const
+
+/** The Today feed; refreshed often while the local AI installs, documents arrive in the background. */
+export function useFeed() {
+  return useQuery({
+    queryKey: feedKey,
+    queryFn: api.feed,
+    refetchInterval: (q) => {
+      const phase = q.state.data?.setup.phase
+      return phase && phase !== "ready" && phase !== "disabled" ? 2000 : 30_000
+    },
+  })
+}
