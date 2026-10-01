@@ -78,16 +78,28 @@ uv run binder             # http://127.0.0.1:8765
 uv run --extra desktop binder --desktop   # fenêtre native (pywebview)
 ```
 
-### Application de bureau (Linux)
+### Application de bureau (Linux, Windows, macOS)
+
+Binder tourne sur les trois systèmes. La fenêtre utilise le moteur web du système sous Windows
+(Edge WebView2, présent par défaut sur Windows 10 et 11) et macOS (WebKit), Qt WebEngine sous Linux.
 
 ```bash
-./packaging/build-app.sh      # interface + exécutable PyInstaller (Qt WebEngine)
-./packaging/install-linux.sh  # installe dans ~/.local/opt/binder + entrée « Binder » du menu
-./packaging/install-linux.sh --uninstall
+python packaging/build.py     # interface + exécutable PyInstaller pour le système courant
 ```
 
+| Système | Résultat |
+|---|---|
+| Linux | `packaging/dist/Binder/Binder` ; `./packaging/install-linux.sh` l'ajoute au menu (`--uninstall` pour retirer) |
+| Windows | `packaging\dist\Binder\Binder.exe` |
+| macOS | `packaging/dist/Binder.app` |
+
+PyInstaller ne compile pas pour un autre système : le workflow GitHub « Application de bureau »
+(lancement manuel ou tag `v*`) construit les trois versions et les publie en artefacts.
+L'application n'est pas signée : au premier lancement, macOS demande clic droit → Ouvrir et
+Windows SmartScreen « Informations complémentaires » → Exécuter quand même.
+
 L'application embarque son serveur sur un port libre de 127.0.0.1 : fermer la fenêtre arrête tout.
-Environ 580 Mo, dont 200 Mo pour le moteur web Chromium de Qt. Ollama reste à installer à part.
+Sous Linux, environ 580 Mo, dont 200 Mo pour le moteur web Chromium de Qt. Ollama reste à installer à part.
 
 En développement : `uv run binder` d'un côté, `npm run dev` de l'autre (http://localhost:5173,
 les appels `/api` sont relayés vers le backend).
@@ -98,13 +110,16 @@ Par variables d'environnement, ou dans un fichier `backend/.env` :
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `BINDER_DATA_DIR` | `~/.local/share/binder` | base, fichiers chiffrés, clé |
+| `BINDER_DATA_DIR` | voir ci-dessous | base, fichiers chiffrés, clé |
 | `BINDER_DB_KEY` | générée dans `DATA_DIR/key` | secret maître du chiffrement |
 | `BINDER_LLM_MODEL` | `qwen3.5:9b` | modèle Ollama |
 | `BINDER_LLM_ENABLED` | `true` | `false` pour n'utiliser que les règles |
 | `BINDER_OLLAMA_URL` | `http://localhost:11434` | |
 | `BINDER_PORT` | `8765` | |
 | `BINDER_AUTO_IMPORT` | `true` | `false` pour couper l'import automatique en tâche de fond |
+
+Dossier de données par défaut : `~/.local/share/binder` (Linux, ou `$XDG_DATA_HOME/binder`),
+`~/Library/Application Support/Binder` (macOS), `%LOCALAPPDATA%\Binder` (Windows).
 
 > ⚠️ Perdre la clé, c'est perdre l'accès aux données. Sauvegardez `DATA_DIR/key`.
 
@@ -133,5 +148,5 @@ de généralisation. Le jeu de 100 documents annotés reste à constituer.
 - Jeu d'évaluation de 100 documents, comparaison modèles locaux et API
 - Recherche sémantique (sqlite-vec, nomic-embed-text)
 - Notifications système pour les échéances et les hausses
-- Paquets Windows et macOS
+- Installeurs signés Windows (MSI) et macOS (DMG notarisé)
 - Clé protégée par le trousseau du système ou une phrase de passe

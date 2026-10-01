@@ -2,6 +2,7 @@
 
 import argparse
 import socket
+import sys
 import threading
 import time
 
@@ -34,7 +35,9 @@ def _free_port() -> int:
 
 
 def run_desktop() -> None:
-    """Application de bureau : serveur interne sur un port libre + fenêtre native Qt.
+    """Application de bureau : serveur interne sur un port libre + fenêtre native.
+
+    Moteur web du système sous Windows (Edge WebView2) et macOS (WebKit), Qt sous Linux.
 
     Le serveur vit dans un thread du même processus : fermer la fenêtre arrête tout.
     """
@@ -55,7 +58,7 @@ def run_desktop() -> None:
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.create_window("Binder", url, width=1320, height=860, min_size=(960, 640))
-    webview.start(gui="qt", private_mode=False)
+    webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False)
     server.should_exit = True
 
 
