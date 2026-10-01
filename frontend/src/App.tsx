@@ -9,6 +9,7 @@ import { DocumentDetailPage } from "@/pages/DocumentDetail"
 import { DocumentsPage } from "@/pages/Documents"
 import { FoldersPage } from "@/pages/Folders"
 import { HistoryPage } from "@/pages/History"
+import { LettersPage } from "@/pages/Letters"
 import { HomePage } from "@/pages/Home"
 import { SearchPage } from "@/pages/Search"
 import { SettingsPage } from "@/pages/Settings"
@@ -34,6 +35,7 @@ export default function App() {
                 <Route path="recherche" element={<SearchPage />} />
                 <Route path="historique" element={<HistoryPage />} />
                 <Route path="dossiers" element={<FoldersPage />} />
+                <Route path="courriers" element={<LettersPage />} />
                 <Route path="tri" element={<SortingPage />} />
                 <Route path="reglages" element={<SettingsPage />} />
                 <Route path="corbeille" element={<TrashPage />} />

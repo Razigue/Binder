@@ -246,3 +246,9 @@ class MailSettingsIn(BaseModel):
 class ImportSettingsIn(BaseModel):
     folder: FolderSettingsIn | None = None
     mail: MailSettingsIn | None = None
+
+
+class LetterRequest(BaseModel):
+    kind: str
+    document_id: int | None = None
+    details: str = ""

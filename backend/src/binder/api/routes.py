@@ -34,6 +34,7 @@ from binder.schemas import (
     FolderSettings,
     ImportSettings,
     ImportSettingsIn,
+    LetterRequest,
     MailSettings,
     Stats,
     SystemStatus,
@@ -46,6 +47,7 @@ from binder.services import (
     folders,
     importers,
     ingest,
+    letters,
     llm,
     organize,
     retention,
@@ -475,6 +477,46 @@ def export_folder(key: str, session: SessionDep) -> StreamingResponse:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# --- Courriers types -----------------------------------------------------------------------
+
+PROFILE_KEY = "profile"
+
+
+@router.get("/profile")
+def get_profile(session: SessionDep) -> letters.Profile:
+    return settings_store.load(session, PROFILE_KEY, letters.Profile)
+
+
+@router.put("/profile")
+def update_profile(body: letters.Profile, session: SessionDep) -> letters.Profile:
+    settings_store.save(session, PROFILE_KEY, body)
+    session.commit()
+    return body
+
+
+@router.get("/letters/kinds")
+def letter_kinds() -> dict[str, str]:
+    return letters.KINDS
+
+
+@router.post("/letters")
+def write_letter(body: LetterRequest, session: SessionDep) -> letters.Letter:
+    if body.kind not in letters.KINDS:
+        raise HTTPException(400, "Type de courrier inconnu")
+    doc = _get_doc(session, body.document_id) if body.document_id is not None else None
+    profile = settings_store.load(session, PROFILE_KEY, letters.Profile)
+    letter = letters.write(body.kind, doc, profile, body.details)
+    activity.log(
+        session,
+        "letter",
+        f"Courrier rédigé : {letter.subject.lower()} ({letter.recipient})",
+        actor="user",
+        document=doc,
+    )
+    session.commit()
+    return letter
 
 
 # --- Échéances -----------------------------------------------------------------------------

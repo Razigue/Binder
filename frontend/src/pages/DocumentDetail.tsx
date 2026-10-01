@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
-  CalendarDays, Check, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
+  CalendarDays, Check, Mail, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
   Pencil, RefreshCw, Trash2, X,
 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -180,6 +180,9 @@ function InfoPanel({ doc }: { doc: DocDetail }) {
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={() => reanalyze.mutate()}>
               <RefreshCw /> Relancer l'analyse
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate(`/courriers?document=${doc.id}`)}>
+              <Mail /> Rédiger un courrier
             </DropdownMenuItem>
             <DropdownMenuItem render={<a href={fileUrl(doc.id)} target="_blank" rel="noreferrer" />}>
               <Download /> Ouvrir l'original

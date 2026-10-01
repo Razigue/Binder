@@ -171,6 +171,24 @@ export interface Folder {
   pieces: FolderPiece[]
 }
 
+export interface Profile {
+  name: string
+  address: string
+  city: string
+  email: string
+  phone: string
+}
+
+export type LetterKind = "resiliation" | "reclamation" | "demande"
+
+export interface Letter {
+  kind: LetterKind
+  subject: string
+  recipient: string
+  body: string
+  registered: boolean
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -224,6 +242,10 @@ export const api = {
   explanation: (id: number, refresh = false) =>
     request<Explanation>(`/documents/${id}/explanation${query({ refresh: refresh || undefined })}`),
   folders: () => request<Folder[]>("/folders"),
+  profile: () => request<Profile>("/profile"),
+  saveProfile: (body: Profile) => request<Profile>("/profile", json("PUT", body)),
+  writeLetter: (body: { kind: LetterKind; document_id?: number | null; details?: string }) =>
+    request<Letter>("/letters", json("POST", body)),
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
