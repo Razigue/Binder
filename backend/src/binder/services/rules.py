@@ -150,6 +150,9 @@ DOC_TYPES: list[tuple[str, str]] = [
     (r"titre de sejour", "Titre de séjour"),
     (r"controle technique", "Contrôle technique"),
     (r"certificat d'immatriculation|carte grise", "Carte grise"),
+    (r"releve d'identite bancaire|(?<![a-z])rib(?![a-z])", "RIB"),
+    (r"contrat de travail", "Contrat de travail"),
+    (r"contrat de location|(?<![a-z])bail (?:d'habitation|de location)", "Bail"),
     (r"taxe fonciere", "Taxe foncière"),
     (r"taxe d'habitation", "Taxe d'habitation"),
     (r"avis d'impot|impot sur le revenu", "Avis d'imposition"),
@@ -417,7 +420,15 @@ def detect_issuer(norm: str) -> str | None:
 
 
 # Documents sans montant ni échéance, quelle que soit leur catégorie.
-INFORMATIVE_TYPES = ("Attestation", "Relevé bancaire", "Contrat", "Devis", "Carte grise")
+INFORMATIVE_TYPES = (
+    "Attestation",
+    "Relevé bancaire",
+    "Contrat",
+    "Devis",
+    "Carte grise",
+    "RIB",
+    "Bail",
+)
 # Documents dont la validité compte : sans date de fin, ils partent en vérification.
 EXPIRING_TYPES = (
     "Carte d'identité",

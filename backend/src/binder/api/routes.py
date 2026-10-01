@@ -43,6 +43,7 @@ from binder.services import (
     activity,
     deadlines,
     explain,
+    folders,
     importers,
     ingest,
     llm,
@@ -414,6 +415,66 @@ def trash_deletable(body: TrashRequest, session: SessionDep) -> dict[str, int]:
         trashed += 1
     session.commit()
     return {"trashed": trashed}
+
+
+# --- Dossiers types ------------------------------------------------------------------------
+
+
+def _folder_kind(key: str) -> folders.FolderKind:
+    kind = folders.KINDS.get(key)
+    if kind is None:
+        raise HTTPException(404, "Dossier inconnu")
+    return kind
+
+
+@router.get("/folders")
+def list_folders(session: SessionDep) -> list[folders.FolderStatus]:
+    return [folders.evaluate(session, kind) for kind in folders.KINDS.values()]
+
+
+@router.get("/folders/{key}")
+def get_folder(key: str, session: SessionDep) -> folders.FolderStatus:
+    return folders.evaluate(session, _folder_kind(key))
+
+
+@router.get("/folders/{key}/export")
+def export_folder(key: str, session: SessionDep) -> StreamingResponse:
+    """ZIP des pièces trouvées, numérotées, avec la liste de ce qui manque encore."""
+    kind = _folder_kind(key)
+    status = folders.evaluate(session, kind)
+    buffer = io.BytesIO()
+    missing = []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for n, piece in enumerate(status.pieces, 1):
+            if piece.status != "ok":
+                extra = f" ({piece.note})" if piece.note else ""
+                optional = " [facultatif]" if piece.optional else ""
+                missing.append(f"- {piece.label}{optional}{extra}. {piece.hint}")
+            if piece.status == "outdated":
+                continue
+            for doc_id in piece.document_ids:
+                doc = session.get(Document, doc_id)
+                if doc is None:
+                    continue
+                path = f"{n:02d} {piece.label}/{organize.standard_name(doc)}"
+                archive.writestr(path, ingest.load_file(doc))
+        lines = [kind.title, "", kind.description, ""]
+        lines += ["Pièces à ajouter :", *missing] if missing else ["Dossier complet."]
+        archive.writestr("A_LIRE.txt", "\n".join(lines) + "\n")
+    activity.log(
+        session,
+        "export",
+        f"{kind.title} exporté ({status.ready}/{status.total} pièces)",
+        actor="user",
+    )
+    session.commit()
+    buffer.seek(0)
+    name = f"binder-{kind.key}-{date.today()}.zip"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 # --- Échéances -----------------------------------------------------------------------------

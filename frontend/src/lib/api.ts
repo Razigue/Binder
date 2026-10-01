@@ -149,6 +149,28 @@ export interface Explanation {
   engine: "llm" | "rules"
 }
 
+export interface FolderPiece {
+  key: string
+  label: string
+  status: "ok" | "partial" | "outdated" | "missing"
+  found: number
+  needed: number
+  optional: boolean
+  hint: string
+  document_ids: number[]
+  note: string
+}
+
+export interface Folder {
+  key: string
+  title: string
+  description: string
+  complete: boolean
+  ready: number
+  total: number
+  pieces: FolderPiece[]
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -201,6 +223,7 @@ export const api = {
   deleteDocument: (id: number) => request<void>(`/documents/${id}`, { method: "DELETE" }),
   explanation: (id: number, refresh = false) =>
     request<Explanation>(`/documents/${id}/explanation${query({ refresh: refresh || undefined })}`),
+  folders: () => request<Folder[]>("/folders"),
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
@@ -225,3 +248,4 @@ export const api = {
 export const fileUrl = (id: number) => `/api/documents/${id}/file`
 export const previewUrl = (id: number, page = 0) => `/api/documents/${id}/preview?page=${page}`
 export const exportUrl = (category?: Category) => `/api/export${query({ category })}`
+export const folderExportUrl = (key: string) => `/api/folders/${key}/export`

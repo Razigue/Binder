@@ -27,6 +27,9 @@ FOREVER = Rule("À conserver sans limite")
 BY_TYPE: dict[str, Rule] = {
     "Bulletin de paie": Rule("Jusqu'à la liquidation de la retraite"),
     "Contrat": Rule("Toute la durée du contrat, puis 2 ans"),
+    "Contrat de travail": Rule("Jusqu'à la liquidation de la retraite"),
+    "Bail": Rule("Toute la durée de la location, puis 3 ans"),
+    "RIB": Rule("Tant que le compte est ouvert"),
     "Carte grise": Rule("Tant que vous possédez le véhicule"),
     "Contrôle technique": Rule("Jusqu'au contrôle suivant", until_replaced=True),
     "Carte d'identité": Rule("Tant qu'elle est valide", until_replaced=True),
