@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
-  CalendarDays, Check, Mail, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Loader2, MoreHorizontal,
-  Pencil, RefreshCw, Trash2, X,
+  CalendarDays, Check, Mail, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Hourglass, Loader2,
+  MoreHorizontal, Pencil, RefreshCw, Trash2, X,
 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { StatusBadge } from "@/components/DocumentList"
-import { LocalBadge } from "@/components/StatusDot"
 import { ActivityList } from "@/components/ActivityList"
 import {
   useActivity, useDeleteDocument, useDocument, useFeed, useInvalidateAll, useUpdateDocument,
@@ -62,7 +61,6 @@ export function DocumentDetailPage() {
           <ChevronRight className="size-3.5" />
           <span className="truncate font-medium text-foreground">{doc?.title ?? "…"}</span>
         </nav>
-        <LocalBadge />
       </div>
       {isPending || !doc ? (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
@@ -191,6 +189,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
   }, [doc, editing])
 
   const processing = doc.status === "processing"
+  const waiting = doc.status === "waiting"
   const missing = new Set(doc.missing_fields)
   const dueSoon = doc.due_date ? (parseDate(doc.due_date).getTime() - Date.now()) / 86_400_000 < 15 : false
 
@@ -289,7 +288,16 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
         </ul>
       )}
       <OrganizeNotices doc={doc} />
-      {!processing && <InShort doc={doc} />}
+      {waiting && (
+        <div className="flex items-start gap-3 border-b px-5 py-4">
+          <Hourglass className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">{t("waiting")}</p>
+            <p className="text-sm text-muted-foreground">{t("waitingHint")}</p>
+          </div>
+        </div>
+      )}
+      {!processing && !waiting && <InShort doc={doc} />}
 
       <div className="p-5">
         <h2 className="mb-2 font-semibold">{t("extracted")}</h2>

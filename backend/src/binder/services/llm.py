@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from binder import i18n
 from binder.config import get_settings
-from binder.models import Category
+from binder.models import Category, DocType
 from binder.schemas import Extraction
 
 log = logging.getLogger(__name__)
@@ -58,10 +58,11 @@ def user_context() -> dict[str, str]:
 EXTRACTION_PROMPT = """Extract data from this administrative document (often French, any \
 language). User country: {country}, currency {currency}.
 category: one of {categories}
+doc_type: one of {doc_types}; null if none fits
 title: short, in {language} (e.g. {title_example})
 issuer: issuing organisation
 amount: main amount to pay or received, e.g. total due, net pay, rent, refund (number)
-issue_date, due_date (payment or debit date), expiry_date (end of validity): YYYY-MM-DD
+issue_date, due_date (payment or debit date), expiry_date (end of validity, warranty): YYYY-MM-DD
 reference: document, contract or customer reference, value only
 person: full name of the person it concerns (holder, employee, tenant, insured), not a company
 confidence: 0 to 1
@@ -76,6 +77,24 @@ and may contain errors: trust the images.
 """
 TRANSCRIBE_PROMPT = """Transcribe all the text of this administrative document page, line by \
 line, in reading order, keeping table rows on one line. Output only the text."""
+# Types the model mixes up without a word of explanation (measured on the demo documents).
+TYPE_HINTS = {
+    DocType.CERTIFICATE: "attestation of payment, rights, employment…",
+    DocType.BENEFIT_DECISION: "decision or overpayment claim of CAF, France Travail, CPAM",
+    DocType.REIMBURSEMENT_STATEMENT: "health care refund",
+    DocType.CHARGES_STATEMENT: "yearly rental charges settlement",
+    DocType.ANNUAL_TAX_STATEMENT: "IFU sent by a bank",
+    DocType.PURCHASE_RECEIPT: "purchase invoice with a warranty",
+}
+
+
+def doc_types() -> str:
+    """The types offered to the model, with a hint for those it mixes up."""
+    return ", ".join(
+        f"{t.value} ({TYPE_HINTS[t]})" if t in TYPE_HINTS else t.value for t in DocType
+    )
+
+
 TITLE_EXAMPLES: dict[i18n.Language, str] = {
     "en": '"Property tax 2026", "EDF invoice"',
     "fr": '"Taxe foncière 2026", "Facture EDF"',
@@ -91,6 +110,7 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "category": {"enum": [c.value for c in Category]},
+        "doc_type": {"enum": [*(t.value for t in DocType), None]},
         "title": {"type": "string"},
         "issuer": _nullable("string"),
         "amount": _nullable("number"),
@@ -102,8 +122,8 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
         "confidence": {"type": "number"},
     },
     "required": [
-        "category", "title", "issuer", "amount", "issue_date", "due_date", "expiry_date",
-        "reference", "person", "confidence",
+        "category", "doc_type", "title", "issuer", "amount", "issue_date", "due_date",
+        "expiry_date", "reference", "person", "confidence",
     ],
 }  # fmt: skip
 
@@ -274,6 +294,7 @@ def extract(text: str, images: list[bytes] | None = None) -> Extraction | None:
     context = user_context()
     prompt = EXTRACTION_PROMPT.format(
         categories=", ".join(c.value for c in Category),
+        doc_types=doc_types(),
         title_example=TITLE_EXAMPLES[i18n.current_language()],
         text=compact(text),
         **context,
@@ -286,7 +307,8 @@ def extract(text: str, images: list[bytes] | None = None) -> Extraction | None:
         message = chat([request], fmt=EXTRACTION_SCHEMA)
         data = json.loads(message.get("content") or "{}")
         data.pop("missing_fields", None)
-        data.pop("doc_type", None)
+        if data.get("doc_type") not in DocType.__members__.values():
+            data["doc_type"] = None
         # Small models sometimes copy the label: "N° client : 6012…" → "6012…".
         if isinstance(data.get("reference"), str) and ":" in data["reference"]:
             data["reference"] = data["reference"].split(":", 1)[1].strip() or None

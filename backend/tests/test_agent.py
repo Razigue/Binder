@@ -110,7 +110,7 @@ def test_text_details_are_found_by_reading(library: dict[str, int], session: Ses
     result = tools.read_document(
         session, library["avis-imposition.pdf"], query="revenu fiscal de référence"
     )
-    assert any("32 480" in p for p in result.payload["passages"])
+    assert any("52 310" in p for p in result.payload["passages"])
 
 
 def test_deadlines_include_overdue_ones_and_their_total(
@@ -135,7 +135,7 @@ def test_expirations_list_every_document_with_a_validity(
 
 
 def test_agent_actions_are_logged_and_reversible(library: dict[str, int], session: Session) -> None:
-    tax = library["taxe-fonciere.pdf"]
+    tax = library["avis-imposition.pdf"]
     paid = tools.call(session, "mark_deadline_paid", {"document_id": tax})
     assert paid.changed and all(d["paid"] for d in paid.payload["updated"])
 
@@ -190,7 +190,9 @@ def test_view_document_shows_the_page(library: dict[str, int], session: Session)
     result = tools.call(session, "view_document", {"document_id": library["facture-edf.pdf"]})
     assert result.payload["pages"] == 1 and result.images[0][:2] == b"\xff\xd8"  # JPEG
     names = {t["function"]["name"] for t in tools.schemas(vision=False)}
-    assert "view_document" not in names and len(names) == len(tools.TOOLS) - 1
+    # Web search is off in the tests (conftest): its tools are not offered either.
+    assert "view_document" not in names
+    assert len(names) == len(tools.TOOLS) - 1 - len(tools.WEB_TOOLS)
 
 
 # --- Harness -------------------------------------------------------------------------------
@@ -211,9 +213,52 @@ def test_answer_without_looking_is_refused_once(
     assert response.citations == [doc_id]
     assert model.requests[1][-1]["content"] == loop.TOOLS_FIRST
     assert "€120" not in json.dumps(model.requests[1])
-    assert [e["type"] for e in events][:2] == ["token", "token"]
-    assert {"type": "step"} in events and events.count({"type": "step"}) >= 1
+    # The discarded guess never reached the screen: no text shown, then wiped.
+    shown = "".join(e["text"] for e in events if e["type"] == "token")
+    assert shown.strip() == f"Your EDF bill is €94.37 (ID #{doc_id})."
+    assert {"type": "step"} not in events
     assert any(e["type"] == "tool" and e["name"] == "search_documents" for e in events)
+
+
+def test_promise_is_not_shown_before_being_discarded(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    long_promise = "I'll create the reminder for the property tax right away, " * 3
+    model.replies = [
+        call("list_deadlines"),
+        answer(long_promise),  # announced, not done: sent back with DO_IT
+        call("create_reminder", title="Property tax", due_date="2026-10-10"),
+        answer("Done: reminder on 10 October, as asked, for the property tax payment. " * 2),
+    ]
+    events: list[dict[str, Any]] = []
+    loop.run(session, "Remind me about the property tax on 10/10", [], emit=events.append)
+    shown = "".join(e["text"] for e in events if e["type"] == "token")
+    assert "I'll create" not in shown and shown.startswith("Done:")
+    assert {"type": "step"} not in events
+
+
+def test_questions_about_the_app_use_the_guide(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    model.replies = [
+        call("app_help", question="What is Gmail IMAP?"),
+        answer("Create an app password at myaccount.google.com/apppasswords."),
+    ]
+    loop.run(session, "What is Gmail IMAP?", [])
+    assert "app_help" in loop.system_prompt(session)
+    guide = json.loads(model.requests[1][-1]["content"])["guide"]
+    assert "myaccount.google.com/apppasswords" in guide[0]
+
+
+def test_router_answers_questions_about_the_app(library: dict[str, int], session: Session) -> None:
+    response = loop.run(session, "C'est quoi l'IMAP de GMAIL", [])
+    assert "apppasswords" in response.answer
+    assert [c.name for c in response.tool_calls] == ["app_help"]
+    phone = loop.run(session, "How do I scan with my phone?", [])
+    assert "QR code" in phone.answer
+    # A question about a document is not a question about the app.
+    edf = loop.run(session, "What should I do about the EDF bill?", [])
+    assert "app_help" not in [c.name for c in edf.tool_calls]
 
 
 def test_context_size_and_library_overview_are_sent(
@@ -243,7 +288,7 @@ def test_context_size_and_library_overview_are_sent(
     llm.chat([{"role": "user", "content": "hi"}])
     assert sent[0]["options"]["num_ctx"] >= 16384 and sent[0]["keep_alive"]
     prompt = loop.system_prompt(session, vision=True)
-    assert '"documents":16' in prompt and "view_document" in prompt
+    assert '"documents":21' in prompt and "view_document" in prompt
 
 
 def test_loose_citations_are_fixed_only_for_known_documents(
@@ -468,8 +513,8 @@ def test_offline_router_acts_only_when_asked(
     # A question about payments changes nothing.
     r = ask("How much have I paid for electricity?")
     assert "mark_deadline_paid" not in [c["name"] for c in r["tool_calls"]]
-    r = ask("I paid the property tax, mark it as paid")
-    assert r["changed"] and r["citations"] == [library["taxe-fonciere.pdf"]]
+    r = ask("I paid the income tax, mark it as paid")
+    assert r["changed"] and r["citations"] == [library["avis-imposition.pdf"]]
     r = ask("Write a letter to cancel my Orange subscription")
     assert r["letters"][0]["recipient"] == "Orange"
     assert "Rental application" in ask("What is missing in my rental application?")["answer"]

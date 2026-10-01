@@ -49,6 +49,32 @@ T = i18n.catalog(
             "en": "Documents to attach to a housing benefit claim with the CAF.",
             "fr": "Pièces à joindre à une demande d'aide au logement.",
         },
+        "identity_renewal_title": {
+            "en": "Identity card or passport renewal",
+            "fr": "Renouvellement de carte d'identité ou de passeport",
+        },
+        "identity_renewal_description": {
+            "en": "Pre-application on ants.gouv.fr, then an appointment at a town hall. Also "
+            "bring an identity photo less than 6 months old and, for a passport, a tax stamp "
+            "bought online.",
+            "fr": "Pré-demande sur ants.gouv.fr, puis rendez-vous en mairie. Prévoyez aussi une "
+            "photo d'identité de moins de 6 mois et, pour un passeport, un timbre fiscal acheté "
+            "en ligne.",
+        },
+        "school_title": {"en": "School enrolment", "fr": "Inscription scolaire"},
+        "school_description": {
+            "en": "Enrolment at the town hall, then admission at the school. Also bring the "
+            "child's health record (compulsory vaccinations).",
+            "fr": "Inscription en mairie, puis admission à l'école. Apportez aussi le carnet de "
+            "santé de l'enfant (vaccinations obligatoires).",
+        },
+        "retirement_title": {"en": "Retirement claim", "fr": "Demande de retraite"},
+        "retirement_description": {
+            "en": "One online claim on info-retraite.fr covers every scheme, 4 to 6 months "
+            "before the chosen date.",
+            "fr": "Une seule demande en ligne sur info-retraite.fr pour tous vos régimes, 4 à 6 "
+            "mois avant la date de départ choisie.",
+        },
         # Pieces: label and hint.
         "identity_label": {
             "en": "Valid identity document",
@@ -122,6 +148,50 @@ T = i18n.catalog(
             "en": "The signed lease, or a rent receipt less than 3 months old.",
             "fr": "Le bail signé, ou une quittance de moins de 3 mois.",
         },
+        "current_identity_label": {
+            "en": "Current identity card or passport, even expired",
+            "fr": "Carte d'identité ou passeport actuel, même périmé",
+        },
+        "current_identity_hint": {
+            "en": "If it was lost or stolen: the loss or theft declaration instead.",
+            "fr": "En cas de perte ou de vol : la déclaration de perte ou de vol à la place.",
+        },
+        "recent_address_label": {
+            "en": "Proof of address less than one year old",
+            "fr": "Justificatif de domicile de moins d'un an",
+        },
+        "birth_certificate_label": {"en": "Birth certificate", "fr": "Acte de naissance"},
+        "birth_certificate_hint": {
+            "en": "Only if your former document expired more than 5 years ago or was lost, and "
+            "your birthplace does not share its records online.",
+            "fr": "Seulement si l'ancienne pièce est périmée depuis plus de 5 ans ou perdue, et "
+            "si votre commune de naissance n'est pas dématérialisée.",
+        },
+        "child_civil_status_label": {
+            "en": "Family record book or child's birth certificate",
+            "fr": "Livret de famille ou acte de naissance de l'enfant",
+        },
+        "child_civil_status_hint": {
+            "en": "Ask the town hall of the place of birth for a copy of the birth certificate.",
+            "fr": "Demandez une copie de l'acte de naissance à la mairie du lieu de naissance.",
+        },
+        "parent_identity_label": {
+            "en": "Identity document of a parent",
+            "fr": "Pièce d'identité d'un parent",
+        },
+        "former_school_label": {
+            "en": "Certificate from the former school",
+            "fr": "Certificat de radiation de l'ancienne école",
+        },
+        "former_school_hint": {
+            "en": "Only when changing school: the former school gives it.",
+            "fr": "Seulement en cas de changement d'école : l'ancienne école le délivre.",
+        },
+        "pension_statement_label": {"en": "Career statement", "fr": "Relevé de carrière"},
+        "pension_statement_hint": {
+            "en": "Downloadable from info-retraite.fr; check every year is there.",
+            "fr": "Téléchargeable sur info-retraite.fr ; vérifiez que toutes vos années y sont.",
+        },
         # Status notes.
         "partial": {"en": "{found} of {needed}", "fr": "{found} sur {needed}"},
         "expired": {
@@ -166,6 +236,8 @@ class Piece:
     # Maximum age (days) from the document's date.
     max_age: int | None = None
     optional: bool = False
+    # An expired document still does (the former identity card for its renewal).
+    expired_ok: bool = False
     # Catalog keys of the label and hint (default: "<key>_label", "<key>_hint").
     text: str = ""
     hint_text: str = ""
@@ -201,6 +273,16 @@ IDENTITY = Piece("identity", lambda d: d.doc_type in IDENTITY_TYPES)
 TAX_NOTICE = Piece("tax_notice", _type_in(DocType.TAX_NOTICE), max_age=550)
 PAYSLIPS = Piece("income", _type_in(DocType.PAYSLIP), count=3, max_age=100)
 WORK_CONTRACT = Piece("work_contract", _type_in(DocType.EMPLOYMENT_CONTRACT))
+BANK_DETAILS = Piece("bank_details", _type_in(DocType.BANK_DETAILS))
+
+
+def _proof_of_address(d: Document) -> bool:
+    return d.doc_type in PROOF_OF_ADDRESS and d.category in {
+        Category.ENERGY,
+        Category.TELECOM,
+        Category.HOUSING,
+    }
+
 
 KINDS: dict[str, FolderKind] = {
     k.key: k
@@ -219,14 +301,7 @@ KINDS: dict[str, FolderKind] = {
             "mortgage",
             [
                 IDENTITY,
-                Piece(
-                    "proof_of_address",
-                    lambda d: (
-                        d.doc_type in PROOF_OF_ADDRESS
-                        and d.category in {Category.ENERGY, Category.TELECOM, Category.HOUSING}
-                    ),
-                    max_age=92,
-                ),
+                Piece("proof_of_address", _proof_of_address, max_age=92),
                 PAYSLIPS,
                 Piece("tax_notices", _type_in(DocType.TAX_NOTICE), count=2, max_age=915),
                 Piece("bank_statements", _type_in(DocType.BANK_STATEMENT), count=3, max_age=100),
@@ -237,7 +312,7 @@ KINDS: dict[str, FolderKind] = {
             "caf",
             [
                 IDENTITY,
-                Piece("bank_details", _type_in(DocType.BANK_DETAILS)),
+                BANK_DETAILS,
                 Piece("housing", _type_in(DocType.LEASE, DocType.RENT_RECEIPT)),
                 Piece(
                     "tax_notice",
@@ -246,6 +321,44 @@ KINDS: dict[str, FolderKind] = {
                     optional=True,
                     hint_text="tax_notice_optional_hint",
                 ),
+            ],
+        ),
+        FolderKind(
+            "identity_renewal",
+            [
+                Piece(
+                    "current_identity",
+                    _type_in(DocType.IDENTITY_CARD, DocType.PASSPORT),
+                    expired_ok=True,
+                ),
+                Piece(
+                    "recent_address",
+                    _proof_of_address,
+                    max_age=365,
+                    hint_text="proof_of_address_hint",
+                ),
+                Piece("birth_certificate", _type_in(DocType.CIVIL_STATUS), optional=True),
+            ],
+        ),
+        FolderKind(
+            "school",
+            [
+                Piece(
+                    "child_civil_status",
+                    _type_in(DocType.FAMILY_RECORD_BOOK, DocType.CIVIL_STATUS),
+                ),
+                Piece("proof_of_address", _proof_of_address, max_age=92),
+                Piece("parent_identity", IDENTITY.match, hint_text="identity_hint"),
+                Piece("former_school", _type_in(DocType.SCHOOL_CERTIFICATE), optional=True),
+            ],
+        ),
+        FolderKind(
+            "retirement",
+            [
+                Piece("pension_statement", _type_in(DocType.PENSION_STATEMENT)),
+                IDENTITY,
+                BANK_DETAILS,
+                TAX_NOTICE,
             ],
         ),
     ]
@@ -280,7 +393,7 @@ def _date_of(doc: Document) -> date:
 
 
 def _is_fresh(doc: Document, piece: Piece, today: date) -> bool:
-    if doc.expiry_date is not None and doc.expiry_date < today:
+    if doc.expiry_date is not None and doc.expiry_date < today and not piece.expired_ok:
         return False
     return piece.max_age is None or _date_of(doc) >= today - timedelta(days=piece.max_age)
 
@@ -385,6 +498,10 @@ KIND_WORDS = {
     "rental": r"locat|louer|bail|proprietaire|landlord|rent(?:al|ing)|flat|apartment|appartement",
     "mortgage": r"pret|credit immobilier|emprunt|banque|mortgage|loan",
     "caf": r"(?<![a-z])caf(?![a-z])|apl|aide au logement|allocation logement|housing benefit",
+    "identity_renewal": r"renouvel\w* (?:de )?(?:ma |mon |la |le )?(?:carte d'identite|cni|"
+    r"passeport)|(?:identity card|passport) renewal|renew (?:my )?(?:identity card|passport)",
+    "school": r"inscription (?:scolaire|a l'ecole)|school enrol",
+    "retirement": r"retraite|retirement|pension claim",
 }
 PICK_PROMPT = """The user needs to put together a file of documents: "{purpose}". Country: \
 {country}. Their documents (id, title, type, date, person):

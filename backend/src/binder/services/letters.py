@@ -1,8 +1,10 @@
 """Letters written for the user, complete and ready to send, then followed until answered.
 
 Any letter can be asked for in plain words ("ask the CAF to pay the overpayment in
-instalments"): the local model writes the body from the related document; without a model, the
-closest template (termination, complaint, request, or a generic letter) is used. The sender
+instalments"): the local model writes the body from the related document. The common letters
+(termination, complaint, request, payment plan, appeal, formal notice, change of address) also
+have templates carrying the legal points they rely on; the model is briefed with the same
+points, and the templates write the letter without a model (demos). The sender
 (name, address) and the recipient's address come from the documents themselves; only what
 Binder really cannot know stays between square brackets.
 
@@ -26,9 +28,12 @@ from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
 
 from binder import i18n
-from binder.models import Category, Correspondence, Deadline, Document
+from binder.models import Category, Correspondence, Deadline, DocType, Document
+from binder.schemas import LegalCheck
 from binder.schemas import Letter as Letter  # re-exported: letters.Letter
-from binder.services import activity, household, llm, settings_store, undo
+from binder.services import activity, household, lawcheck, llm, settings_store, undo
+from binder.services.profile import KEY as PROFILE_KEY
+from binder.services.profile import Profile as Profile  # re-exported: letters.Profile
 from binder.services.rules import normalize
 from binder.services.text import html_to_pdf
 
@@ -50,6 +55,16 @@ T = i18n.catalog(
             "en": "Document request (certificate, duplicate…)",
             "fr": "Demande de document (attestation, duplicata…)",
         },
+        "kind_payment_plan": {
+            "en": "Payment plan or extra time to pay",
+            "fr": "Demande de délai ou d'échelonnement de paiement",
+        },
+        "kind_appeal": {
+            "en": "Challenge a decision (fine, tax, benefits)",
+            "fr": "Contestation d'une décision (amende, impôts, CAF…)",
+        },
+        "kind_formal_notice": {"en": "Formal notice", "fr": "Mise en demeure"},
+        "kind_address_change": {"en": "Change of address", "fr": "Changement d'adresse"},
         "written": {
             "en": "Letter drafted: {subject} ({recipient})",
             "fr": "Courrier rédigé : {subject} ({recipient})",
@@ -174,6 +189,179 @@ T = i18n.catalog(
             "en": "You may send it to me by post or by email using the contact details above.",
             "fr": "Vous pouvez me l'adresser par courrier ou par e-mail aux coordonnées ci-dessus.",
         },
+        # Payment plan.
+        "plan_subject": {
+            "en": "Request for a payment plan",
+            "fr": "Demande d'échelonnement de paiement",
+        },
+        "plan_target_amount": {
+            "en": "the sum of {amount:money} you are asking me to pay",
+            "fr": "la somme de {amount:money} dont vous me demandez le paiement",
+        },
+        "plan_target_due": {
+            "en": "the sum of {amount:money} you are asking me to pay by {due:date}",
+            "fr": "la somme de {amount:money} dont vous me demandez le paiement avant le "
+            "{due:date}",
+        },
+        "plan_target": {
+            "en": "the sum you are asking me to pay",
+            "fr": "la somme dont vous me demandez le paiement",
+        },
+        "plan_intro": {
+            "en": "I am writing to you regarding {target} (reference above).",
+            "fr": "Je vous écris au sujet de {target} (référence ci-dessus).",
+        },
+        "plan_situation": {
+            "en": "[Explain your situation here: lower income, unexpected expenses…]",
+            "fr": "[Expliquez ici votre situation : baisse de revenus, dépenses imprévues…]",
+        },
+        "plan_ask": {
+            "en": "My situation does not allow me to pay this sum in one go. I would be grateful "
+            "if you could allow me to pay it in [number] monthly instalments, or grant me extra "
+            "time.",
+            "fr": "Ma situation ne me permet pas de régler cette somme en une seule fois. Je vous "
+            "serais reconnaissant(e) de bien vouloir m'accorder un échelonnement en [nombre] "
+            "mensualités, ou un délai supplémentaire.",
+        },
+        # Benefits offices can also write off a debt the household cannot repay.
+        "plan_write_off": {
+            "en": "Failing that, given my situation, I ask for the debt to be written off in "
+            "whole or in part.",
+            "fr": "À défaut, compte tenu de ma situation, je sollicite une remise totale ou "
+            "partielle de cette dette.",
+        },
+        "plan_good_faith": {
+            "en": "I am acting in good faith and wish to settle this debt. Please confirm the "
+            "schedule you agree to.",
+            "fr": "De bonne foi, je souhaite m'acquitter de cette somme dans les meilleures "
+            "conditions. Je vous remercie de bien vouloir me confirmer l'échéancier retenu.",
+        },
+        # Appeal.
+        "appeal_subject": {"en": "Appeal against a decision", "fr": "Recours gracieux"},
+        "appeal_intro": {
+            "en": "I am asking you to reconsider the decision referenced above.",
+            "fr": "Je sollicite, par la voie du recours gracieux, le réexamen de la décision "
+            "référencée ci-dessus.",
+        },
+        "fine_subject": {
+            "en": "Request for exemption from a fine",
+            "fr": "Requête en exonération",
+        },
+        "fine_recipient": {
+            "en": "Public Prosecutor's Officer",
+            "fr": "Officier du Ministère Public",
+        },
+        "fine_intro": {
+            "en": "I dispute the fine referenced above and hereby submit a request for exemption, "
+            "within the 45-day time limit.",
+            "fr": "Je conteste l'avis de contravention référencé ci-dessus et vous adresse une "
+            "requête en exonération, dans le délai de 45 jours.",
+        },
+        "fine_reasons": {
+            "en": "[State the grounds: you were not driving, vehicle sold, wrong number plate, "
+            "missing road sign…]",
+            "fr": "[Exposez les motifs : vous n'étiez pas le conducteur, véhicule vendu, erreur "
+            "de plaque, signalisation absente…]",
+        },
+        "fine_original": {
+            "en": "Please find enclosed the original notice of the fine.",
+            "fr": "Vous trouverez ci-joint l'original de l'avis de contravention.",
+        },
+        "benefit_subject": {
+            "en": "Appeal to the amicable appeals board",
+            "fr": "Recours amiable",
+        },
+        "benefit_recipient": {
+            "en": "Amicable appeals board",
+            "fr": "Commission de recours amiable",
+        },
+        "benefit_intro": {
+            "en": "I dispute the decision referenced above and refer it to the amicable appeals "
+            "board, within two months of its notification.",
+            "fr": "Je conteste la décision référencée ci-dessus et saisis la commission de "
+            "recours amiable, dans le délai de deux mois suivant sa notification.",
+        },
+        "tax_subject": {"en": "Tax claim", "fr": "Réclamation"},
+        "tax_intro": {
+            "en": "I dispute the tax referenced above and hereby submit a claim.",
+            "fr": "Je conteste l'imposition référencée ci-dessus et vous adresse une réclamation.",
+        },
+        "tax_relief": {
+            "en": "I ask you to grant the corresponding tax relief.",
+            "fr": "Je vous prie de bien vouloir prononcer le dégrèvement correspondant.",
+        },
+        "appeal_reasons": {
+            "en": "[Explain why the decision is wrong, with the facts and dates.]",
+            "fr": "[Expliquez pourquoi la décision est erronée, avec les faits et les dates.]",
+        },
+        "appeal_enclosed": {
+            "en": "Please find enclosed the supporting documents.",
+            "fr": "Vous trouverez ci-joint les pièces justificatives.",
+        },
+        # Formal notice.
+        "notice_subject": {"en": "Formal notice", "fr": "Mise en demeure"},
+        "notice_what": {
+            "en": "[specify: refund of the deposit, repair not carried out, order not delivered…]",
+            "fr": "[précisez : restitution du dépôt de garantie, réparation non effectuée, "
+            "commande non livrée…]",
+        },
+        "notice_intro": {
+            "en": "Despite my previous requests, the following situation has still not been "
+            "resolved: {what}.",
+            "fr": "Malgré mes précédentes démarches, la situation suivante reste à ce jour sans "
+            "suite : {what}.",
+        },
+        "notice_amount": {
+            "en": "The amount at stake is {amount:money}.",
+            "fr": "Le montant en jeu s'élève à {amount:money}.",
+        },
+        "notice_deposit": {
+            "en": "The deposit must be returned within one month of handing back the keys (two "
+            "months if the check-out inventory differs from the check-in one); beyond that, "
+            "the sum due is increased by 10% of the monthly rent for each month of delay "
+            "(article 22 of French law no. 89-462 of 6 July 1989).",
+            "fr": "Le dépôt de garantie doit être restitué dans un délai d'un mois à compter de "
+            "la remise des clés (deux mois si l'état des lieux de sortie diffère de celui "
+            "d'entrée) ; au-delà, le montant dû est majoré de 10 % du loyer mensuel par mois de "
+            "retard (article 22 de la loi n° 89-462 du 6 juillet 1989).",
+        },
+        "notice_demand": {
+            "en": "I hereby give you formal notice to remedy this within fifteen days of "
+            "receiving this letter.",
+            "fr": "Par la présente, je vous mets en demeure d'y remédier dans un délai de quinze "
+            "jours à compter de la réception de ce courrier.",
+        },
+        "notice_court": {
+            "en": "Failing that, I reserve the right to refer the matter to a conciliator or to "
+            "the competent court without further notice.",
+            "fr": "À défaut, je me réserve le droit de saisir le conciliateur de justice ou la "
+            "juridiction compétente, sans autre avis.",
+        },
+        # Change of address.
+        "move_subject": {"en": "Change of address", "fr": "Changement d'adresse"},
+        "move_intro_dated": {
+            "en": "Please note that my address changes on {when:date}. My new address is:",
+            "fr": "Je vous informe de mon changement d'adresse à compter du {when:date}. Ma "
+            "nouvelle adresse est la suivante :",
+        },
+        "move_intro": {
+            "en": "Please note that my address has changed. My new address is:",
+            "fr": "Je vous informe de mon changement d'adresse. Ma nouvelle adresse est la "
+            "suivante :",
+        },
+        "move_new_address": {"en": "[New address]", "fr": "[Nouvelle adresse]"},
+        "move_update": {
+            "en": "Please update my details for the contract referenced above and send your "
+            "mail to this address from now on.",
+            "fr": "Je vous remercie de bien vouloir mettre à jour mes coordonnées pour le contrat "
+            "référencé ci-dessus et de m'adresser désormais votre courrier à cette adresse.",
+        },
+        "move_transfer": {
+            "en": "I would like to transfer my contract to this address on that date (or, "
+            "failing that, to end it then); I will send you the meter reading.",
+            "fr": "Je souhaite transférer mon contrat à cette adresse à cette date (ou, à défaut, "
+            "le résilier à cette date) ; je vous communiquerai le relevé du compteur.",
+        },
         # Letter described in words, without a model.
         "custom_intro": {
             "en": "I am writing to you in order to {purpose}.",
@@ -224,22 +412,21 @@ FOLLOW_UP_REGISTERED = 30
 BLANK = re.compile(r"\[[^\]\n]{2,80}\]")
 
 # Setting holding the sender's details.
-PROFILE_KEY = "profile"
 # Stable identifiers of the letter kinds (API values).
-KINDS = ("termination", "complaint", "request")
+KINDS = (
+    "termination",
+    "complaint",
+    "request",
+    "payment_plan",
+    "appeal",
+    "formal_notice",
+    "address_change",
+)
 
 
 def kind_titles() -> dict[str, str]:
     """{kind: title} in the interface language."""
     return {kind: T(f"kind_{kind}") for kind in KINDS}
-
-
-class Profile(BaseModel):
-    name: str = ""
-    address: str = ""
-    city: str = ""
-    email: str = ""
-    phone: str = ""
 
 
 def profile_for(session: Session) -> Profile:
@@ -323,6 +510,90 @@ def _request(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
     return T("request_subject"), paragraphs, False
 
 
+def _payment_plan(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+    if doc is not None and doc.amount is not None and doc.due_date is not None:
+        target = T("plan_target_due", amount=doc.amount, due=doc.due_date)
+    elif doc is not None and doc.amount is not None:
+        target = T("plan_target_amount", amount=doc.amount)
+    else:
+        target = T("plan_target")
+    paragraphs = [T("plan_intro", target=target), details or T("plan_situation"), T("plan_ask")]
+    if doc is not None and doc.category == Category.SOCIAL:
+        paragraphs.append(T("plan_write_off"))
+    paragraphs.append(T("plan_good_faith"))
+    return T("plan_subject"), paragraphs, False
+
+
+def appeal_procedure(doc: Document | None) -> str:
+    """Which appeal applies: "fine", "benefit" (benefits or health insurance), "tax" or
+    "other" (any other decision: recours gracieux)."""
+    if doc is None:
+        return "other"
+    if doc.doc_type == DocType.FINE:
+        return "fine"
+    if doc.doc_type == DocType.BENEFIT_DECISION or doc.category in (
+        Category.SOCIAL,
+        Category.HEALTH,
+    ):
+        return "benefit"
+    if doc.category == Category.TAXES:
+        return "tax"
+    return "other"
+
+
+def _appeal(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+    procedure = appeal_procedure(doc)
+    if procedure == "fine":
+        paragraphs = [T("fine_intro"), details or T("fine_reasons"), T("fine_original")]
+        return T("fine_subject"), paragraphs, True
+    if procedure == "benefit":
+        paragraphs = [T("benefit_intro"), details or T("appeal_reasons"), T("appeal_enclosed")]
+        return T("benefit_subject"), paragraphs, True
+    if procedure == "tax":
+        paragraphs = [T("tax_intro"), details or T("appeal_reasons"), T("tax_relief")]
+        paragraphs.append(T("appeal_enclosed"))
+        return T("tax_subject"), paragraphs, True
+    paragraphs = [T("appeal_intro"), details or T("appeal_reasons"), T("appeal_enclosed")]
+    return T("appeal_subject"), paragraphs, True
+
+
+def _formal_notice(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+    what = (details or T("notice_what")).rstrip(".")
+    paragraphs = [T("notice_intro", what=what[:1].lower() + what[1:])]
+    if doc is not None and doc.amount is not None:
+        paragraphs.append(T("notice_amount", amount=doc.amount))
+    housing = doc is not None and doc.doc_type in (DocType.LEASE, DocType.RENT_RECEIPT)
+    if housing and re.search(r"garantie|deposit", normalize(details)):
+        paragraphs.append(T("notice_deposit"))
+    paragraphs += [T("notice_demand"), T("notice_court")]
+    return T("notice_subject"), paragraphs, True
+
+
+def address_details(new_address: str, when: date | None = None) -> str:
+    """`details` of a change of address letter."""
+    return f"{when.isoformat()}\n{new_address}" if when else new_address
+
+
+def _address_change(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+    """`details`: the new address, optionally preceded by the moving date on its own line
+    (YYYY-MM-DD, see address_details)."""
+    lines = [line.strip() for line in details.strip().splitlines() if line.strip()]
+    when = None
+    if lines:
+        try:
+            when = date.fromisoformat(lines[0])
+            lines = lines[1:]
+        except ValueError:
+            pass
+    intro = T("move_intro_dated", when=when) if when else T("move_intro")
+    new_address = "\n".join(lines) or T("move_new_address")
+    paragraphs = [f"{intro}\n{new_address}"]
+    if doc is not None and doc.category in (Category.ENERGY, Category.TELECOM):
+        paragraphs.append(T("move_transfer"))
+    paragraphs.append(T("move_update"))
+    return T("move_subject"), paragraphs, False
+
+
 def _custom(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
     purpose = details or T("request_placeholder")
     purpose = purpose[:1].lower() + purpose[1:]
@@ -336,8 +607,25 @@ BUILDERS = {
     "termination": _cancellation,
     "complaint": _complaint,
     "request": _request,
+    "payment_plan": _payment_plan,
+    "appeal": _appeal,
+    "formal_notice": _formal_notice,
+    "address_change": _address_change,
     "custom": _custom,
 }
+
+
+def _recipient(kind: str, doc: Document | None) -> str | None:
+    """Who an appeal goes to, when it is not the issuer itself."""
+    if kind != "appeal":
+        return None
+    procedure = appeal_procedure(doc)
+    if procedure == "fine":
+        return T("fine_recipient")
+    if procedure == "benefit":
+        board = T("benefit_recipient")
+        return f"{doc.issuer} - {board}" if doc is not None and doc.issuer else board
+    return None
 
 
 def letter_language() -> i18n.Language:
@@ -354,7 +642,10 @@ def write(
     language = letter_language()
     with i18n.using(language):
         subject, paragraphs, registered = BUILDERS[kind](doc, details.strip())
-        return layout(kind, doc, profile, subject, paragraphs, registered, language, address)
+        recipient = _recipient(kind, doc)
+        return layout(
+            kind, doc, profile, subject, paragraphs, registered, language, address, recipient
+        )
 
 
 def layout(
@@ -454,8 +745,48 @@ class _Composed(BaseModel):
     registered: bool = False
 
 
+# What the model is told for a letter of a known kind: the legal points of the template.
+BRIEFS = {
+    "payment_plan": "Ask for a payment plan (monthly instalments) or extra time to pay the sum "
+    "due, explaining the situation in good faith. To a benefits office (CAF…), also ask for the "
+    "debt to be written off in whole or in part if it cannot be repaid.",
+    "formal_notice": "A formal notice (mise en demeure) giving 15 days to comply, after which "
+    "the matter may go to a conciliator or to court; registered letter. For a rental deposit "
+    "not returned: it is due one month after the keys are handed back (two if the inventories "
+    "differ), increased by 10% of the monthly rent per month of delay (article 22 of law "
+    "89-462).",
+}
+APPEAL_BRIEFS = {
+    "fine": "A request for exemption (requête en exonération) against the fine, to the Officier "
+    "du Ministère Public, within 45 days; the original notice is enclosed; registered letter.",
+    "benefit": "An appeal to the organisation's commission de recours amiable, within two months "
+    "of the decision; registered letter.",
+    "tax": "A claim (réclamation) to the tax office asking for the corresponding tax relief "
+    "(dégrèvement); registered letter.",
+    "other": "A recours gracieux asking the organisation to reconsider its decision; registered "
+    "letter.",
+}
+# Kinds whose template takes the user's own words.
+DETAILED = {"custom", "complaint", "payment_plan", "appeal", "formal_notice", "address_change"}
+
+
+def brief(kind: str | None, doc: Document | None) -> str:
+    """Instructions for the model for a letter of this kind ("" for kinds whose template is
+    used as it is: termination, request, change of address)."""
+    if kind == "appeal":
+        return APPEAL_BRIEFS[appeal_procedure(doc)]
+    return BRIEFS.get(kind or "", "")
+
+
 # Template chosen without a model, from the words of the request.
-_KIND_WORDS = [
+KIND_WORDS = [
+    ("formal_notice", r"mise en demeure|mettre en demeure|formal notice"),
+    ("payment_plan", r"echelonn|delai de paiement|plusieurs fois|instalment|payment plan"),
+    ("address_change", r"changement d'adresse|nouvelle adresse|demenag|change of address"),
+    (
+        "appeal",
+        r"amende|contravention|recours|contester (?:la|cette) decision|appeal|(?<![a-z])fine",
+    ),
     ("termination", r"resili|mettre fin|arreter mon|cancel|terminat|end my"),
     ("complaint", r"contest|reclam|dispute|complain|erreur|error|double|trop[ -]percu"),
 ]
@@ -463,7 +794,7 @@ _KIND_WORDS = [
 
 def guess_kind(purpose: str) -> str:
     norm = normalize(purpose)
-    return next((kind for kind, words in _KIND_WORDS if re.search(words, norm)), "custom")
+    return next((kind for kind, words in KIND_WORDS if re.search(words, norm)), "custom")
 
 
 def _compose_llm(purpose: str, doc: Document | None, language: i18n.Language) -> _Composed | None:
@@ -513,11 +844,15 @@ def compose(
     address = recipient_address(doc, profile)
     language = letter_language()
     composed = None
-    if kind is None and purpose.strip() and llm.is_available():
-        composed = _compose_llm(purpose.strip(), doc, language)
+    instructions = brief(kind, doc)
+    if purpose.strip() and llm.is_available() and (kind is None or instructions):
+        composed = _compose_llm(f"{instructions} {purpose.strip()}".strip(), doc, language)
     if composed is not None:
+        with i18n.using(language):
+            special = _recipient(kind or "custom", doc)
+        issuer = doc.issuer if doc and doc.issuer else None
         letter = layout(
-            "custom",
+            kind or "custom",
             doc,
             profile,
             composed.subject.strip(),
@@ -525,12 +860,15 @@ def compose(
             composed.registered,
             language,
             address,
-            recipient=(doc.issuer if doc and doc.issuer else composed.recipient.strip()) or None,
+            recipient=special or issuer or composed.recipient.strip() or None,
         )
     else:
         kind = kind or guess_kind(purpose)
-        details = purpose if kind in ("custom", "complaint") else ""
+        details = purpose if kind in DETAILED else ""
         letter = write(kind, doc, profile, details, address)
+    # Templates and the model may both quote law that has changed since: checked online today.
+    with i18n.using(language):
+        letter.verification = lawcheck.verify(session, letter.body)
     return save(session, letter, actor=actor)
 
 
@@ -544,6 +882,7 @@ def save(session: Session, letter: Letter, *, actor: str = "user") -> Letter:
         body=letter.body,
         language=letter.language,
         registered=letter.registered,
+        verification=letter.verification.model_dump_json() if letter.verification else None,
     )
     session.add(row)
     session.flush()
@@ -569,6 +908,7 @@ def out(row: Correspondence) -> Letter:
         follow_up_on=row.follow_up_on,
         answered=row.answered,
         blanks=len(BLANK.findall(row.body)),
+        verification=LegalCheck.model_validate_json(row.verification) if row.verification else None,
     )
 
 

@@ -1,9 +1,10 @@
 """The Today feed: everything that needs the user, as cards with one-tap actions.
 
-Sources: the recovery code to write down, import reports, the weekly briefing, questions about
-uncertain documents, deadlines, renewals, anomalies, missing documents, letters to send or
-follow up, and proactive suggestions (sort out old papers, compare an insurance before it
-renews). Every action runs through `act`, which the routes wrap in an undo capture.
+Sources: import reports, the weekly briefing, questions about uncertain documents, deadlines,
+renewals, anomalies, missing documents, letters to send or follow up, the next steps of the
+journeys under way, documents waiting for the local AI, and proactive suggestions (sort out old
+papers, compare an insurance before it renews). Every action runs through `act`, which the
+routes wrap in an undo capture.
 """
 
 from datetime import UTC, date, datetime, time, timedelta
@@ -14,7 +15,7 @@ from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.db import WITHOUT_TEXT
-from binder.models import Category, Correspondence, Deadline, DocType, Document
+from binder.models import Category, Correspondence, Deadline, DocType, Document, DocumentStatus
 from binder.services import (
     activity,
     anomalies,
@@ -25,6 +26,7 @@ from binder.services import (
     editing,
     household,
     ingest,
+    journeys,
     letters,
     missing,
     questions,
@@ -37,18 +39,6 @@ from binder.services import (
 T = i18n.catalog(
     "feed",
     {
-        "recovery_title": {
-            "en": "Write down your recovery code",
-            "fr": "Notez votre code de récupération",
-        },
-        "recovery_detail": {
-            "en": "Binder backs up your documents every day, encrypted. With this code, a backup "
-            "opens on any computer. Keep it on paper, away from this computer.",
-            "fr": "Binder sauvegarde vos documents chaque jour, chiffrés. Avec ce code, une "
-            "sauvegarde s'ouvre sur n'importe quel ordinateur. Gardez-le sur papier, loin de cet "
-            "ordinateur.",
-        },
-        "recovery_done": {"en": "I wrote it down", "fr": "Je l'ai noté"},
         "report_upload_one": {"en": "{n} document added", "fr": "{n} document ajouté"},
         "report_upload_other": {"en": "{n} documents added", "fr": "{n} documents ajoutés"},
         "report_mail_one": {
@@ -199,6 +189,23 @@ T = i18n.catalog(
             "fr": "Code noté. Binder ne l'affiche plus.",
         },
         "list_separator": {"en": ", ", "fr": ", "},
+        "step_due_in": {"en": "By {date:date}", "fr": "Avant le {date:date}"},
+        "step_today": {"en": "Today", "fr": "Aujourd'hui"},
+        "journey_detail": {"en": "{journey} · {when}", "fr": "{journey} · {when}"},
+        "see_steps": {"en": "See the steps", "fr": "Voir les étapes"},
+        "act_step": {"en": "Done: {title}", "fr": "C'est fait : {title}"},
+        "waiting_title_one": {
+            "en": "{n} document is waiting for the local AI",
+            "fr": "{n} document attend l'IA locale",
+        },
+        "waiting_title_other": {
+            "en": "{n} documents are waiting for the local AI",
+            "fr": "{n} documents attendent l'IA locale",
+        },
+        "waiting_detail": {
+            "en": "They are kept safe. Binder reads and files them as soon as the AI is ready.",
+            "fr": "Ils sont en sécurité. Binder les lira et les rangera dès que l'IA sera prête.",
+        },
     },
 )
 
@@ -211,7 +218,7 @@ TONE_RANK = {"urgent": 0, "soon": 1, "info": 2}
 # Actions run by the server; the others are handled by the interface (open, agent, upload…).
 SERVER_ACTIONS = {
     "answer", "mark_paid", "trash_many", "letter", "letter_sent", "letter_answered",
-    "follow_up", "dismiss", "confirm_recovery", "remind", "mark_seen",
+    "follow_up", "dismiss", "confirm_recovery", "remind", "mark_seen", "journey_step",
 }  # fmt: skip
 
 
@@ -234,7 +241,7 @@ class FeedItem(BaseModel):
     when: date | None = None
     document_ids: list[int] = []
     actions: list[Action] = []
-    # Kind-specific data: recovery code, import batch, briefing figures…
+    # Kind-specific data: import batch, briefing figures…
     extra: dict[str, Any] = {}
 
 
@@ -248,23 +255,6 @@ def _dismiss_action(key: str, label: str | None = None) -> Action:
 
 def _open(doc_id: int, label: str | None = None) -> Action:
     return Action(type="open", label=label or T("open"), params={"url": f"/documents/{doc_id}"})
-
-
-def _recovery(session: Session) -> list[FeedItem]:
-    state = backup.state(session)
-    if state.confirmed or not state.code:
-        return []
-    return [
-        FeedItem(
-            key="recovery",
-            kind="recovery",
-            tone="info",
-            title=T("recovery_title"),
-            detail=T("recovery_detail"),
-            actions=[Action(type="confirm_recovery", label=T("recovery_done"), primary=True)],
-            extra={"code": state.code},
-        )
-    ]
 
 
 def _reports(session: Session) -> list[FeedItem]:
@@ -690,6 +680,75 @@ def _reply(session: Session, row: Correspondence) -> Document | None:
     return next((d for d in docs if normalize(d.issuer or "") == who), None)
 
 
+def _step_when(due: date, today: date) -> str:
+    days = (due - today).days
+    if days < 0:
+        return T("overdue_one") if days == -1 else T("overdue", days=-days)
+    return T("step_today") if days == 0 else T("step_due_in", date=due)
+
+
+def _journeys(session: Session, today: date) -> list[FeedItem]:
+    """The next steps of each journey under way, due within a week (or late): two at most per
+    journey, the journey itself holds the rest."""
+    items = []
+    shown: dict[int, int] = {}
+    for row, step in journeys.due_steps(session, today, SOON):
+        assert row.id is not None and step.due is not None
+        if shown.get(row.id, 0) >= 2:
+            continue
+        shown[row.id] = shown.get(row.id, 0) + 1
+        items.append(
+            FeedItem(
+                key=f"journey:{row.id}:{step.key}:{row.event_date}",
+                kind="journey",
+                tone="urgent" if step.due <= today + timedelta(days=2) else "soon",
+                title=step.title,
+                detail=T(
+                    "journey_detail",
+                    journey=journeys.title(row),
+                    when=_step_when(step.due, today),
+                ),
+                when=step.due,
+                document_ids=step.document_ids,
+                actions=[
+                    Action(
+                        type="journey",
+                        label=T("see_steps"),
+                        primary=True,
+                        params={"journey_id": row.id},
+                    ),
+                    Action(
+                        type="journey_step",
+                        label=T("done"),
+                        params={"journey_id": row.id, "step": step.key},
+                    ),
+                ],
+                extra={"journey_id": row.id, "step": step.key},
+            )
+        )
+    return items
+
+
+def _waiting(session: Session) -> list[FeedItem]:
+    ids = session.exec(
+        select(Document.id).where(
+            Document.status == DocumentStatus.WAITING, col(Document.deleted_at).is_(None)
+        )
+    ).all()
+    if not ids:
+        return []
+    return [
+        FeedItem(
+            key=f"waiting:{len(ids)}",
+            kind="waiting",
+            tone="info",
+            title=T.plural("waiting_title", len(ids)),
+            detail=T("waiting_detail"),
+            document_ids=[i for i in ids if i is not None],
+        )
+    ]
+
+
 def _household(session: Session) -> list[FeedItem]:
     members = household.members(session)
     full = [m for m in members if len(m.name.split()) >= 2]
@@ -713,10 +772,11 @@ def _household(session: Session) -> list[FeedItem]:
 def build(session: Session, today: date | None = None) -> list[FeedItem]:
     today = today or date.today()
     dismissed = set(settings_store.load(session, DISMISSED_KEY, Dismissed).keys)
-    lead = _recovery(session) + _reports(session) + _briefing(session)
+    lead = _reports(session) + _briefing(session) + _waiting(session)
     rest = (
         _questions(session)
         + _deadlines(session, today)
+        + _journeys(session, today)
         + _expirations(session, today)
         + _anomalies(session)
         + _letters(session, today)
@@ -819,6 +879,18 @@ def act(session: Session, kind: str, params: dict[str, Any], *, actor: str = "us
     if kind == "dismiss":
         dismiss(session, str(params.get("key") or ""))
         return ActResult(message=T("act_dismissed"))
+    if kind == "journey_step":
+        from binder.models import Journey
+
+        journey = session.get(Journey, _int(params, "journey_id"))
+        if journey is None:
+            raise BadAction("journey")
+        key = str(params.get("step") or "")
+        try:
+            step = journeys.set_step(session, journey, key, True, actor=actor)
+        except journeys.UnknownStep as e:
+            raise BadAction("step") from e
+        return ActResult(message=T("act_step", title=step.title))
     if kind == "mark_seen":
         reports.mark_seen(session, str(params.get("batch") or ""))
         return ActResult(message=T("act_dismissed"))

@@ -425,6 +425,8 @@ CATEGORIES = catalog(
         "telecom": {"en": "Telecom", "fr": "Télécom"},
         "identity": {"en": "Identity", "fr": "Identité"},
         "vehicle": {"en": "Vehicle", "fr": "Véhicule"},
+        "family": {"en": "Family", "fr": "Famille"},
+        "purchases": {"en": "Purchases & warranties", "fr": "Achats & garanties"},
         "other": {"en": "Other", "fr": "Autre"},
     },
 )
@@ -458,6 +460,25 @@ DOC_TYPES = catalog(
         "payment_schedule": {"en": "Payment schedule", "fr": "Échéancier"},
         "invoice": {"en": "Invoice", "fr": "Facture"},
         "contract": {"en": "Contract", "fr": "Contrat"},
+        "loan_statement": {"en": "Loan statement", "fr": "Relevé de crédit"},
+        "savings_statement": {"en": "Savings statement", "fr": "Relevé d'épargne"},
+        "annual_tax_statement": {
+            "en": "Annual tax statement (IFU)",
+            "fr": "Imprimé fiscal unique (IFU)",
+        },
+        "donation_receipt": {"en": "Donation receipt", "fr": "Reçu de don"},
+        "childcare_certificate": {
+            "en": "Childcare costs certificate",
+            "fr": "Attestation de frais de garde",
+        },
+        "school_certificate": {"en": "School certificate", "fr": "Certificat de scolarité"},
+        "civil_status": {"en": "Civil status record", "fr": "Acte d'état civil"},
+        "family_record_book": {"en": "Family record book", "fr": "Livret de famille"},
+        "pension_statement": {"en": "Pension statement", "fr": "Relevé de carrière"},
+        "benefit_decision": {"en": "Benefit decision", "fr": "Notification de droits"},
+        "charges_statement": {"en": "Service charges statement", "fr": "Régularisation de charges"},
+        "fine": {"en": "Fine", "fr": "Avis de contravention"},
+        "purchase_receipt": {"en": "Purchase receipt", "fr": "Facture d'achat"},
     },
 )
 

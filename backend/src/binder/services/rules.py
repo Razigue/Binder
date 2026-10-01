@@ -39,6 +39,8 @@ T = i18n.catalog(
 # Weight = number of words in the expression: a long expression is more discriminating.
 CATEGORY_KEYWORDS: dict[Category, list[str]] = {
     Category.TAXES: [
+        "recu fiscal",
+        "reduction d'impot",
         "avis d'impot",
         "impot sur le revenu",
         "taxe fonciere",
@@ -94,6 +96,11 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "caisse d'epargne",
         "banque populaire",
         "credit mutuel",
+        "tableau d'amortissement",
+        "capital restant du",
+        "livret a",
+        "assurance vie",
+        "imprime fiscal unique",
     ],
     Category.IDENTITY: [
         "carte nationale d'identite",
@@ -102,8 +109,14 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "permis de conduire",
         "titre de sejour",
         "lieu de naissance",
+        "acte de naissance",
+        "livret de famille",
+        "officier de l'etat civil",
     ],
     Category.VEHICLE: [
+        "avis de contravention",
+        "amende forfaitaire",
+        "antai",
         "controle technique",
         "certificat d'immatriculation",
         "carte grise",
@@ -120,6 +133,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "charges locatives",
         "syndic",
         "depot de garantie",
+        "regularisation des charges",
     ],
     Category.HEALTH: [
         "assurance maladie",
@@ -142,6 +156,8 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "pole emploi",
         "urssaf",
         "attestation de paiement",
+        "trop-percu",
+        "notification de droits",
     ],
     Category.WORK: [
         "bulletin de paie",
@@ -153,6 +169,8 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "contrat de travail",
         "conges payes",
         "net imposable",
+        "releve de carriere",
+        "assurance retraite",
     ],
     Category.TELECOM: [
         "orange",
@@ -165,11 +183,42 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "abonnement internet",
         "facture mobile",
     ],
+    Category.FAMILY: [
+        "certificat de scolarite",
+        "frais de garde",
+        "assistante maternelle",
+        "creche",
+        "cantine",
+        "restauration scolaire",
+        "periscolaire",
+        "etablissement scolaire",
+    ],
+    Category.PURCHASES: [
+        "garantie legale",
+        "garantie commerciale",
+        "extension de garantie",
+        "bon de livraison",
+        "ticket de caisse",
+        "numero de serie",
+    ],
 }
 
 # (pattern, type): the first matching pattern gives the document type. Order matters: specific
 # types before generic ones ("attestation d'assurance" before "attestation").
 DOC_TYPES: list[tuple[str, DocType]] = [
+    (r"livret de famille", DocType.FAMILY_RECORD_BOOK),
+    (r"acte de (?:naissance|mariage|deces)|extrait d'acte", DocType.CIVIL_STATUS),
+    (r"avis de contravention|amende forfaitaire", DocType.FINE),
+    (r"imprime fiscal unique|(?<![a-z])ifu(?![a-z])", DocType.ANNUAL_TAX_STATEMENT),
+    (r"recu (?:fiscal|au titre des dons)|cerfa n?.? ?11580", DocType.DONATION_RECEIPT),
+    (r"frais de garde", DocType.CHILDCARE_CERTIFICATE),
+    (r"certificat de scolarite", DocType.SCHOOL_CERTIFICATE),
+    (r"releve de (?:carriere|situation individuelle)", DocType.PENSION_STATEMENT),
+    (r"trop-percu|notification de (?:droits|decision)", DocType.BENEFIT_DECISION),
+    (r"regularisation des charges", DocType.CHARGES_STATEMENT),
+    (r"tableau d'amortissement|capital restant du", DocType.LOAN_STATEMENT),
+    (r"releve (?:d'epargne|de (?:votre )?livret|annuel assurance vie)", DocType.SAVINGS_STATEMENT),
+    (r"garantie (?:legale|commerciale|constructeur)", DocType.PURCHASE_RECEIPT),
     (r"carte nationale d'identite|carte d'identite", DocType.IDENTITY_CARD),
     (r"passeport", DocType.PASSPORT),
     (r"permis de conduire", DocType.DRIVING_LICENCE),
@@ -243,6 +292,8 @@ REQUIRED_FIELDS: dict[Category, list[str]] = {
     Category.SOCIAL: ["issue_date"],
     Category.IDENTITY: ["expiry_date"],
     Category.VEHICLE: [],
+    Category.FAMILY: ["issue_date"],
+    Category.PURCHASES: ["amount"],
     Category.OTHER: [],
 }
 
@@ -282,8 +333,8 @@ AMOUNT_KEYWORDS = (
 REFERENCE_KEYWORDS = (
     r"reference(?: de l'avis| client| du contrat)?|ref\.?"
     r"|n[°o] (?:de )?(?:contrat|client|allocataire|police|facture)"
-    r"|numero (?:de )?(?:contrat|client|fiscal|allocataire|police|facture)"
-    r"|(?:facture|contrat|avis) n[°o]|identifiant"
+    r"|numero (?:de )?(?:contrat|client|fiscal|allocataire|police|facture|l'avis)"
+    r"|(?:facture|contrat|avis|recu) n[°o]|identifiant"
 )
 
 _AMOUNT_RE = re.compile(
@@ -437,7 +488,13 @@ TITLED_WITH_ISSUER = {
     DocType.QUOTE,
 }
 # Yearly tax documents: the title gives the year.
-TITLED_WITH_YEAR = {DocType.PROPERTY_TAX, DocType.HOUSING_TAX, DocType.TAX_NOTICE}
+TITLED_WITH_YEAR = {
+    DocType.PROPERTY_TAX,
+    DocType.HOUSING_TAX,
+    DocType.TAX_NOTICE,
+    DocType.ANNUAL_TAX_STATEMENT,
+    DocType.CHARGES_STATEMENT,
+}
 
 
 def detect_title(
@@ -481,6 +538,15 @@ INFORMATIVE_TYPES = {
     DocType.VEHICLE_REGISTRATION,
     DocType.BANK_DETAILS,
     DocType.LEASE,
+    DocType.LOAN_STATEMENT,
+    DocType.SAVINGS_STATEMENT,
+    DocType.ANNUAL_TAX_STATEMENT,
+    DocType.DONATION_RECEIPT,
+    DocType.CHILDCARE_CERTIFICATE,
+    DocType.SCHOOL_CERTIFICATE,
+    DocType.CIVIL_STATUS,
+    DocType.FAMILY_RECORD_BOOK,
+    DocType.PENSION_STATEMENT,
 }
 # Documents whose validity matters: without an end date, they go to review.
 EXPIRING_TYPES = {

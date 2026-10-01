@@ -53,7 +53,7 @@ def test_old_bill_imported_late_does_not_raise_alert(client: TestClient) -> None
 
 def test_single_document_is_not_a_subscription(client: TestClient, samples: list[Sample]) -> None:
     upload(client, by_name(samples, "facture-orange.pdf"))
-    upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    upload(client, by_name(samples, "avis-imposition.pdf"))
     assert client.get("/api/subscriptions").json() == []
 
 

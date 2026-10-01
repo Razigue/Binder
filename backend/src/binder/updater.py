@@ -1,5 +1,9 @@
 """Desktop application update from GitHub releases, at launch.
 
+Installed with the installer (Velopack: Setup.exe, .pkg, AppImage), Binder updates through
+Velopack: delta packages, verified, applied while Binder restarts. See `installed()`.
+
+The portable archives (and the versions published before the installer) use the update below.
 Like Discord: on startup, Binder queries the latest release. If it is newer, the archive for
 this system is downloaded next to the installation, verified (SHA-256) and extracted, then
 replaces the old version, and Binder restarts.
@@ -69,6 +73,31 @@ def _client(timeout: float | httpx.Timeout = 10.0) -> httpx.Client:
         follow_redirects=True,
         headers={"User-Agent": f"Binder/{__version__}"},
     )
+
+
+# --- Installed application (Velopack) -----------------------------------------------------
+
+
+def installed() -> Any | None:
+    """Velopack's update manager when Binder runs from its installer, otherwise None.
+
+    Velopack refuses to create one outside an installation (portable archive, sources).
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        import velopack
+
+        return velopack.UpdateManager(velopack.GithubSource(get_settings().update_repo))
+    except Exception as e:
+        log.info("Not installed by the installer: %s", e)
+        return None
+
+
+def download_size(info: Any) -> int:
+    """Bytes Velopack downloads for an update: the deltas when it can, else the full package."""
+    deltas = sum(int(d.Size) for d in info.DeltasToTarget)
+    return deltas or int(info.TargetFullRelease.Size)
 
 
 # --- Versions ------------------------------------------------------------------------------

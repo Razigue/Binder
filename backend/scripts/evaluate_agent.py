@@ -4,7 +4,7 @@ uv run python scripts/evaluate_agent.py              # configured Ollama model
 uv run python scripts/evaluate_agent.py --rules      # router without a model
 uv run python scripts/evaluate_agent.py --think -k reminder   # reasoning on, some scenarios
 
-Each scenario starts from a fresh copy of the same library (16 demo PDFs, plus a photographed
+Each scenario starts from a fresh copy of the same library (17 demo PDFs, plus a photographed
 water bill: an image, read by OCR or by the model's vision) and checks what matters: the tools
 called, the documents cited, the figures in the answer and the changes made in the database.
 """
@@ -115,9 +115,9 @@ def both(*checks: Callable[[Session, dict[str, int]], bool]) -> Callable[..., bo
 SCENARIOS = [
     # Facts held in the fields.
     Scenario(
-        "taxe_fonciere",
-        ["Combien je dois payer pour la taxe foncière et avant quand ?"],
-        cites=["taxe-fonciere.pdf"],
+        "impot_a_payer",
+        ["Combien je dois payer pour mes impôts et avant quand ?"],
+        cites=["avis-imposition.pdf"],
         answer=[money(1240), day(d(5))],
     ),
     Scenario(
@@ -134,15 +134,15 @@ SCENARIOS = [
     ),
     Scenario(
         "caf",
-        ["Combien je touche de la CAF par mois ?"],
+        ["Combien je touche d'allocations familiales par mois ?"],
         cites=["attestation-caf.pdf"],
-        answer=[money(212.45)],
+        answer=[money(151.08)],
     ),
     Scenario(
         "loyer",
         ["Mon loyer charges comprises, c'est combien ?"],
         cites=["quittance-loyer.pdf"],
-        answer=[money(850)],
+        answer=[money(1210)],
     ),
     Scenario(
         "cni_expiration",
@@ -175,7 +175,7 @@ SCENARIOS = [
         "revenu_fiscal",
         ["Quel est mon revenu fiscal de référence ?"],
         cites=["avis-imposition.pdf"],
-        answer=[money(32480)],
+        answer=[money(52310)],
     ),
     Scenario(
         "consommation",
@@ -206,7 +206,7 @@ SCENARIOS = [
         "a_payer_15j",
         ["Qu'est-ce que je dois payer dans les 15 prochains jours ?"],
         tools=["list_deadlines"],
-        answer=[r"taxe fonci|1[\s.,]?240"],
+        answer=[r"imp[oô]t|1[\s.,]?240"],
     ),
     Scenario(
         "deadlines_october_en",
@@ -220,7 +220,19 @@ SCENARIOS = [
         "avis_impot_que_faire",
         ["Qu'est-ce que je dois faire avec mon avis d'impôt sur le revenu ?"],
         cites=["avis-imposition.pdf"],
-        answer=[money(1842), r"pay|régl|dû|due"],
+        answer=[money(1240), r"pay|régl|dû|due"],
+    ),
+    Scenario(
+        "trop_percu_caf",
+        ["La CAF me réclame de l'argent : combien, pourquoi, et que puis-je faire ?"],
+        cites=["trop-percu-caf.pdf"],
+        answer=[money(423.48), r"rentrée scolaire|ARS", r"contest|échelonn|recours"],
+    ),
+    Scenario(
+        "prelevement_double",
+        ["Y a-t-il un problème sur mes prélèvements ?"],
+        any_tool=["list_alerts", "read_document", "search_documents"],
+        answer=[r"Orange"],
     ),
     Scenario(
         "a_verifier",
@@ -266,9 +278,9 @@ SCENARIOS = [
     ),
     Scenario(
         "taxe_payee",
-        ["J'ai payé la taxe foncière ce matin, marque-la comme réglée."],
+        ["J'ai payé mes impôts ce matin, marque l'avis comme réglé."],
         tools=["mark_deadline_paid"],
-        effect=deadline_done("taxe-fonciere.pdf"),
+        effect=deadline_done("avis-imposition.pdf"),
     ),
     Scenario(
         "reclasser_devis",
@@ -345,18 +357,21 @@ def water_bill() -> Sample:
 
 
 def build_library(directory: Path) -> None:
-    """The demo documents, filed with the rules (deterministic), plus a photographed bill."""
+    """The demo documents, filed with the rules (deterministic), plus a photographed bill. They
+    are imported as a demo batch: real documents would wait for the model."""
     use(directory)
     available = llm.is_available
     llm.is_available = lambda: False  # type: ignore[method-assign]
     try:
         with Session(get_engine()) as session:
+            batch = ingest.new_batch(ingest.DEMO_BATCH.rstrip("-"))
             for sample in build_samples(TODAY):
-                doc, _ = ingest.store(session, sample.pdf(), sample.filename, "application/pdf")
+                pdf = sample.pdf()
+                doc, _ = ingest.store(session, pdf, sample.filename, "application/pdf", batch=batch)
                 ingest.analyze(session, doc)
             photo = water_bill()
             png = render_page(photo.pdf(), "application/pdf", 0, dpi=130)
-            doc, _ = ingest.store(session, png, photo.filename, "image/png")
+            doc, _ = ingest.store(session, png, photo.filename, "image/png", batch=batch)
             ingest.analyze(session, doc)
     finally:
         llm.is_available = available  # type: ignore[method-assign]

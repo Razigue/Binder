@@ -38,7 +38,7 @@ def test_watched_folder_imports_once_and_leaves_files(
     inbox.mkdir()
     r = client.put("/api/import/settings", json={"folder": {"enabled": True, "path": str(inbox)}})
     assert r.status_code == 200
-    drop(inbox, "taxe.pdf", by_name(samples, "taxe-fonciere.pdf").pdf())
+    drop(inbox, "taxe.pdf", by_name(samples, "avis-imposition.pdf").pdf())
     drop(inbox, "2026/orange.pdf", by_name(samples, "facture-orange.pdf").pdf())
     drop(inbox, ".cache/ignore.pdf", by_name(samples, "facture-edf.pdf").pdf())
     drop(inbox, "notes.txt", b"not a document")
@@ -64,7 +64,7 @@ def test_watched_folder_imports_once_and_leaves_files(
 def test_trashed_document_is_not_reimported_from_folder(
     client: TestClient, samples: list[Sample], tmp_path: Path
 ) -> None:
-    drop(tmp_path / "in", "taxe.pdf", by_name(samples, "taxe-fonciere.pdf").pdf())
+    drop(tmp_path / "in", "taxe.pdf", by_name(samples, "avis-imposition.pdf").pdf())
     client.put(
         "/api/import/settings", json={"folder": {"enabled": True, "path": str(tmp_path / "in")}}
     )
@@ -186,7 +186,7 @@ def test_mail_error_is_reported_once(client: TestClient, monkeypatch: pytest.Mon
 def test_import_origin_follows_display_language(
     client: TestClient, samples: list[Sample], tmp_path: Path
 ) -> None:
-    drop(tmp_path / "in", "taxe.pdf", by_name(samples, "taxe-fonciere.pdf").pdf())
+    drop(tmp_path / "in", "taxe.pdf", by_name(samples, "avis-imposition.pdf").pdf())
     client.put(
         "/api/import/settings", json={"folder": {"enabled": True, "path": str(tmp_path / "in")}}
     )

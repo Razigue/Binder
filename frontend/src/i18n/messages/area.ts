@@ -1,17 +1,19 @@
 import { defineMessages } from "@/i18n/core"
 
-// The six life areas of the navigation, and their page.
+// The life areas of the navigation, and their page.
 export const area = defineMessages({
   en: {
     "area.housing": "Housing",
     "area.money": "Money",
     "area.work": "Work & benefits",
+    "area.family": "Family",
     "area.health": "Health",
     "area.identity": "Identity",
     "area.vehicle": "Vehicle",
     "hint.housing": "Rent, energy, internet and home insurance.",
     "hint.money": "Taxes, bank and insurance.",
     "hint.work": "Payslips, contracts and benefits.",
+    "hint.family": "School, childcare and family papers.",
     "hint.health": "Health insurance and reimbursements.",
     "hint.identity": "Identity documents and their renewal.",
     "hint.vehicle": "Registration, inspection and car insurance.",
@@ -30,6 +32,7 @@ export const area = defineMessages({
     noMatch: "No document matches.",
     oldVersion: "Older version",
     analysing: "Reading…",
+    waiting: "Waiting for the AI",
     question: "A question",
     count_one: "{count} document",
     count_other: "{count} documents",
@@ -38,12 +41,14 @@ export const area = defineMessages({
     "area.housing": "Logement",
     "area.money": "Argent",
     "area.work": "Travail & aides",
+    "area.family": "Famille",
     "area.health": "Santé",
     "area.identity": "Identité",
     "area.vehicle": "Véhicule",
     "hint.housing": "Loyer, énergie, internet et assurance habitation.",
     "hint.money": "Impôts, banque et assurances.",
     "hint.work": "Bulletins de paie, contrats et aides.",
+    "hint.family": "École, garde d'enfants et papiers de famille.",
     "hint.health": "Assurance maladie, mutuelle et remboursements.",
     "hint.identity": "Pièces d'identité et leur renouvellement.",
     "hint.vehicle": "Carte grise, contrôle technique et assurance auto.",
@@ -62,6 +67,7 @@ export const area = defineMessages({
     noMatch: "Aucun document ne correspond.",
     oldVersion: "Ancienne version",
     analysing: "Lecture…",
+    waiting: "En attente de l'IA",
     question: "Une question",
     count_one: "{count} document",
     count_other: "{count} documents",

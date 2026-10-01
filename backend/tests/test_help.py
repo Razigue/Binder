@@ -33,7 +33,7 @@ def money_fr(value: float) -> str:
 
 
 def test_explanation_of_a_bill_to_pay(client: TestClient, samples: list[Sample]) -> None:
-    doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    doc = upload(client, by_name(samples, "avis-imposition.pdf"))
     ex = client.get(f"/api/documents/{doc['id']}/explanation").json()
     assert ex["engine"] == "rules"
     assert ex["language"] == "en"
@@ -70,7 +70,7 @@ def test_reminder_letter_asks_for_action(client: TestClient) -> None:
 
 
 def test_explanation_is_cached_and_reset_on_edit(client: TestClient, samples: list[Sample]) -> None:
-    doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    doc = upload(client, by_name(samples, "avis-imposition.pdf"))
     url = f"/api/documents/{doc['id']}/explanation"
     client.get(url)
     client.patch(f"/api/documents/{doc['id']}", json={"amount": 1300.0})
@@ -82,7 +82,7 @@ def test_questions_are_answered_with_their_source(
 ) -> None:
     for s in samples:
         upload(client, s)
-    tax = client.get("/api/documents", params={"q": "taxe fonciere"}).json()[0]
+    tax = client.get("/api/documents", params={"q": "impot revenu"}).json()[0]
 
     r = ask(client, "Combien je dois payer pour la taxe foncière ?")
     assert r["answer"] == f"Amount for “{tax['title']}”: $1,240.00 [#{tax['id']}]."
@@ -131,7 +131,7 @@ def test_english_questions(client: TestClient, samples: list[Sample]) -> None:
 def test_offline_agent_answers_in_french(client: TestClient, samples: list[Sample]) -> None:
     for s in samples:
         upload(client, s)
-    tax = client.get("/api/documents", params={"q": "taxe fonciere"}).json()[0]
+    tax = client.get("/api/documents", params={"q": "impot revenu"}).json()[0]
     # The explanation cached in English is rewritten in French.
     ask(client, "Explain the MAIF avis d'échéance, do I need to do anything?")
     use_french(client)
@@ -256,6 +256,6 @@ def test_english_questions_find_french_documents(client: TestClient, samples: li
         answer: str = client.post("/api/agent/chat", json={"message": message}).json()["answer"]
         return answer
 
-    assert "Property tax 2026" in ask("How much is the property tax?")
+    assert "Tax notice 2026" in ask("How much is the income tax?")
     # The roadworthiness test has no payment date: its end of validity answers the question.
     assert ask("When is my car inspection due?").startswith("Expiry date for")

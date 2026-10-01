@@ -14,6 +14,7 @@ from starlette.responses import Response
 
 from binder import __version__, guard
 from binder.api import assistant
+from binder.api import journeys as journeys_api
 from binder.api import scan as scan_api
 from binder.api.routes import router
 from binder.config import get_settings
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.middleware("http")(guard.middleware(lambda: get_settings().access_token))
     app.include_router(router)
     app.include_router(assistant.router)
+    app.include_router(journeys_api.router)
     app.include_router(scan_api.router)
 
     if (STATIC_DIR / "index.html").exists():

@@ -4,11 +4,11 @@ import { currentLocale } from "@/lib/format"
 
 export type Category =
   | "taxes" | "energy" | "insurance" | "bank" | "housing" | "health"
-  | "social" | "work" | "telecom" | "identity" | "vehicle" | "other"
+  | "social" | "work" | "telecom" | "identity" | "vehicle" | "family" | "purchases" | "other"
 
 export const CATEGORIES: Category[] = [
   "taxes", "energy", "insurance", "bank", "housing", "health",
-  "social", "work", "telecom", "identity", "vehicle", "other",
+  "social", "work", "telecom", "identity", "vehicle", "family", "purchases", "other",
 ]
 
 export const DOC_TYPES = [
@@ -16,7 +16,10 @@ export const DOC_TYPES = [
   "vehicle_registration", "bank_details", "employment_contract", "lease", "property_tax",
   "housing_tax", "tax_notice", "rent_receipt", "payment_notice", "insurance_certificate",
   "bank_statement", "payslip", "reimbursement_statement", "certificate", "quote",
-  "payment_schedule", "invoice", "contract",
+  "payment_schedule", "invoice", "contract", "loan_statement", "savings_statement",
+  "annual_tax_statement", "donation_receipt", "childcare_certificate", "school_certificate",
+  "civil_status", "family_record_book", "pension_statement", "benefit_decision",
+  "charges_statement", "fine", "purchase_receipt",
 ] as const
 
 export type DocType = (typeof DOC_TYPES)[number]
@@ -36,7 +39,8 @@ export interface Preferences {
 
 export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme">>
 
-export type DocumentStatus = "processing" | "to_review" | "classified"
+/** "waiting": a real document imported before the local AI was ready; read as soon as it is. */
+export type DocumentStatus = "processing" | "waiting" | "to_review" | "classified"
 
 export interface Doc {
   id: number
@@ -83,9 +87,9 @@ export type DocPatch = Partial<
   >
 > & { validated?: boolean; keep_forever?: boolean }
 
-/** The six life areas of the navigation. */
-export type Area = "housing" | "money" | "work" | "health" | "identity" | "vehicle"
-export const AREAS: Area[] = ["housing", "money", "work", "health", "identity", "vehicle"]
+/** The life areas of the navigation. */
+export type Area = "housing" | "money" | "work" | "family" | "health" | "identity" | "vehicle"
+export const AREAS: Area[] = ["housing", "money", "work", "family", "health", "identity", "vehicle"]
 
 export interface Deadline {
   id: number
@@ -172,6 +176,8 @@ export interface ChatResponse {
   undo: string | null
   /** Packs of documents put together during the turn. */
   folders: Folder[]
+  /** Journeys started or read during the turn. */
+  journeys: Journey[]
 }
 
 /** Progress of an answer: tools as they start, text as it is written. */
@@ -268,9 +274,15 @@ export interface Profile {
   city: string
   email: string
   phone: string
+  /** What the agent must know about the user, in their own words. */
+  notes: string
+  /** Fields Binder filled from the documents (it keeps them up to date until the user edits). */
+  auto: string[]
 }
 
-export const LETTER_KINDS = ["termination", "complaint", "request"] as const
+export const LETTER_KINDS = [
+  "termination", "complaint", "request", "payment_plan", "appeal", "formal_notice", "address_change",
+] as const
 
 export type LetterKind = (typeof LETTER_KINDS)[number]
 
@@ -292,6 +304,31 @@ export interface Letter {
   answered: boolean
   /** Details left in [brackets] for the user to fill in. */
   blanks: number
+  /** Its legal points, checked online when it was written. */
+  verification: LegalCheck | null
+}
+
+export interface LegalSource {
+  title: string
+  url: string
+}
+
+/** A legal point of a letter. `outdated`: the official source says otherwise (`evidence`, its own
+ * sentence); the letter is not changed, `correction` is the wording the user can apply. */
+export interface LegalPoint {
+  claim: string
+  status: "confirmed" | "outdated" | "unverified"
+  evidence: string
+  correction: string
+  sources: LegalSource[]
+}
+
+/** `outdated`: a source contradicts a point; `unverified`: a point could not be checked;
+ * `none`: the letter quotes no law. */
+export interface LegalCheck {
+  status: "verified" | "outdated" | "unverified" | "none"
+  checked_on: string
+  points: LegalPoint[]
 }
 
 export type Tone = "urgent" | "soon" | "info"
@@ -308,8 +345,8 @@ export interface FeedAction {
 export interface FeedItem {
   key: string
   kind:
-    | "recovery" | "report" | "briefing" | "question" | "deadline" | "expiry" | "anomaly"
-    | "missing" | "letter" | "suggestion" | "household"
+    | "report" | "briefing" | "question" | "deadline" | "expiry" | "anomaly"
+    | "missing" | "letter" | "suggestion" | "household" | "journey" | "waiting"
   tone: Tone
   title: string
   detail: string
@@ -320,6 +357,58 @@ export interface FeedItem {
   document_ids: number[]
   actions: FeedAction[]
   extra: Record<string, unknown>
+}
+
+export const FOLDER_KINDS = ["rental", "mortgage", "caf", "identity_renewal", "school", "retirement"] as const
+
+export type FolderKind = (typeof FOLDER_KINDS)[number]
+
+export const JOURNEY_KINDS = ["moving", "birth", "death", "tax_return"] as const
+
+export type JourneyKind = (typeof JOURNEY_KINDS)[number]
+
+/** What a step offers to do in one tap. */
+export type StepAction =
+  | { type: "letter"; label: string; params: { kind?: LetterKind; purpose?: string; details?: string; document_id?: number } }
+  | { type: "folder"; label: string; params: { kind: FolderKind } }
+  | { type: "open"; label: string; params: { url: string } }
+
+export interface JourneyStep {
+  key: string
+  title: string
+  detail: string
+  due: string | null
+  done: boolean
+  /** Done on its own: the letter was sent, the document arrived. */
+  auto: boolean
+  document_ids: number[]
+  amount: number | null
+  action: StepAction | null
+}
+
+export interface Journey {
+  id: number
+  kind: JourneyKind
+  title: string
+  description: string
+  event_label: string
+  event_date: string
+  details: Record<string, string>
+  steps: JourneyStep[]
+  done: number
+  total: number
+  closed: boolean
+  created_at: string
+}
+
+export interface JourneyKindInfo {
+  kind: JourneyKind
+  title: string
+  description: string
+  event_label: string
+  default_date: string | null
+  /** What can be told when starting ({key: label}). */
+  fields: Record<string, string>
 }
 
 export interface SetupStatus {
@@ -541,6 +630,8 @@ export const api = {
   editLetter: (id: number, body: string) => request<Letter>(`/letters/${id}`, json("PUT", { body })),
   letterSent: (id: number) => request<Letter>(`/letters/${id}/sent`, { method: "POST" }),
   letterAnswered: (id: number) => request<Letter>(`/letters/${id}/answered`, { method: "POST" }),
+  letterFollowUp: (id: number) => request<Letter>(`/letters/${id}/follow-up`, { method: "POST" }),
+  letters: () => request<Letter[]>("/letters"),
   feed: () => request<Feed>("/feed"),
   act: (action: Pick<FeedAction, "type" | "params">) =>
     request<ActResult>("/actions", json("POST", { type: action.type, params: action.params })),
@@ -552,9 +643,21 @@ export const api = {
   household: () => request<Member[]>("/household"),
   sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
   prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),
+  journeyKinds: () => request<JourneyKindInfo[]>("/journeys/kinds"),
+  journeys: () => request<Journey[]>("/journeys"),
+  journey: (id: number) => request<Journey>(`/journeys/${id}`),
+  startJourney: (body: { kind: JourneyKind; event_date: string; details: Record<string, string> }) =>
+    request<Journey>("/journeys", json("POST", body)),
+  updateJourney: (id: number, body: { event_date?: string; details?: Record<string, string>; closed?: boolean }) =>
+    request<Journey>(`/journeys/${id}`, json("PATCH", body)),
+  journeyStep: (id: number, key: string, done: boolean) =>
+    request<Journey>(`/journeys/${id}/steps/${encodeURIComponent(key)}`, json("PUT", { done })),
   setup: () => request<SetupStatus>("/setup"),
   retrySetup: () => request<SetupStatus>("/setup/retry", { method: "POST" }),
   backup: () => request<BackupInfo>("/backup"),
+  backupNow: () => request<BackupInfo>("/backup/now", { method: "POST" }),
+  confirmRecoveryCode: () => request<BackupInfo>("/backup/confirm", { method: "POST" }),
+  renewRecoveryCode: () => request<BackupInfo>("/backup/code", { method: "POST" }),
   restoreBackup: (file: File, code: string) => {
     const form = new FormData()
     form.append("file", file)
@@ -591,6 +694,8 @@ export const api = {
   closeScan: () => request<void>("/scan/session", { method: "DELETE" }),
   deleteScanPage: (id: string) => request<void>(`/scan/pages/${id}`, { method: "DELETE" }),
   seedDemo: () => request<{ imported: number; batch: string | null }>("/demo", { method: "POST" }),
+  demoStatus: () => request<{ documents: number }>("/demo"),
+  clearDemo: () => request<{ removed: number }>("/demo", { method: "DELETE" }),
   chat: (message: string, history: ChatMessage[], attachments: number[] = [], signal?: AbortSignal) =>
     request<ChatResponse>("/agent/chat", { ...json("POST", { message, history, attachments }), signal }),
   chatStream: (

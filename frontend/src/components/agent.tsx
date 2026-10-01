@@ -51,11 +51,16 @@ import { agent as messages } from "@/i18n/messages/agent"
 import { categoryLabel, daysLabel, formatAmount, formatDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { CategoryIcon } from "./CategoryIcon"
+import { JourneyCard } from "./journey"
 import { FolderView, LetterView } from "./panels"
 import { ACCEPT } from "./upload"
 
-// Suggested prompts, in the UI language (the agent understands both).
-const SUGGESTIONS = ["upcoming", "october", "alerts", "letter", "folder"] as const
+// Suggested prompts by what the agent does, in the UI language (the agent understands both).
+const SUGGESTIONS = {
+  ask: ["taxIncome", "electricity", "upcoming"],
+  watch: ["alerts", "renew", "october"],
+  act: ["letter", "folder", "reminder", "moving"],
+} as const
 // Same limit as the backend (attachments per message).
 const MAX_ATTACHMENTS = 10
 
@@ -176,6 +181,18 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     if (question) ask(question)
   }
 
+  // Ctrl K (Cmd K) opens the agent from anywhere, ready to type.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   return (
     <AgentContext.Provider value={{ open }}>
       {children}
@@ -269,20 +286,25 @@ function AgentConversation({
         {turns.length === 0 && (
           <>
             <p className="text-sm font-medium">{t("prompt")}</p>
-            <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("suggestions")}</p>
-              <div className="flex flex-col items-start gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => onAsk(t(`suggestion.${s}`))}
-                    className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left text-sm transition-colors select-none hover:bg-accent"
-                  >
-                    <FileText className="size-3.5 text-muted-foreground" /> {t(`suggestion.${s}`)}
-                  </button>
-                ))}
+            {(Object.keys(SUGGESTIONS) as (keyof typeof SUGGESTIONS)[]).map((group) => (
+              <div key={group}>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">{t(`group.${group}`)}</p>
+                <div className="flex flex-col items-start gap-1.5">
+                  {SUGGESTIONS[group].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => onAsk(t(`suggestion.${s}`))}
+                      className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left text-sm transition-colors select-none hover:bg-accent"
+                    >
+                      {t(`suggestion.${s}`)}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ))}
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Paperclip className="mt-0.5 size-3.5 shrink-0" /> {t("attachTip")}
+            </p>
           </>
         )}
 
@@ -1036,6 +1058,9 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
       ))}
       {response.folders.map((folder) => (
         <FolderView key={folder.key} folder={folder} />
+      ))}
+      {(response.journeys ?? []).map((journey) => (
+        <JourneyCard key={journey.id} journey={journey} />
       ))}
       {response.changed && <Changed token={response.undo} />}
       {docs.length > 0 && (

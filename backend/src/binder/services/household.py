@@ -136,8 +136,9 @@ def addresses_in(text: str) -> list[tuple[str, str]]:
     return found
 
 
-def home_address(session: Session) -> tuple[str, str] | None:
-    """The household's address: the one written on most documents (bills, receipts…)."""
+def home_address(session: Session, *, at_least: int = 1) -> tuple[str, str] | None:
+    """The household's address: the one written on most documents (bills, receipts…), and on
+    `at_least` of them."""
     counts: Counter[tuple[str, str]] = Counter()
     spelling: dict[tuple[str, str], tuple[str, str]] = {}
     for text in session.exec(select(Document.text).where(col(Document.deleted_at).is_(None))):
@@ -147,4 +148,39 @@ def home_address(session: Session) -> tuple[str, str] | None:
             spelling.setdefault(key, (street, town))
     if not counts:
         return None
-    return spelling[counts.most_common(1)[0][0]]
+    key, count = counts.most_common(1)[0]
+    return spelling[key] if count >= at_least else None
+
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# Mobile numbers only: landlines and short numbers in documents belong to the issuers.
+_MOBILE = re.compile(r"(?<![\d+])(?:\+33\s?|0033\s?|0)([67](?:[\s.-]?\d{2}){4})(?![\d])")
+# Addresses of organisations, not of a person.
+_SERVICE = re.compile(
+    r"no-?reply|ne-?pas-?repondre|contact|service|client|support|info|dpo|rgpd|courrier|"
+    r"reclamation|facturation|bonjour|hello|admin|accueil|webmaster",
+    re.IGNORECASE,
+)
+
+
+def contact_details(session: Session) -> dict[str, str]:
+    """The household's own email and mobile number: the ones written in documents from at
+    least two different issuers (an issuer's contact details only appear in its own)."""
+    seen: dict[str, dict[str, set[str]]] = {"email": {}, "phone": {}}
+    rows = session.exec(
+        select(Document.text, Document.issuer).where(col(Document.deleted_at).is_(None))
+    )
+    for text, issuer in rows:
+        source = normalize(issuer or "") or text[:80]
+        for email in _EMAIL.findall(text):
+            if not _SERVICE.search(email.split("@")[0]):
+                seen["email"].setdefault(email.lower(), set()).add(source)
+        for digits in _MOBILE.findall(text):
+            number = "0" + re.sub(r"\D", "", digits)
+            seen["phone"].setdefault(" ".join(re.findall(r"\d{2}", number)), set()).add(source)
+    found = {}
+    for field, values in seen.items():
+        shared = [(len(sources), value) for value, sources in values.items() if len(sources) >= 2]
+        if shared:
+            found[field] = max(shared)[1]
+    return found

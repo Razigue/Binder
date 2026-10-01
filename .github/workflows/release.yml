@@ -1,9 +1,20 @@
 name: Release
 
 # Pushing a v* tag (e.g. v1.2.0): full CI, build for Linux, Windows and macOS, then a GitHub
-# release with the three archives. The installed application updates itself from it.
-# Manual run: builds the archives (run artifacts) without publishing a release.
-# Archive names are shared with binder.updater.ASSETS: change both together.
+# release with:
+# - the installers (Velopack): BinderApp-win-Setup.exe, .pkg (macOS), .AppImage (Linux), and the
+#   update packages and feeds (releases.<channel>.json) the installed application reads;
+# - the portable archives, whose names are shared with binder.updater.ASSETS (change both
+#   together): versions installed from them update themselves from these.
+# Manual run: builds everything (run artifacts) without publishing a release.
+#
+# Signing, optional (unsigned builds work, but SmartScreen and Gatekeeper warn):
+# - Windows, Azure Trusted Signing: secrets AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#   and variables AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE.
+# - macOS: secrets APPLE_CERTIFICATES_P12 (base64 of a .p12 holding the "Developer ID
+#   Application" and "Developer ID Installer" certificates), APPLE_CERTIFICATES_PASSWORD,
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD, and variables APPLE_APP_IDENTITY,
+#   APPLE_INSTALL_IDENTITY (certificate subjects, e.g. "Developer ID Application: Name (TEAM)").
 on:
   push:
     tags: ["v*"]
@@ -11,6 +22,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  VPK_VERSION: 1.2.161
 
 jobs:
   ci:
@@ -24,10 +38,13 @@ jobs:
         include:
           - os: ubuntu-latest
             name: Binder-linux-x64
+            channel: linux
           - os: windows-latest
             name: Binder-windows-x64
+            channel: windows
           - os: macos-latest
             name: Binder-macos-arm64
+            channel: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,16 +54,63 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet tool install -g vpk --version ${{ env.VPK_VERSION }}
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0
-      - name: Build
+      - name: Version
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            uv run --no-project packaging/build.py --version "${GITHUB_REF_NAME#v}"
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            uv run --no-project packaging/build.py
+            echo "VERSION=0.0.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
+      - name: Previous release (delta updates)
+        shell: bash
+        # Nothing to download before the first release made with the installer.
+        run: |
+          vpk download github --repoUrl "https://github.com/${GITHUB_REPOSITORY}" \
+            --channel ${{ matrix.channel }} --token "${{ secrets.GITHUB_TOKEN }}" \
+            --outputDir packaging/releases || echo "No previous installer release"
+
+      - name: Windows signing
+        if: runner.os == 'Windows' && vars.AZURE_SIGNING_ACCOUNT != ''
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/signing.json" <<JSON
+          {"Endpoint": "${{ vars.AZURE_SIGNING_ENDPOINT }}",
+           "CodeSigningAccountName": "${{ vars.AZURE_SIGNING_ACCOUNT }}",
+           "CertificateProfileName": "${{ vars.AZURE_SIGNING_PROFILE }}"}
+          JSON
+          echo "VPK_AZURE_TRUSTED_SIGN_FILE=$RUNNER_TEMP/signing.json" >> "$GITHUB_ENV"
+      - name: macOS signing
+        if: runner.os == 'macOS' && vars.APPLE_APP_IDENTITY != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+      - name: macOS notarization
+        if: runner.os == 'macOS' && vars.APPLE_APP_IDENTITY != ''
+        run: |
+          xcrun notarytool store-credentials binder-notary --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" --password "${{ secrets.APPLE_APP_PASSWORD }}"
+          {
+            echo "VPK_SIGN_APP_IDENTITY=${{ vars.APPLE_APP_IDENTITY }}"
+            echo "VPK_SIGN_INSTALL_IDENTITY=${{ vars.APPLE_INSTALL_IDENTITY }}"
+            echo "VPK_SIGN_ENTITLEMENTS=$GITHUB_WORKSPACE/packaging/entitlements.plist"
+            echo "VPK_NOTARY_PROFILE=binder-notary"
+          } >> "$GITHUB_ENV"
+
+      - name: Build
+        shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: uv run --no-project packaging/build.py --version "$VERSION" --installer
       - name: Archive
         shell: bash
         run: |
@@ -58,10 +122,24 @@ jobs:
           else
             tar czf ../../${{ matrix.name }}.tar.gz Binder
           fi
+      - name: Release files
+        shell: bash
+        # Only this version's files: the previous release's packages were downloaded for deltas.
+        run: |
+          mkdir out
+          mv ${{ matrix.name }}.* out/
+          cd packaging/releases
+          for f in *; do
+            case "$f" in
+              *-"$VERSION"-*.nupkg|*Setup*|*.pkg|*.AppImage|releases.*.json|assets.*.json|RELEASES*)
+                cp "$f" ../../out/ ;;
+            esac
+          done
+          ls -l ../../out
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.name }}.*
+          path: out/*
           if-no-files-found: error
 
   release:
@@ -77,7 +155,7 @@ jobs:
           merge-multiple: true
       - name: Checksums
         working-directory: dist
-        run: sha256sum Binder-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

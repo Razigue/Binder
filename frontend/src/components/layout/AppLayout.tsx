@@ -1,10 +1,9 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUp, BookLock, Bot, History, Mail, Sun, Trash2 } from "lucide-react"
+import { ArrowUp, BookLock, Bot, Files, History, ListChecks, Settings, Sun, Trash2, type LucideIcon } from "lucide-react"
 import { useAgent } from "@/components/agent"
-import { LocalBadge } from "@/components/StatusDot"
-import { useDesktopTitleBar } from "@/components/layout/TitleBar"
+import { TitleBar, useDesktopWindow } from "@/components/layout/TitleBar"
 import { useT } from "@/i18n"
 import { area as areaMessages } from "@/i18n/messages/area"
 import { layout } from "@/i18n/messages/layout"
@@ -12,10 +11,14 @@ import { AREAS, api } from "@/lib/api"
 import { AREA_STYLE } from "@/lib/areas"
 import { cn } from "@/lib/utils"
 
-const itemClass = "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+const itemClass = "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
 const idleClass = "text-sidebar-foreground hover:bg-sidebar-accent/60"
-const smallClass = "flex items-center gap-2 rounded-md px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-const mobileItemClass = "shrink-0 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors"
+const smallClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    "flex min-h-9 items-center gap-3 rounded-lg px-3 py-1.5 text-sm transition-colors",
+    isActive ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+  )
+const mobileItemClass = "shrink-0 rounded-lg px-3.5 py-2 text-sm whitespace-nowrap transition-colors"
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   cn(itemClass, isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : idleClass)
 
@@ -27,53 +30,72 @@ export function AppLayout() {
   const mobileNav = useRef<HTMLElement>(null)
   const areas = useQuery({ queryKey: ["areas"], queryFn: api.areas, refetchInterval: 30_000 })
   const attention = new Map(areas.data?.map((a) => [a.area, a.attention]))
-  useDesktopTitleBar()
+  const desktop = useDesktopWindow()
+  const titleBar = desktop?.custom === true
+  useNoFocusOnLaunch()
 
   // The phone bar scrolls sideways: keep the current page's tab in view.
   useEffect(() => {
     mobileNav.current?.querySelector<HTMLElement>("[aria-current=page]")?.scrollIntoView({ block: "nearest", inline: "center" })
   }, [pathname])
 
-  const nav = [
+  const main = [
     { to: "/", label: t("nav.today"), icon: Sun, end: true, count: 0 },
-    ...AREAS.map((a) => ({ to: `/area/${a}`, label: ta(`area.${a}`), icon: AREA_STYLE[a].icon, end: false, count: attention.get(a) ?? 0 })),
+    { to: "/prepare", label: t("nav.prepare"), icon: ListChecks, end: false, count: 0 },
+    { to: "/documents", label: t("nav.documents"), icon: Files, end: false, count: 0 },
   ]
+  const lifeAreas = AREAS.map((a) => ({
+    to: `/area/${a}`,
+    label: ta(`area.${a}`),
+    icon: AREA_STYLE[a].icon,
+    end: false,
+    count: attention.get(a) ?? 0,
+  }))
+  const mobile = [main[0], ...lifeAreas, main[1], main[2], { to: "/settings", label: t("nav.settings"), icon: Settings, end: false, count: 0 }]
+  // The ask bar sits on every page but Today, which opens on its own composer.
+  const askBar = pathname !== "/"
 
-  return (
-    <div className="flex min-h-svh">
+  const shell = (
+    <div className={cn("flex", titleBar ? "min-h-full" : "min-h-svh")}>
       <div className="hidden w-60 shrink-0 border-r bg-sidebar md:block">
-        <aside className="sticky top-0 flex h-svh flex-col px-3 py-5 select-none">
-          <div className="mb-8 flex items-center gap-3 px-2">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BookLock className="size-4" />
-            </span>
-            <p className="text-[15px] font-semibold">Binder</p>
-          </div>
-          <nav className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
-            {nav.map((item, i) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={(s) => cn(linkClass(s), i === 1 && "mt-4")}>
-                <item.icon className="size-4" />
-                <span className="flex-1">{item.label}</span>
-                {item.count > 0 && (
-                  <span className="min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[11px] font-semibold text-amber-800 tabular-nums dark:bg-amber-500/15 dark:text-amber-300">
-                    {item.count}
-                  </span>
-                )}
-              </NavLink>
+        <aside className="sticky top-0 flex h-[calc(100svh-var(--titlebar-height,0px))] flex-col px-3 py-5 select-none">
+          {/* The desktop title bar already carries the logo and name. */}
+          {!titleBar && (
+            <div className="mb-6 flex items-center gap-3 px-2">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <BookLock className="size-4" />
+              </span>
+              <p className="text-[15px] font-semibold">Binder</p>
+            </div>
+          )}
+          {/* The agent first: one click, or Ctrl K, from anywhere. */}
+          <button
+            onClick={() => agent.open()}
+            title={t("askShortcut")}
+            className="mb-5 flex h-10 w-full items-center gap-2.5 rounded-lg border bg-card px-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Bot className="size-4 text-primary" />
+            <span className="flex-1 truncate">{t("nav.ask")}</span>
+          </button>
+          {/* The negative margin and padding leave room for focus rings, which overflow clips. */}
+          <nav aria-label={t("navigation")} className="-m-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1">
+            {main.map((item) => (
+              <NavItem key={item.to} {...item} />
             ))}
-            <button onClick={() => agent.open()} className={cn(itemClass, idleClass, "mt-4")}>
-              <Bot className="size-4" /> {t("nav.ask")}
-            </button>
+            <p className="mt-5 mb-1 px-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t("nav.areas")}</p>
+            {lifeAreas.map((item) => (
+              <NavItem key={item.to} {...item} />
+            ))}
           </nav>
           <div className="mt-4 flex flex-col gap-0.5">
-            <NavLink to="/settings" className={smallClass}>
-              <Mail className="size-3.5" /> {t("nav.mail")}
-            </NavLink>
             <NavLink to="/history" className={smallClass}>
-              <History className="size-3.5" /> {t("nav.history")}
+              <History className="size-4" /> {t("nav.history")}
             </NavLink>
             <NavLink to="/trash" className={smallClass}>
-              <Trash2 className="size-3.5" /> {t("nav.trash")}
+              <Trash2 className="size-4" /> {t("nav.trash")}
+            </NavLink>
+            <NavLink to="/settings" className={smallClass}>
+              <Settings className="size-4" /> {t("nav.settings")}
             </NavLink>
           </div>
         </aside>
@@ -86,7 +108,10 @@ export function AppLayout() {
           aria-label={t("navigation")}
           className="flex gap-1 overflow-x-auto border-b bg-sidebar px-3 py-2 pr-8 [scrollbar-width:none] select-none mask-r-from-[calc(100%-2rem)] md:hidden"
         >
-          {nav.map((item) => (
+          <button onClick={() => agent.open()} aria-label={t("nav.ask")} className={cn(mobileItemClass, "flex items-center gap-1.5 bg-primary text-primary-foreground")}>
+            <Bot className="size-4" /> {t("nav.ask")}
+          </button>
+          {mobile.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -98,19 +123,63 @@ export function AppLayout() {
               {item.label}
             </NavLink>
           ))}
-          <NavLink to="/settings" className={cn(mobileItemClass, "hover:bg-sidebar-accent/60")}>
-            {t("nav.mail")}
-          </NavLink>
         </nav>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 md:px-10 md:pt-8">
+        <main className={cn("w-full flex-1 px-4 pt-6 md:px-8 md:pt-8 2xl:px-12", askBar ? "pb-28" : "pb-12")}>
           {/* Pages load on first visit: the menu stays in place meanwhile. */}
           <Suspense fallback={null}>
             <Outlet />
           </Suspense>
         </main>
-        <AskBar />
+        {askBar && <AskBar />}
       </div>
     </div>
+  )
+
+  if (!titleBar) return shell
+  // Desktop window: the page scrolls under the title bar, whose buttons keep the window corner.
+  return (
+    <div className="flex h-svh flex-col">
+      <TitleBar maximized={desktop.maximized} />
+      <div className="min-h-0 flex-1 overflow-y-auto">{shell}</div>
+    </div>
+  )
+}
+
+/**
+ * The desktop shell hands keyboard focus to the page when its window opens, which lands on the
+ * first menu link and draws its focus ring. Focus that arrives before the user has pressed a key
+ * or clicked is not theirs: drop it.
+ */
+function useNoFocusOnLaunch() {
+  useEffect(() => {
+    const blur = () => {
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active !== document.body) active.blur()
+    }
+    const stop = () => {
+      window.removeEventListener("focusin", blur, true)
+      window.removeEventListener("keydown", stop, true)
+      window.removeEventListener("pointerdown", stop, true)
+    }
+    blur()
+    window.addEventListener("focusin", blur, true)
+    window.addEventListener("keydown", stop, true)
+    window.addEventListener("pointerdown", stop, true)
+    return stop
+  }, [])
+}
+
+function NavItem({ to, label, icon: Icon, end, count }: { to: string; label: string; icon: LucideIcon; end: boolean; count: number }) {
+  return (
+    <NavLink to={to} end={end} className={linkClass}>
+      <Icon className="size-4" />
+      <span className="flex-1">{label}</span>
+      {count > 0 && (
+        <span className="min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[11px] font-semibold text-amber-800 tabular-nums dark:bg-amber-500/15 dark:text-amber-300">
+          {count}
+        </span>
+      )}
+    </NavLink>
   )
 }
 
@@ -119,18 +188,6 @@ function AskBar() {
   const t = useT(layout)
   const agent = useAgent()
   const [text, setText] = useState("")
-  const input = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        input.current?.focus()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-4 pb-4 md:left-60">
@@ -141,22 +198,21 @@ function AskBar() {
           agent.open(q || undefined)
           setText("")
         }}
-        className="pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-xl border bg-card p-1.5 pl-4"
+        className="pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-xl border bg-card p-2 pl-4"
       >
         <Bot className="size-4 shrink-0 text-primary" />
         <input
-          ref={input}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={t("askPlaceholder")}
           aria-label={t("nav.ask")}
-          className="h-8 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
+          className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
         />
         <kbd className="hidden rounded border px-1.5 font-sans text-[11px] text-muted-foreground sm:inline">{t("askShortcut")}</kbd>
         <button
           type="submit"
           aria-label={t("nav.ask")}
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-80"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-80"
         >
           <ArrowUp className="size-4" />
         </button>
@@ -172,10 +228,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="flex items-center gap-4">
-        {actions}
-        <LocalBadge />
-      </div>
+      {actions && <div className="flex items-center gap-3">{actions}</div>}
     </div>
   )
 }

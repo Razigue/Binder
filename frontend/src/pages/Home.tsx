@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { BookLock, CircleCheck, FlaskConical, Loader2, RotateCcw, Upload } from "lucide-react"
+import { ArrowUp, BookLock, Bot, CircleCheck, FlaskConical, Loader2, Paperclip, RotateCcw, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -9,11 +10,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAgent } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
+import { Ongoing } from "@/components/ongoing"
+import { Upcoming } from "@/components/upcoming"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { usePanels } from "@/components/panels"
 import { useUpload } from "@/components/upload"
-import { useFeed, useInvalidateAll } from "@/hooks/queries"
+import { useDeadlines, useFeed, useInvalidateAll, useProfile } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { today } from "@/i18n/messages/today"
 import { api, type FeedItem, type SetupStatus } from "@/lib/api"
@@ -23,14 +27,23 @@ export function HomePage() {
   const t = useT(today)
   const feed = useFeed()
   const data = feed.data
-  const [day] = useState(() => toIso(new Date()))
+  const [day] = useState(() => new Date())
+  const horizon = useMemo(() => ({ start: toIso(day), end: toIso(new Date(day.getTime() + 60 * 86_400_000)) }), [day])
+  const deadlines = useDeadlines(horizon)
+  const greeting = useGreeting(day)
   if (data && data.documents === 0 && !data.items.some((i) => i.kind === "report")) return <Welcome setup={data.setup} />
-  const now = data?.items.filter((i) => i.tone !== "info") ?? []
-  const later = data?.items.filter((i) => i.tone === "info") ?? []
+  const items = data?.items ?? []
+  // What to do, what Binder asks, what is merely worth knowing: three different gestures.
+  const questions = items.filter((i) => i.kind === "question")
+  const toDo = items.filter((i) => i.kind !== "question" && i.tone !== "info")
+  const later = items.filter((i) => i.kind !== "question" && i.tone === "info")
+  const attention = toDo.length + questions.length
+  const summary = attention ? t("summary", { count: attention }) : t("summaryNone")
   return (
     <>
-      <PageHeader title={t("title")} subtitle={formatDate(day, "long")} />
+      <PageHeader title={greeting} subtitle={data ? `${formatDate(toIso(day), "long")} · ${summary}` : formatDate(toIso(day), "long")} />
       {data && <SetupCard setup={data.setup} />}
+      <AskCard />
       {!data ? (
         <Card className="gap-3 p-5">
           {[0, 1, 2].map((i) => (
@@ -38,28 +51,129 @@ export function HomePage() {
           ))}
         </Card>
       ) : (
-        <div className="space-y-6">
-          {now.length === 0 ? (
-            <div className="flex items-start gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
-              <CircleCheck className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
-              <div>
-                <p className="font-medium">{t("allGood")}</p>
-                <p className="text-sm text-muted-foreground">{t("allGoodHint")}</p>
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
+          <div className="min-w-0 space-y-8">
+            {attention === 0 && (
+              <div className="flex items-start gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
+                <CircleCheck className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
+                <div>
+                  <p className="font-medium">{t("allGood")}</p>
+                  <p className="text-sm text-muted-foreground">{t("allGoodHint")}</p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <FeedList items={now} />
-          )}
-          {later.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-sm font-medium text-muted-foreground">{t("later")}</h2>
-              <FeedList items={later} />
-            </section>
-          )}
-          <DropBar />
+            )}
+            {toDo.length > 0 && (
+              <Section title={t("toDo")} count={toDo.length}>
+                <FeedList items={toDo} />
+              </Section>
+            )}
+            {questions.length > 0 && (
+              <Section title={t("questions")} hint={t("questionsHint")} count={questions.length}>
+                <FeedList items={questions} />
+              </Section>
+            )}
+            {later.length > 0 && (
+              <Section title={t("later")}>
+                <FeedList items={later} />
+              </Section>
+            )}
+            <DropBar />
+          </div>
+          <aside className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
+            <Ongoing limit={4} />
+            <Upcoming deadlines={(deadlines.data ?? []).filter((d) => !d.done).slice(0, 6)} empty={t("upcomingEmpty")} />
+          </aside>
         </div>
       )}
     </>
+  )
+}
+
+/** "Hello Camille": the first name from the profile, when it looks like one. */
+function useGreeting(now: Date) {
+  const t = useT(today)
+  const name = useProfile().data?.name.trim() ?? ""
+  const first = name.split(/\s+/)[0] ?? ""
+  // "M. MARTIN Camille" or "MARTIN" would make an odd greeting: stay plain then.
+  const usable = /\p{Ll}/u.test(first) && !first.endsWith(".")
+  const evening = now.getHours() >= 18
+  if (!usable) return evening ? t("evening") : t("hello")
+  return evening ? t("eveningName", { name: first }) : t("helloName", { name: first })
+}
+
+function Section({ title, hint, count, children }: { title: string; hint?: string; count?: number; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-3">
+        <h2 className="font-semibold">
+          {title}
+          {count !== undefined && <span className="ml-2 font-normal text-muted-foreground tabular-nums">{count}</span>}
+        </h2>
+        {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+const EXAMPLES = ["upcoming", "alerts", "letter"] as const
+
+/** The agent at the top of Today: ask or delegate in a sentence, or start from an example. */
+function AskCard() {
+  const t = useT(today)
+  const agent = useAgent()
+  const upload = useUpload()
+  const [text, setText] = useState("")
+  return (
+    <Card className="mb-8 gap-3 p-4 sm:p-5">
+      <p className="flex items-center gap-2 font-semibold">
+        <Bot className="size-4 text-primary" /> {t("askTitle")}
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          agent.open(text.trim() || undefined)
+          setText("")
+        }}
+        className="flex items-center gap-2 rounded-xl border bg-background p-1.5 pl-2 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30"
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={upload.open}
+          aria-label={t("attach")}
+          title={t("attach")}
+          className="text-muted-foreground"
+        >
+          <Paperclip />
+        </Button>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={t("askPlaceholder")}
+          aria-label={t("askTitle")}
+          className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
+        />
+        <Button type="submit" size="icon" aria-label={t("send")} title={t("send")}>
+          <ArrowUp />
+        </Button>
+      </form>
+      <div className="flex flex-wrap items-center gap-2">
+        {EXAMPLES.map((key) => (
+          <button
+            key={key}
+            onClick={() => agent.open(t(`example.${key}`))}
+            className="rounded-lg border bg-card px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+          >
+            {t(`example.${key}`)}
+          </button>
+        ))}
+        <Link to="/prepare" className="px-1 text-sm font-medium text-primary hover:underline">
+          {t("everything")}
+        </Link>
+      </div>
+    </Card>
   )
 }
 

@@ -23,7 +23,7 @@ class Extraction(BaseModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
     missing_fields: list[str] = []
     extractor: str = "rules"
-    # Type detected by the rules (a DocType value: "invoice", "insurance_certificate"…).
+    # Document type (a DocType value: "invoice", "insurance_certificate"…).
     doc_type: str | None = None
     # Person the document concerns (holder, employee, tenant, insured…).
     person: str | None = None
@@ -180,6 +180,34 @@ class ToolCallTrace(BaseModel):
     arguments: dict[str, object]
 
 
+class LegalSource(BaseModel):
+    title: str
+    url: str
+
+
+class LegalPoint(BaseModel):
+    """A legal point of a text and what the official source says about it. `outdated`: the
+    source states something else (`evidence`, copied from it); the text is left as it is and
+    the user decides, `correction` being the wording proposed."""
+
+    # The point as written in the text.
+    claim: str
+    status: Literal["confirmed", "outdated", "unverified"]
+    evidence: str = ""
+    correction: str = ""
+    sources: list[LegalSource] = []
+
+
+class LegalCheck(BaseModel):
+    """Legal points of a text checked online (services/lawcheck.py), and when. `outdated`: a
+    source contradicts a point; `unverified`: a point could not be checked; `none`: no legal
+    point."""
+
+    status: Literal["verified", "outdated", "unverified", "none"]
+    checked_on: date
+    points: list[LegalPoint] = []
+
+
 class Letter(BaseModel):
     kind: str
     subject: str
@@ -198,6 +226,8 @@ class Letter(BaseModel):
     answered: bool = False
     # Words still to fill in ([to be completed]); none when Binder knew everything.
     blanks: int = 0
+    # Its legal points checked online when it was written.
+    verification: LegalCheck | None = None
 
 
 class ChatResponse(BaseModel):
@@ -216,6 +246,8 @@ class ChatResponse(BaseModel):
     undo: str | None = None
     # Packs put together during the turn.
     folders: list[dict[str, object]] = []
+    # Journeys started or read during the turn.
+    journeys: list[dict[str, object]] = []
 
 
 class SystemStatus(BaseModel):

@@ -26,3 +26,4 @@ key
 # Build de l'application
 packaging/build/
 packaging/dist/
+packaging/releases/

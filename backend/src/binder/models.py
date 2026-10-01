@@ -24,6 +24,10 @@ class Category(StrEnum):
     TELECOM = "telecom"
     IDENTITY = "identity"
     VEHICLE = "vehicle"
+    # School, childcare, activities of the children.
+    FAMILY = "family"
+    # Purchase invoices and their warranties.
+    PURCHASES = "purchases"
     OTHER = "other"
 
 
@@ -53,6 +57,22 @@ class DocType(StrEnum):
     PAYMENT_SCHEDULE = "payment_schedule"
     INVOICE = "invoice"
     CONTRACT = "contract"
+    LOAN_STATEMENT = "loan_statement"
+    SAVINGS_STATEMENT = "savings_statement"
+    # Imprimé fiscal unique: what a bank declared to the tax office (interest, dividends).
+    ANNUAL_TAX_STATEMENT = "annual_tax_statement"
+    DONATION_RECEIPT = "donation_receipt"
+    CHILDCARE_CERTIFICATE = "childcare_certificate"
+    SCHOOL_CERTIFICATE = "school_certificate"
+    CIVIL_STATUS = "civil_status"
+    FAMILY_RECORD_BOOK = "family_record_book"
+    PENSION_STATEMENT = "pension_statement"
+    # Decision of a benefits office (rights, overpayment, end of payment).
+    BENEFIT_DECISION = "benefit_decision"
+    CHARGES_STATEMENT = "charges_statement"
+    FINE = "fine"
+    # Purchase invoice whose warranty is tracked (expiry_date = end of warranty).
+    PURCHASE_RECEIPT = "purchase_receipt"
 
 
 # Enum member names stored by versions before the English identifiers (SQLAlchemy stores
@@ -99,6 +119,8 @@ LEGACY_DOC_TYPES = {
 
 class DocumentStatus(StrEnum):
     PROCESSING = "processing"
+    # A real document imported before the local AI was ready: analysed as soon as it is.
+    WAITING = "waiting"
     TO_REVIEW = "to_review"
     CLASSIFIED = "classified"
 
@@ -245,6 +267,8 @@ class Correspondence(SQLModel, table=True):
     answered: bool = False
     # Letter this one follows up.
     follows: int | None = None
+    # Legal points checked online when it was written (schemas.LegalCheck, JSON).
+    verification: str | None = None
 
 
 class Learned(SQLModel, table=True):
@@ -260,3 +284,21 @@ class Learned(SQLModel, table=True):
     label: str = ""
     count: int = 1
     updated_at: datetime = Field(default_factory=_now)
+
+
+class Journey(SQLModel, table=True):
+    """A life event followed step by step (services/journeys.py): moving, a birth, the tax
+    return… Steps are computed from the kind and the user's documents; only what the user did
+    is stored."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    # Kind identifier ("moving", "birth", "death", "tax_return").
+    kind: str = Field(index=True)
+    # Date the steps are counted from (moving day, birth, death, filing deadline).
+    event_date: date
+    # JSON: what the user told Binder (new address, person concerned…).
+    details: str = "{}"
+    # JSON list of the keys of the steps marked done.
+    done: str = "[]"
+    closed: bool = False

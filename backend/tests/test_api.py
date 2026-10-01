@@ -12,7 +12,7 @@ def by_name(samples: list[Sample], name: str) -> Sample:
 
 
 def test_upload_classifies_and_creates_deadline(client: TestClient, samples: list[Sample]) -> None:
-    doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    doc = upload(client, by_name(samples, "avis-imposition.pdf"))
     assert doc["category"] == "taxes"
     assert doc["status"] == "classified"
     assert doc["amount"] == 1240.0
@@ -72,7 +72,7 @@ def test_preview_file_and_export(client: TestClient, samples: list[Sample]) -> N
 def test_data_is_encrypted_at_rest(
     client: TestClient, samples: list[Sample], isolated_env: Path
 ) -> None:
-    upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    upload(client, by_name(samples, "avis-imposition.pdf"))
     db_bytes = (isolated_env / "binder.db").read_bytes()
     assert not db_bytes.startswith(b"SQLite format 3")
     assert b"FINANCES" not in db_bytes.upper()

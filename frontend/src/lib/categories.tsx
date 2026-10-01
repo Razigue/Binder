@@ -1,6 +1,6 @@
 import {
-  Briefcase, Car, FileText, HeartPulse, Home, IdCard, Landmark, Receipt, ShieldCheck, Smartphone, Users, Zap,
-  type LucideIcon,
+  Backpack, Briefcase, Car, FileText, HeartPulse, Home, IdCard, Landmark, Receipt, ShieldCheck, ShoppingBag,
+  Smartphone, Users, Zap, type LucideIcon,
 } from "lucide-react"
 import type { Category } from "./api"
 
@@ -16,5 +16,7 @@ export const CATEGORY_STYLE: Record<Category, { icon: LucideIcon; tone: string; 
   telecom: { icon: Smartphone, tone: "bg-cyan-50 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-400", color: "#0891b2" },
   identity: { icon: IdCard, tone: "bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400", color: "#0d9488" },
   vehicle: { icon: Car, tone: "bg-lime-50 text-lime-700 dark:bg-lime-500/15 dark:text-lime-400", color: "#4d7c0f" },
+  family: { icon: Backpack, tone: "bg-rose-50 text-rose-500 dark:bg-rose-500/15 dark:text-rose-400", color: "#f43f5e" },
+  purchases: { icon: ShoppingBag, tone: "bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400", color: "#a16207" },
   other: { icon: FileText, tone: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-300", color: "#64748b" },
 }

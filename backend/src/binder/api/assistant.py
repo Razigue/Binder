@@ -422,6 +422,14 @@ def backup_now(session: SessionDep) -> backup.BackupInfo:
     return backup.info(session)
 
 
+@router.post("/backup/confirm")
+def backup_confirm(session: SessionDep) -> backup.BackupInfo:
+    """The user wrote the recovery code down: Binder stops showing it."""
+    backup.confirm(session)
+    session.commit()
+    return backup.info(session)
+
+
 @router.post("/backup/code")
 def backup_new_code(session: SessionDep) -> backup.BackupInfo:
     backup.renew_code(session)

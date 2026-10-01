@@ -2,8 +2,8 @@ import { useNavigate } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
-  AlertTriangle, CalendarClock, CircleHelp, Copy, FileSearch, FileText, Inbox, KeyRound, Lightbulb, Mail, Newspaper,
-  Users, type LucideIcon,
+  AlertTriangle, CalendarClock, CircleHelp, FileSearch, FileText, Hourglass, Inbox, Lightbulb, ListChecks, Mail,
+  Newspaper, Users, type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CategoryIcon } from "@/components/CategoryIcon"
@@ -20,7 +20,6 @@ import { cn } from "@/lib/utils"
 
 // Icon of a card without area or category.
 const KIND_ICON: Record<FeedItem["kind"], LucideIcon> = {
-  recovery: KeyRound,
   report: Inbox,
   briefing: Newspaper,
   question: CircleHelp,
@@ -31,6 +30,8 @@ const KIND_ICON: Record<FeedItem["kind"], LucideIcon> = {
   letter: Mail,
   suggestion: Lightbulb,
   household: Users,
+  journey: ListChecks,
+  waiting: Hourglass,
 }
 
 const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
@@ -69,6 +70,9 @@ export function useRunAction() {
       case "report":
         panels.showReport(String(p.batch))
         return
+      case "journey":
+        panels.showJourney(Number(p.journey_id))
+        return
       case "pdf":
         window.location.assign(String(p.url))
         return
@@ -84,7 +88,6 @@ export function FeedCard({ item }: { item: FeedItem }) {
   const { run, pending } = useRunAction()
   const Icon = KIND_ICON[item.kind]
   const tone = TONE_STYLE[item.tone]
-  const code = typeof item.extra.code === "string" ? item.extra.code : null
 
   return (
     <li className="flex gap-4 px-5 py-4">
@@ -116,20 +119,6 @@ export function FeedCard({ item }: { item: FeedItem }) {
             )}
             {item.detail}
           </p>
-        )}
-        {code && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <code className="rounded-lg border bg-muted/50 px-3 py-1.5 font-sans text-base font-semibold tracking-wider select-all">
-              {code}
-            </code>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigator.clipboard.writeText(code).then(() => toast.success(t("codeCopied")))}
-            >
-              <Copy /> {t("copyCode")}
-            </Button>
-          </div>
         )}
         {item.actions.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
