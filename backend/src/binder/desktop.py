@@ -353,6 +353,31 @@ class WindowApi:
         ).start()
 
 
+def _share_qt_profile() -> None:
+    """One Qt WebEngine profile for every window.
+
+    pywebview (6.2.1) gives each Qt window its own persistent profile, all named "pywebview" and
+    stored in the same folder. Two of them in one process (the splash screen, then the main
+    window) make Qt WebEngine spin, its memory grows, and the main window stays blank.
+    """
+    import importlib
+
+    # Untyped on purpose: QWebEngineProfile is not part of the module's public interface.
+    qt: Any = importlib.import_module("webview.platforms.qt")
+    original = qt.QWebEngineProfile
+    profiles: dict[str, Any] = {}
+
+    def profile(*args: Any) -> Any:
+        if not args:  # private mode: one throwaway profile per window is fine
+            return original()
+        name = args[0]
+        if name not in profiles:
+            profiles[name] = original(*args)
+        return profiles[name]
+
+    qt.QWebEngineProfile = profile
+
+
 class Desktop:
     def __init__(self, finish_update: Path | None) -> None:
         self.finish_update = finish_update
@@ -376,6 +401,8 @@ class Desktop:
             text_select=True,
         )
         webview.settings["ALLOW_DOWNLOADS"] = True
+        if sys.platform.startswith("linux"):
+            _share_qt_profile()
         webview.start(
             self._boot,
             (window,),
