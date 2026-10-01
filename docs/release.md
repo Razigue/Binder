@@ -31,6 +31,9 @@ the `velopack` Python package) on the PyInstaller output:
   wizard, no UAC prompt, Start menu and desktop shortcuts, then starts Binder. Uninstall from
   Settings > Apps removes that folder only.
 - **macOS**: a `.pkg`. **Linux**: an AppImage.
+- `--noPortable` is passed only on Windows and macOS: Linux's `vpk pack` does not accept
+  it, since the AppImage is its portable package. The workflow also creates the portable
+  archives used by older installations.
 - The package id is `BinderApp`, not `Binder`: on Windows the install folder is
   `%LocalAppData%\<id>`, and `%LocalAppData%\Binder` is the data folder, which uninstalling would
   delete.

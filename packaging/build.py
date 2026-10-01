@@ -95,9 +95,11 @@ def installer(version: str) -> None:
         "--packId", PACK_ID, "--packVersion", version, "--packTitle", "Binder",
         "--packAuthors", "Binder", "--packDir", str(pack_dir), "--mainExe", main_exe,
         "--outputDir", str(RELEASES),
-        # The portable archives stay those of the release workflow (and their own update).
-        "--noPortable",
     ]
+    # Linux's AppImage is the portable package; its CLI rejects --noPortable.
+    # Windows/macOS portable archives are built separately by the release workflow.
+    if system != "linux":
+        cmd += ["--noPortable"]
     if icon is not None:
         cmd += ["--icon", str(icon)]
     if sys.platform == "win32":
