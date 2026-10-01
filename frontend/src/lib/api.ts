@@ -189,6 +189,21 @@ export interface Letter {
   registered: boolean
 }
 
+export interface Subscription {
+  key: string
+  label: string
+  category: Category
+  doc_type: string | null
+  cadence: string
+  interval_days: number | null
+  last_amount: number
+  previous_amount: number
+  change_pct: number
+  yearly_estimate: number | null
+  increase: boolean
+  history: { document_id: number; date: string; amount: number }[]
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -246,6 +261,7 @@ export const api = {
   saveProfile: (body: Profile) => request<Profile>("/profile", json("PUT", body)),
   writeLetter: (body: { kind: LetterKind; document_id?: number | null; details?: string }) =>
     request<Letter>("/letters", json("POST", body)),
+  subscriptions: () => request<Subscription[]>("/subscriptions"),
   trash: () => request<Doc[]>("/trash"),
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),

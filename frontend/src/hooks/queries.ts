@@ -84,6 +84,10 @@ export function usePurgeDocument() {
   return useMutation({ mutationFn: api.purgeDocument, onSuccess: invalidate })
 }
 
+export function useSubscriptions() {
+  return useQuery({ queryKey: ["subscriptions"], queryFn: api.subscriptions })
+}
+
 export function useExpirations() {
   return useQuery({ queryKey: keys.expirations, queryFn: api.expirations })
 }

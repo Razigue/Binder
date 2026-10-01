@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
-import { Archive, ArrowRight, CalendarClock, ChevronRight, FileCheck2, FileClock, Sparkles, Upload } from "lucide-react"
+import { Archive, ArrowRight, TrendingUp, CalendarClock, ChevronRight, FileCheck2, FileClock, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -8,7 +8,7 @@ import { CategoryIcon } from "@/components/CategoryIcon"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useUpload } from "@/components/upload"
 import {
-  useDeadlines, useDocuments, useExpirations, useInvalidateAll, useRetention, useStats,
+  useDeadlines, useDocuments, useExpirations, useInvalidateAll, useRetention, useStats, useSubscriptions,
 } from "@/hooks/queries"
 import { api, type Category } from "@/lib/api"
 import { daysLabel, formatAmount, formatDate, missingLabel, toIso, urgency, urgencyStyles } from "@/lib/format"
@@ -47,6 +47,7 @@ export function HomePage() {
           to="/documents"
         />
       </div>
+      <IncreaseHint />
       <SortingHint />
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AttentionList />
@@ -182,6 +183,22 @@ function AttentionList() {
         </ul>
       )}
     </SectionCard>
+  )
+}
+
+function IncreaseHint() {
+  const { data } = useSubscriptions()
+  const rising = data?.filter((s) => s.increase) ?? []
+  if (!rising.length) return null
+  return (
+    <Link to="/abonnements" className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-sm hover:bg-amber-50">
+      <TrendingUp className="size-4 text-amber-600" />
+      <span className="flex-1">
+        Hausse détectée :{" "}
+        {rising.map((s) => `${s.label} (+${Math.round(s.change_pct)} %)`).join(", ")}
+      </span>
+      <ArrowRight className="size-4 text-muted-foreground" />
+    </Link>
   )
 }
 

@@ -14,6 +14,7 @@ import { HomePage } from "@/pages/Home"
 import { SearchPage } from "@/pages/Search"
 import { SettingsPage } from "@/pages/Settings"
 import { SortingPage } from "@/pages/Sorting"
+import { SubscriptionsPage } from "@/pages/Subscriptions"
 import { TrashPage } from "@/pages/Trash"
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ export default function App() {
                 <Route path="historique" element={<HistoryPage />} />
                 <Route path="dossiers" element={<FoldersPage />} />
                 <Route path="courriers" element={<LettersPage />} />
+                <Route path="abonnements" element={<SubscriptionsPage />} />
                 <Route path="tri" element={<SortingPage />} />
                 <Route path="reglages" element={<SettingsPage />} />
                 <Route path="corbeille" element={<TrashPage />} />

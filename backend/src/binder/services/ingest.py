@@ -14,7 +14,7 @@ from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import activity, deadlines, llm, organize, rules
+from binder.services import activity, deadlines, llm, organize, rules, subscriptions
 from binder.services.text import SUPPORTED_MIME, read_document
 
 log = logging.getLogger(__name__)
@@ -174,6 +174,8 @@ def analyze(session: Session, doc: Document) -> Document:
     sync_deadline(session, doc)
     index_document(session, doc)
     organize.reorganize(session, doc, previous_key)
+    session.flush()
+    subscriptions.check_increase(session, doc)
     session.commit()
     session.refresh(doc)
     return doc

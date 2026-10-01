@@ -52,6 +52,7 @@ from binder.services import (
     organize,
     retention,
     settings_store,
+    subscriptions,
 )
 from binder.services.text import render_page
 
@@ -477,6 +478,14 @@ def export_folder(key: str, session: SessionDep) -> StreamingResponse:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# --- Abonnements ---------------------------------------------------------------------------
+
+
+@router.get("/subscriptions")
+def list_subscriptions(session: SessionDep) -> list[subscriptions.Subscription]:
+    return subscriptions.detect(session)
 
 
 # --- Courriers types -----------------------------------------------------------------------

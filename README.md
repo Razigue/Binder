@@ -7,17 +7,40 @@ Vous déposez vos papiers (PDF, photos). Binder les classe, extrait les informat
 Rien ne quitte votre machine : la base est chiffrée (SQLCipher), les fichiers aussi (Fernet),
 et l'IA tourne en local via Ollama.
 
-## Fonctionnalités (V1)
+## Fonctionnalités
 
-- **Dépôt** : glisser-déposer de PDF, JPG ou PNG, avec détection des doublons.
-- **Classement** : Impôts, Énergie, Assurance, Banque, Logement, Santé, Social, Travail, Télécom.
-- **Extraction** : montant, date d'émission, échéance, référence, émetteur, avec un score de confiance.
-  Un document incomplet ou douteux part dans la file « À vérifier », et vous pouvez corriger puis valider.
-- **Échéances** : déduites des documents, frise du mois, rappels manuels, marquage « réglée ».
-- **Recherche** plein texte (FTS5), insensible aux accents et aux mots partiels.
-- **Agent** : « Quels documents arrivent bientôt ? », « Trouve mes factures EDF »,
-  « Rappelle-moi de payer la cantine le 12/11/2026 », « Exporte mon dossier impôts ».
-- **Export** d'un dossier en ZIP (documents déchiffrés et `index.json`).
+**Automatiser**
+- **Dépôt** : glisser-déposer de PDF, JPG ou PNG.
+- **Import automatique** : dossier surveillé (sous-dossiers compris) et pièces jointes d'une boîte
+  mail IMAP. Lecture seule : aucun fichier déplacé, aucun message marqué comme lu.
+- **Classement** : Impôts, Énergie, Assurance, Banque, Logement, Santé, Social, Travail, Télécom,
+  Identité, Véhicule ; type de document détecté (facture, attestation, carte d'identité…).
+- **Renommage** : nom normalisé « AAAA-MM-JJ Titre Émetteur.pdf » au téléchargement et à l'export.
+- **Doublons** : copie exacte ignorée ; doublon probable (autre scan) mis en vérification.
+- **Versions** : une attestation ou une pièce d'identité plus récente remplace l'ancienne
+  (marquée, jamais supprimée). Les bulletins de paie sont tous conservés.
+- **Extraction** : montant, dates d'émission, d'échéance et de fin de validité, référence,
+  émetteur, avec un score de confiance.
+- **Échéances et expirations** : paiements, fins de validité avec délai de renouvellement
+  (90 jours pour une carte d'identité, 120 pour un passeport…), rappels manuels.
+- **Conservation** : durées conseillées (service-public.fr), page « Tri » qui propose les
+  documents à trier ; rien n'est supprimé sans vous.
+
+**Aider**
+- **En bref** : chaque courrier expliqué simplement, avec ce qu'il faut faire et avant quand.
+- **Agent** : répond en citant le document source ; hors IA, répond aux questions
+  « combien », « quand », « quand expire », « explique-moi ».
+- **Dossiers** : location, prêt immobilier, aide au logement CAF ; pièces trouvées, manquantes
+  ou trop anciennes, export ZIP numéroté.
+- **Courriers types** : résiliation, réclamation, demande de document, préremplis.
+- **Abonnements** : factures récurrentes regroupées, rythme, estimation annuelle, alerte en cas
+  de hausse de plus de 10 %.
+- **Recherche** plein texte (FTS5) et **export** ZIP rangé par catégorie et par année.
+
+**Rester fiable**
+- Un document incomplet, douteux ou en double part dans la file « À vérifier ».
+- Supprimer met à la corbeille ; l'effacement définitif demande une confirmation explicite.
+- **Historique** lisible de tout ce que Binder, l'agent et vous avez fait, par document.
 
 ## Architecture
 
@@ -81,6 +104,7 @@ Par variables d'environnement, ou dans un fichier `backend/.env` :
 | `BINDER_LLM_ENABLED` | `true` | `false` pour n'utiliser que les règles |
 | `BINDER_OLLAMA_URL` | `http://localhost:11434` | |
 | `BINDER_PORT` | `8765` | |
+| `BINDER_AUTO_IMPORT` | `true` | `false` pour couper l'import automatique en tâche de fond |
 
 > ⚠️ Perdre la clé, c'est perdre l'accès aux données. Sauvegardez `DATA_DIR/key`.
 
@@ -108,6 +132,6 @@ de généralisation. Le jeu de 100 documents annotés reste à constituer.
 
 - Jeu d'évaluation de 100 documents, comparaison modèles locaux et API
 - Recherche sémantique (sqlite-vec, nomic-embed-text)
-- Rappels planifiés (APScheduler) et notifications
+- Notifications système pour les échéances et les hausses
 - Paquets Windows et macOS
 - Clé protégée par le trousseau du système ou une phrase de passe
