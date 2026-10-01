@@ -70,6 +70,9 @@ def parse_locale(value: str | None) -> tuple[str | None, str | None]:
 
 
 def _windows_locales() -> list[str]:
+    # Lets mypy skip the Windows-only `ctypes.windll` when checking on Linux and macOS.
+    if sys.platform != "win32":
+        return []
     import ctypes
 
     kernel32 = ctypes.windll.kernel32
