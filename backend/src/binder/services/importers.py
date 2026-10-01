@@ -108,7 +108,7 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
             path.read_bytes(),
             path.name,
             actor="watcher",
-            origin=f"depuis le dossier surveillé ({path.relative_to(folder)})",
+            origin=f"depuis le dossier surveillé ({path.relative_to(folder).as_posix()})",
         )
         _seen[path] = key
         if doc:
