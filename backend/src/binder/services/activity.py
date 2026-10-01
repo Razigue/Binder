@@ -1,45 +1,46 @@
-"""Journal d'activité : chaque action de Binder ou de l'utilisateur, en langage clair.
+"""Activity log: every action by Binder or the user, in plain language.
 
-Les fonctions ajoutent l'entrée à la session sans valider : elle part avec la transaction
-de l'action qu'elle décrit (ou disparaît avec elle en cas d'échec).
+Entries are added to the session without committing: they leave with the transaction of the
+action they describe (or disappear with it on failure).
+
+The summary is an i18n message (key + parameters) stored in `details["msg"]` and rendered in
+the current language when displayed; `summary` keeps the text rendered at write time for
+entries whose message no longer exists.
 """
 
 import json
-from datetime import date
 from typing import Any
 
 from sqlmodel import Session
 
+from binder import i18n
 from binder.models import Activity, Document
 
-FIELD_NAMES = {
-    "title": "le titre",
-    "category": "la catégorie",
-    "issuer": "l'émetteur",
-    "amount": "le montant",
-    "issue_date": "la date d'émission",
-    "due_date": "l'échéance",
-    "reference": "la référence",
-    "doc_type": "le type de document",
-    "expiry_date": "la date d'expiration",
-}
+T = i18n.catalog(
+    "activity",
+    {
+        "changes": {
+            "en": "“{title}” edited ({changes})",
+            "fr": "« {title} » modifié ({changes})",
+        },
+        "change": {
+            "en": "{field:field}: {old} → {new}",
+            "fr": "{field:field} : {old} → {new}",
+        },
+        "separator": {"en": "; ", "fr": " ; "},
+    },
+)
 
 
 def display(value: object) -> str:
-    """Valeur lisible pour le journal : 1 240,00 €, 15/10/2026, « — » pour vide."""
-    if value in (None, ""):
-        return "—"
-    if isinstance(value, float):
-        return f"{value:,.2f} €".replace(",", " ").replace(".", ",")
-    if isinstance(value, date):
-        return value.strftime("%d/%m/%Y")
-    return str(getattr(value, "value", value))
+    """Readable value: €1,240.00, 15 Oct 2026, "—" when empty (current language)."""
+    return i18n.format_field_value("", value)
 
 
 def log(
     session: Session,
     action: str,
-    summary: str,
+    msg: i18n.Msg,
     *,
     actor: str = "binder",
     document: Document | None = None,
@@ -49,17 +50,48 @@ def log(
     entry = Activity(
         actor=actor,
         action=action,
-        summary=summary,
+        summary=msg.render(),
         document_id=document.id if document else document_id,
-        details=json.dumps(details or {}, ensure_ascii=False, default=str),
+        details=json.dumps(
+            {**(details or {}), "msg": msg.to_json()}, ensure_ascii=False, default=str
+        ),
     )
     session.add(entry)
     return entry
 
 
-def changes_summary(title: str, changes: dict[str, tuple[object, object]]) -> str:
-    parts = [
-        f"{FIELD_NAMES.get(field, field)} : {display(old)} → {display(new)}"
-        for field, (old, new) in changes.items()
-    ]
-    return f"« {title} » modifié ({'; '.join(parts)})"
+def summary(entry: Activity, details: dict[str, Any]) -> str:
+    """Summary in the current language (stored text for entries without a known message)."""
+    msg = details.get("msg")
+    if isinstance(msg, dict) and i18n.is_known(str(msg.get("key"))):
+        return i18n.render(str(msg["key"]), msg.get("params") or {})
+    return entry.summary
+
+
+def changes_summary(title: str, changes: dict[str, tuple[object, object]]) -> i18n.Msg:
+    return T.msg(
+        "changes",
+        title=title,
+        changes=[
+            {"field": name, "old": i18n.jsonable(old), "new": i18n.jsonable(new)}
+            for name, (old, new) in changes.items()
+        ],
+    )
+
+
+def _render_changes(changes: list[dict[str, Any]], language: i18n.Language) -> str:
+    return T.get("separator", language).join(
+        i18n.render(
+            "activity.change",
+            {
+                "field": c["field"],
+                "old": i18n.format_field_value(c["field"], c["old"], language),
+                "new": i18n.format_field_value(c["field"], c["new"], language),
+            },
+            language,
+        )
+        for c in changes
+    )
+
+
+i18n.register_param_renderer("changes", _render_changes)

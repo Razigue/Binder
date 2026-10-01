@@ -1,58 +1,128 @@
-"""Durées de conservation conseillées (particuliers, France), avec suggestion de tri.
+"""Recommended retention periods (individuals, France), with sorting suggestions.
 
-Repères issus de la fiche « Combien de temps conserver ses papiers ? » de service-public.fr ;
-en cas de doute, la durée la plus longue est retenue. Binder ne supprime jamais rien de
-lui-même : il propose, l'utilisateur met à la corbeille.
+Based on the service-public.fr page « Combien de temps conserver ses papiers ? »; when in
+doubt, the longest period is used. Binder never deletes anything by itself: it suggests, the
+user moves to the trash.
 """
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
-from binder.models import Category, Document
+from binder import i18n
+from binder.models import Category, DocType, Document
+
+T = i18n.catalog(
+    "retention",
+    {
+        "forever": {"en": "Keep indefinitely", "fr": "À conserver sans limite"},
+        "until_retirement": {
+            "en": "Until you claim your pension",
+            "fr": "Jusqu'à la liquidation de la retraite",
+        },
+        "contract": {
+            "en": "For the life of the contract, then 2 years",
+            "fr": "Toute la durée du contrat, puis 2 ans",
+        },
+        "lease": {
+            "en": "For the whole tenancy, then 3 years",
+            "fr": "Toute la durée de la location, puis 3 ans",
+        },
+        "account_open": {
+            "en": "As long as the account is open",
+            "fr": "Tant que le compte est ouvert",
+        },
+        "vehicle_owned": {
+            "en": "As long as you own the vehicle",
+            "fr": "Tant que vous possédez le véhicule",
+        },
+        "next_inspection": {"en": "Until the next inspection", "fr": "Jusqu'au contrôle suivant"},
+        # French agrees with the document's gender (carte: elle, passeport: il).
+        "valid_f": {"en": "As long as it is valid", "fr": "Tant qu'elle est valide"},
+        "valid_m": {"en": "As long as it is valid", "fr": "Tant qu'il est valide"},
+        "no_obligation": {"en": "No obligation to keep", "fr": "Sans obligation de conservation"},
+        "years_one": {"en": "{n} year", "fr": "{n} an"},
+        "years_other": {"en": "{n} years", "fr": "{n} ans"},
+        "tax_years": {
+            "en": "{n} years after the tax year",
+            "fr": "{n} ans après l'année d'imposition",
+        },
+        "replaced": {
+            "en": "Replaced by a newer version",
+            "fr": "Remplacé par une version plus récente",
+        },
+        "replaced_inline": {
+            "en": "replaced by a newer version",
+            "fr": "remplacé par une version plus récente",
+        },
+        "expired": {
+            "en": "Retention period exceeded ({retention_rule})",
+            "fr": "Durée de conservation dépassée ({retention_rule})",
+        },
+        "expired_inline": {
+            "en": "retention period exceeded ({retention_rule})",
+            "fr": "durée de conservation dépassée ({retention_rule})",
+        },
+    },
+)
 
 
 @dataclass(frozen=True)
 class Rule:
-    label: str
-    # Durée en années à partir de la date du document. None : pas de durée fixe.
+    # Message key of the label (T).
+    key: str
+    # Period in years from the document's date. None: no fixed period.
     years: int | None = None
-    # Compter jusqu'au 31 décembre (délai de reprise fiscale).
+    # Count until 31 December (tax reassessment period).
     end_of_year: bool = False
-    # Peut être trié dès qu'une version plus récente le remplace.
+    # Can be sorted out as soon as a newer version replaces it.
     until_replaced: bool = False
 
+    @property
+    def msg(self) -> i18n.Msg:
+        if self.key == "years" and self.years is not None:
+            return T.plural_msg("years", self.years)
+        if self.years is not None:
+            return T.msg(self.key, n=self.years)
+        return T.msg(self.key)
 
-FOREVER = Rule("À conserver sans limite")
+    @property
+    def label(self) -> str:
+        """Label in the current language ("2 years" / "2 ans")."""
+        return self.msg.render()
+
+
+FOREVER = Rule("forever")
 
 BY_TYPE: dict[str, Rule] = {
-    "Bulletin de paie": Rule("Jusqu'à la liquidation de la retraite"),
-    "Contrat": Rule("Toute la durée du contrat, puis 2 ans"),
-    "Contrat de travail": Rule("Jusqu'à la liquidation de la retraite"),
-    "Bail": Rule("Toute la durée de la location, puis 3 ans"),
-    "RIB": Rule("Tant que le compte est ouvert"),
-    "Carte grise": Rule("Tant que vous possédez le véhicule"),
-    "Contrôle technique": Rule("Jusqu'au contrôle suivant", until_replaced=True),
-    "Carte d'identité": Rule("Tant qu'elle est valide", until_replaced=True),
-    "Passeport": Rule("Tant qu'il est valide", until_replaced=True),
-    "Permis de conduire": Rule("Tant qu'il est valide", until_replaced=True),
-    "Titre de séjour": Rule("Tant qu'il est valide", until_replaced=True),
-    # Même remplacée, elle peut prouver la couverture lors d'un sinistre passé.
-    "Attestation d'assurance": Rule("2 ans", years=2),
-    "Devis": Rule("Sans obligation de conservation"),
+    DocType.PAYSLIP: Rule("until_retirement"),
+    DocType.CONTRACT: Rule("contract"),
+    DocType.EMPLOYMENT_CONTRACT: Rule("until_retirement"),
+    DocType.LEASE: Rule("lease"),
+    DocType.BANK_DETAILS: Rule("account_open"),
+    DocType.VEHICLE_REGISTRATION: Rule("vehicle_owned"),
+    DocType.ROADWORTHINESS_TEST: Rule("next_inspection", until_replaced=True),
+    DocType.IDENTITY_CARD: Rule("valid_f", until_replaced=True),
+    DocType.PASSPORT: Rule("valid_m", until_replaced=True),
+    DocType.DRIVING_LICENCE: Rule("valid_m", until_replaced=True),
+    DocType.RESIDENCE_PERMIT: Rule("valid_m", until_replaced=True),
+    # Even once replaced, it can prove coverage for a past claim.
+    DocType.INSURANCE_CERTIFICATE: Rule("years", years=2),
+    DocType.QUOTE: Rule("no_obligation"),
 }
 
 BY_CATEGORY: dict[Category, Rule] = {
-    Category.IMPOTS: Rule("3 ans après l'année d'imposition", years=3, end_of_year=True),
-    Category.ENERGIE: Rule("5 ans", years=5),
-    Category.TELECOM: Rule("1 an", years=1),
-    Category.BANQUE: Rule("5 ans", years=5),
-    Category.LOGEMENT: Rule("3 ans", years=3),
-    Category.ASSURANCE: Rule("2 ans", years=2),
-    Category.SANTE: Rule("2 ans", years=2),
-    Category.SOCIAL: Rule("2 ans", years=2),
-    Category.TRAVAIL: Rule("Jusqu'à la liquidation de la retraite"),
-    Category.IDENTITE: Rule("Tant qu'elle est valide", until_replaced=True),
-    Category.VEHICULE: Rule("Tant que vous possédez le véhicule"),
+    Category.TAXES: Rule("tax_years", years=3, end_of_year=True),
+    Category.ENERGY: Rule("years", years=5),
+    Category.TELECOM: Rule("years", years=1),
+    Category.BANK: Rule("years", years=5),
+    Category.HOUSING: Rule("years", years=3),
+    Category.INSURANCE: Rule("years", years=2),
+    Category.HEALTH: Rule("years", years=2),
+    Category.SOCIAL: Rule("years", years=2),
+    Category.WORK: Rule("until_retirement"),
+    Category.IDENTITY: Rule("valid_f", until_replaced=True),
+    Category.VEHICLE: Rule("vehicle_owned"),
 }
 
 
@@ -65,7 +135,7 @@ def rule_for(doc: Document) -> Rule | None:
 def _add_years(d: date, years: int) -> date:
     try:
         return d.replace(year=d.year + years)
-    except ValueError:  # 29 février
+    except ValueError:  # 29 February
         return d.replace(year=d.year + years, day=28)
 
 
@@ -79,15 +149,36 @@ def keep_until(doc: Document) -> date | None:
     return _add_years(base, rule.years)
 
 
-def deletion_reason(doc: Document, today: date | None = None) -> str | None:
-    """Pourquoi ce document peut être trié, ou None s'il faut le garder."""
+def deletion_msg(
+    doc: Document, today: date | None = None, *, inline: bool = False
+) -> i18n.Msg | None:
+    """Why this document can be sorted out, or None if it must be kept.
+
+    `inline`: lowercase variant, to be embedded in a sentence (activity log of the trash).
+    """
     rule = rule_for(doc)
     if rule is None or doc.keep_forever or doc.deleted_at is not None:
         return None
     today = today or date.today()
+    suffix = "_inline" if inline else ""
     if rule.until_replaced and doc.superseded_by is not None:
-        return "Remplacé par une version plus récente"
+        return T.msg("replaced" + suffix)
     end = keep_until(doc)
     if end is not None and end < today:
-        return f"Durée de conservation dépassée ({rule.label.lower()})"
+        return T.msg("expired" + suffix, retention_rule=rule.msg)
     return None
+
+
+def deletion_reason(doc: Document, today: date | None = None) -> str | None:
+    """Why this document can be sorted out, in the current language (None: keep it)."""
+    msg = deletion_msg(doc, today)
+    return msg.render() if msg else None
+
+
+def _render_rule(value: Any, language: i18n.Language) -> str:
+    """Rule label inside a sentence: "(2 years)", "(jusqu'à la liquidation de la retraite)"."""
+    label = i18n.render(str(value["key"]), value.get("params") or {}, language)
+    return label[:1].lower() + label[1:]
+
+
+i18n.register_param_renderer("retention_rule", _render_rule)

@@ -1,4 +1,4 @@
-"""Gestion de la clé maître : chiffrement de la base (SQLCipher) et des fichiers (Fernet)."""
+"""Master key management: encryption of the database (SQLCipher) and files (Fernet)."""
 
 import base64
 import hashlib
@@ -30,7 +30,7 @@ def _derive(purpose: str) -> bytes:
 
 @lru_cache
 def db_key() -> str:
-    """Clé brute hexadécimale pour SQLCipher (x'...')."""
+    """Raw hexadecimal key for SQLCipher (x'...')."""
     return _derive("sqlcipher").hex()
 
 

@@ -1,11 +1,40 @@
+import { translate, type Language } from "@/i18n/core"
+import { common } from "@/i18n/messages/common"
+import { currentLocale } from "@/lib/format"
+
 export type Category =
-  | "Impôts" | "Énergie" | "Assurance" | "Banque" | "Logement"
-  | "Santé" | "Social" | "Travail" | "Télécom" | "Identité" | "Véhicule" | "Autre"
+  | "taxes" | "energy" | "insurance" | "bank" | "housing" | "health"
+  | "social" | "work" | "telecom" | "identity" | "vehicle" | "other"
 
 export const CATEGORIES: Category[] = [
-  "Impôts", "Énergie", "Assurance", "Banque", "Logement",
-  "Santé", "Social", "Travail", "Télécom", "Identité", "Véhicule", "Autre",
+  "taxes", "energy", "insurance", "bank", "housing", "health",
+  "social", "work", "telecom", "identity", "vehicle", "other",
 ]
+
+export const DOC_TYPES = [
+  "identity_card", "passport", "driving_licence", "residence_permit", "roadworthiness_test",
+  "vehicle_registration", "bank_details", "employment_contract", "lease", "property_tax",
+  "housing_tax", "tax_notice", "rent_receipt", "payment_notice", "insurance_certificate",
+  "bank_statement", "payslip", "reimbursement_statement", "certificate", "quote",
+  "payment_schedule", "invoice", "contract",
+] as const
+
+export type DocType = (typeof DOC_TYPES)[number]
+
+export type Theme = "system" | "light" | "dark"
+
+export interface Preferences {
+  language: "auto" | "en" | "fr"
+  country: string | null
+  theme: Theme
+  effective_language: "en" | "fr"
+  effective_country: string | null
+  currency: string
+  system_language: "en" | "fr"
+  system_country: string | null
+}
+
+export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme">>
 
 export type DocumentStatus = "processing" | "to_review" | "classified"
 
@@ -70,6 +99,7 @@ export interface Stats {
 }
 
 export interface SystemStatus {
+  version: string
   llm_available: boolean
   llm_model: string
   ocr_engine: string | null
@@ -77,19 +107,66 @@ export interface SystemStatus {
   data_dir: string
 }
 
+export interface ModelDownload {
+  phase: "queued" | "starting" | "downloading" | "verifying" | "error"
+  completed: number
+  total: number
+  error: string | null
+}
+
+export interface LocalModel {
+  name: string
+  label: string
+  description: string
+  size: number
+  recommended: boolean
+  /** "embedding": semantic search, used as soon as it is installed (never the active model). */
+  kind: "chat" | "embedding"
+  in_catalog: boolean
+  installed: boolean
+  download: ModelDownload | null
+}
+
+export interface ModelsOverview {
+  enabled: boolean
+  ollama: boolean
+  ollama_url: string
+  active: string
+  active_installed: boolean
+  models: LocalModel[]
+}
+
 export interface ChatMessage {
   role: "user" | "assistant"
   content: string
+  /** Documents the answer showed: the next question can refer to them. */
+  documents?: number[]
+}
+
+export interface ToolCall {
+  name: string
+  arguments: Record<string, unknown>
 }
 
 export interface ChatResponse {
   answer: string
   documents: Doc[]
   deadlines: Deadline[]
-  tool_calls: { name: string; arguments: Record<string, unknown> }[]
+  letters: Letter[]
+  tool_calls: ToolCall[]
   citations: number[]
+  /** The agent changed data (reminder, deadline paid, document corrected or trashed). */
+  changed: boolean
   engine: "llm" | "rules"
 }
+
+/** Progress of an answer: tools as they start, text as it is written. */
+export type ChatEvent =
+  | ({ type: "tool" } & ToolCall)
+  | { type: "token"; text: string }
+  | { type: "step" }
+  | { type: "done"; response: ChatResponse }
+  | { type: "error"; message: string }
 
 export type Actor = "user" | "binder" | "agent" | "watcher" | "mail" | "demo"
 
@@ -179,14 +256,19 @@ export interface Profile {
   phone: string
 }
 
-export type LetterKind = "resiliation" | "reclamation" | "demande"
+export const LETTER_KINDS = ["termination", "complaint", "request"] as const
+
+export type LetterKind = (typeof LETTER_KINDS)[number]
 
 export interface Letter {
   kind: LetterKind
   subject: string
   recipient: string
   body: string
+  /** Advise sending it by registered mail with acknowledgement of receipt. */
   registered: boolean
+  /** Language of the letter: the recipient's (French for FR/BE/LU/MC), not necessarily the UI's. */
+  language: "en" | "fr"
 }
 
 export interface Subscription {
@@ -212,19 +294,58 @@ export class ApiError extends Error {
   }
 }
 
+// Outside React: the language comes from the locale set by I18nProvider.
+function genericError(): string {
+  const language: Language = currentLocale().startsWith("fr") ? "fr" : "en"
+  return translate(common, language)("state.error")
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, init)
+  await check(res)
+  return res.status === 204 ? (undefined as T) : res.json()
+}
+
+async function check(res: Response) {
   if (!res.ok) {
-    let message = res.statusText
+    // The backend localises `detail` itself; anything else gets a generic message.
+    let message = genericError()
     try {
       const body = await res.json()
-      message = typeof body.detail === "string" ? body.detail : message
+      if (typeof body.detail === "string") message = body.detail
     } catch {
-      /* corps non JSON */
+      /* non-JSON body */
     }
     throw new ApiError(res.status, message)
   }
-  return res.status === 204 ? (undefined as T) : res.json()
+}
+
+/** Agent answer as a stream of events (newline-delimited JSON); resolves with the response. */
+async function chatStream(
+  body: { message: string; history: ChatMessage[]; attachments: number[] },
+  onEvent: (event: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<ChatResponse> {
+  const res = await fetch("/api/agent/chat/stream", { ...json("POST", body), signal })
+  await check(res)
+  if (!res.body) throw new ApiError(500, genericError())
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ""
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as ChatEvent
+      if (event.type === "done") return event.response
+      if (event.type === "error") throw new ApiError(500, event.message)
+      onEvent(event)
+    }
+  }
+  throw new ApiError(500, genericError())
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -240,8 +361,30 @@ function query(params: Record<string, string | number | boolean | undefined | nu
   return s ? `?${s}` : ""
 }
 
+export interface ScanPage {
+  id: string
+  /** False when no outline was found: the whole photo is kept. */
+  detected: boolean
+}
+
+export interface ScanSession {
+  /** Address of the scanning page on the local network, carried by the QR code. */
+  url: string
+  qr_code: string
+  phone_connected: boolean
+  documents: ScanPage[][]
+  /** Ids of the documents created once the scan is sent, null until then. */
+  imported: number[] | null
+}
+
 export const api = {
   status: () => request<SystemStatus>("/status"),
+  preferences: () => request<Preferences>("/preferences"),
+  updatePreferences: async (patch: PreferencesUpdate) => {
+    const current = await request<Preferences>("/preferences")
+    const body = { language: current.language, country: current.country, theme: current.theme, ...patch }
+    return request<Preferences>("/preferences", json("PUT", body))
+  },
   stats: () => request<Stats>("/stats"),
   documents: (p: { q?: string; category?: Category; status?: DocumentStatus; limit?: number } = {}) =>
     request<Doc[]>(`/documents${query(p)}`),
@@ -271,6 +414,13 @@ export const api = {
   importSettings: () => request<ImportSettings>("/import/settings"),
   saveImportSettings: (body: ImportSettingsIn) => request<ImportSettings>("/import/settings", json("PUT", body)),
   runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),
+  models: () => request<ModelsOverview>("/llm"),
+  chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
+  downloadModel: (name: string) =>
+    request<ModelsOverview>(`/llm/models/${encodeURIComponent(name)}/download`, { method: "POST" }),
+  cancelDownload: (name: string) =>
+    request<void>(`/llm/models/${encodeURIComponent(name)}/download`, { method: "DELETE" }),
+  deleteModel: (name: string) => request<void>(`/llm/models/${encodeURIComponent(name)}`, { method: "DELETE" }),
   activity: (p: { document_id?: number; limit?: number; before?: number } = {}) =>
     request<Activity[]>(`/activity${query(p)}`),
   deadlines: (p: { start?: string; end?: string; include_done?: boolean } = {}) =>
@@ -278,12 +428,25 @@ export const api = {
   createDeadline: (body: { title: string; due_date: string; amount?: number | null; category?: Category }) =>
     request<Deadline>("/deadlines", json("POST", body)),
   updateDeadline: (id: number, body: { done?: boolean }) => request<Deadline>(`/deadlines/${id}`, json("PATCH", body)),
+  openScan: () => request<ScanSession>("/scan/session", { method: "POST" }),
+  scanSession: () => request<ScanSession>("/scan/session"),
+  importScan: () => request<ScanSession>("/scan/session/import", { method: "POST" }),
+  closeScan: () => request<void>("/scan/session", { method: "DELETE" }),
+  deleteScanPage: (id: string) => request<void>(`/scan/pages/${id}`, { method: "DELETE" }),
   seedDemo: () => request<{ imported: number }>("/demo", { method: "POST" }),
-  chat: (message: string, history: ChatMessage[]) =>
-    request<ChatResponse>("/agent/chat", json("POST", { message, history })),
+  chat: (message: string, history: ChatMessage[], attachments: number[] = [], signal?: AbortSignal) =>
+    request<ChatResponse>("/agent/chat", { ...json("POST", { message, history, attachments }), signal }),
+  chatStream: (
+    message: string,
+    history: ChatMessage[],
+    attachments: number[],
+    onEvent: (event: ChatEvent) => void,
+    signal?: AbortSignal,
+  ) => chatStream({ message, history, attachments }, onEvent, signal),
 }
 
 export const fileUrl = (id: number) => `/api/documents/${id}/file`
 export const previewUrl = (id: number, page = 0) => `/api/documents/${id}/preview?page=${page}`
 export const exportUrl = (category?: Category) => `/api/export${query({ category })}`
+export const scanThumbUrl = (id: string) => `/api/scan/pages/${id}/thumb`
 export const folderExportUrl = (key: string) => `/api/folders/${key}/export`

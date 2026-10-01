@@ -1,25 +1,92 @@
-"""Pipeline d'import : stockage chiffré, lecture, extraction, échéances, indexation."""
+"""Import pipeline: encrypted storage, reading, extraction, deadlines, indexing."""
 
 import hashlib
 import json
 import logging
 import mimetypes
+import time
 import uuid
 from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from binder import security
+from binder import i18n, security
 from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
 from binder.models import Category, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
-from binder.services import activity, deadlines, llm, organize, rules, subscriptions
-from binder.services.text import SUPPORTED_MIME, read_document
+from binder.services import activity, deadlines, embeddings, llm, organize, rules, subscriptions
+from binder.services.text import SUPPORTED_MIME, ReadResult, page_image, read_document
 
 log = logging.getLogger(__name__)
 
+T = i18n.catalog(
+    "ingest",
+    {
+        "unsupported": {
+            "en": "Unsupported format: {filename}",
+            "fr": "Format non pris en charge : {filename}",
+        },
+        "duplicate": {
+            "en": "“{filename}” ignored: already present as “{known}”",
+            "fr": "« {filename} » ignoré : déjà présent sous « {known} »",
+        },
+        "imported": {"en": "“{filename}” imported", "fr": "« {filename} » importé"},
+        "imported_from": {
+            "en": "“{filename}” imported {origin}",
+            "fr": "« {filename} » importé {origin}",
+        },
+        "demo_origin": {"en": "(demo)", "fr": "(démonstration)"},
+        "reimported": {"en": "reimported", "fr": "réimporté"},
+        "confidence": {"en": "{n}% confidence", "fr": "confiance {n} %"},
+        "probable_duplicate": {
+            "en": "probable duplicate of “{title}”",
+            "fr": "doublon probable de « {title} »",
+        },
+        "unreadable": {"en": "unreadable text", "fr": "texte illisible"},
+        "missing": {"en": "missing {ingest_missing}", "fr": "manque {ingest_missing}"},
+        "unknown_category": {"en": "unknown category", "fr": "catégorie inconnue"},
+        "to_review": {
+            "en": "“{title}” set aside for review ({why})",
+            "fr": "« {title} » mis de côté pour vérification ({why})",
+        },
+        "classified": {
+            "en": "“{title}” filed under {category:category} ({confidence})",
+            "fr": "« {title} » classé dans {category:category} ({confidence})",
+        },
+        "analysis_failed": {
+            "en": "“{title}”: analysis failed, check it manually",
+            "fr": "« {title} » : analyse impossible, à vérifier à la main",
+        },
+        "trashed": {"en": "“{title}” moved to the trash", "fr": "« {title} » mis à la corbeille"},
+        "trashed_because": {
+            "en": "“{title}” moved to the trash ({reason})",
+            "fr": "« {title} » mis à la corbeille ({reason})",
+        },
+        "restored": {"en": "“{title}” restored", "fr": "« {title} » restauré"},
+        "restored_because": {
+            "en": "“{title}” restored ({reason})",
+            "fr": "« {title} » restauré ({reason})",
+        },
+        "purged": {
+            "en": "“{title}” permanently deleted",
+            "fr": "« {title} » supprimé définitivement",
+        },
+        "separator": {"en": ", ", "fr": ", "},
+    },
+)
+
+
+def _render_missing(fields: list[str], language: i18n.Language) -> str:
+    """Missing fields in a sentence: "due date, amount" / "l'échéance, le montant"."""
+    return T.get("separator", language).join(i18n.field_label(f, language) for f in fields)
+
+
+i18n.register_param_renderer("ingest_missing", _render_missing)
+
 REVIEW_THRESHOLD = 0.6
+# Pages of a scan shown to the model: administrative documents say what matters up front.
+VISION_PAGES = 3
 
 
 class UnsupportedFile(ValueError):
@@ -31,7 +98,7 @@ def guess_mime(filename: str, declared: str | None) -> str:
     if mime == "image/jpg":
         mime = "image/jpeg"
     if mime not in SUPPORTED_MIME:
-        raise UnsupportedFile(f"Format non pris en charge : {filename}")
+        raise UnsupportedFile(T("unsupported", filename=filename))
     return mime
 
 
@@ -42,22 +109,26 @@ def store(
     mime: str,
     *,
     actor: str = "user",
-    origin: str = "",
+    origin: str | i18n.Msg = "",
 ) -> tuple[Document, bool]:
-    """Enregistre le fichier chiffré. Retourne (document, créé) ; un doublon renvoie l'existant
-    (et le sort de la corbeille s'il y était)."""
+    """Saves the encrypted file. Returns (document, created); a duplicate returns the existing
+    one (and takes it out of the trash if it was there).
+
+    `origin` completes the log entry ("from the watched folder…"): preferably a Msg, so that
+    it follows the language.
+    """
     digest = hashlib.sha256(data).hexdigest()
     existing = session.exec(select(Document).where(Document.sha256 == digest)).first()
     if existing:
         if existing.deleted_at is not None:
-            restore(session, existing, actor=actor, reason="réimporté")
+            restore(session, existing, actor=actor, reason=T.msg("reimported"))
             session.commit()
         else:
             known = existing.title or existing.filename
             activity.log(
                 session,
                 "duplicate",
-                f"« {filename} » ignoré : déjà présent sous « {known} »",
+                T.msg("duplicate", filename=filename, known=known),
                 actor=actor,
                 document=existing,
             )
@@ -73,15 +144,14 @@ def store(
     )
     session.add(doc)
     session.flush()
-    origin = origin or ("(démonstration)" if actor == "demo" else "")
-    activity.log(
-        session,
-        "import",
-        f"« {filename} » importé {origin}".strip(),
-        actor=actor,
-        document=doc,
-        details={"taille": len(data)},
+    if not origin and actor == "demo":
+        origin = T.msg("demo_origin")
+    msg = (
+        T.msg("imported_from", filename=filename, origin=origin)
+        if origin
+        else T.msg("imported", filename=filename)
     )
+    activity.log(session, "import", msg, actor=actor, document=doc, details={"size": len(data)})
     session.commit()
     session.refresh(doc)
     return doc, True
@@ -96,14 +166,14 @@ def delete_file(doc: Document) -> None:
 
 
 def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
-    """Combine les deux extractions : le modèle prime, les règles comblent ses trous."""
+    """Combines both extractions: the model wins, the rules fill its gaps."""
     if by_llm is None:
         return by_rules
     merged = by_llm.model_copy()
     for field in ("issuer", "amount", "issue_date", "due_date", "expiry_date", "reference"):
         if getattr(merged, field) in (None, ""):
             setattr(merged, field, getattr(by_rules, field))
-    if merged.category == Category.AUTRE and by_rules.category != Category.AUTRE:
+    if merged.category == Category.OTHER and by_rules.category != Category.OTHER:
         merged.category = by_rules.category
     merged.title = merged.title or by_rules.title
     merged.doc_type = by_rules.doc_type
@@ -133,7 +203,7 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
 
 def refresh_status(doc: Document, validated: bool = False) -> None:
     if validated and doc.duplicate_of is not None:
-        # Valider un doublon signalé, c'est décider de garder les deux.
+        # Validating a flagged duplicate means deciding to keep both.
         doc.duplicate_of = None
         doc.duplicate_dismissed = True
     missing = rules.missing_for(doc.category, doc.model_dump())
@@ -142,7 +212,7 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
     doc.missing_fields = json.dumps(missing)
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
-    elif missing or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.AUTRE:
+    elif missing or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.OTHER:
         doc.status = DocumentStatus.TO_REVIEW
     else:
         doc.status = DocumentStatus.CLASSIFIED
@@ -156,15 +226,20 @@ def sync_deadline(session: Session, doc: Document) -> None:
 def analyze(session: Session, doc: Document) -> Document:
     previous_key = organize.series_key(doc)
     doc.duplicate_of = None
-    read = read_document(load_file(doc), doc.mime_type)
+    data = load_file(doc)
+    read = read_document(data, doc.mime_type)
+    images = _scan_pages(data, doc.mime_type, read)
+    if images and not read.text.strip():
+        read.text = llm.transcribe(images)
     doc.text = read.text
     doc.page_count = read.page_count
     by_rules = rules.extract(read.text)
-    by_llm = llm.extract(read.text) if read.text.strip() and llm.is_available() else None
+    by_llm = llm.extract(read.text, images) if read.text.strip() and llm.is_available() else None
     ext = merge(by_rules, by_llm)
     if not read.text.strip():
         ext.confidence = 0.0
-        ext.title = ext.title if ext.title != "Document" else doc.filename.rsplit(".", 1)[0]
+        if ext.title == rules.T("untitled"):
+            ext.title = doc.filename.rsplit(".", 1)[0]
     apply_extraction(doc, ext)
     session.add(doc)
     session.flush()
@@ -173,6 +248,7 @@ def analyze(session: Session, doc: Document) -> Document:
     _log_analysis(session, doc)
     sync_deadline(session, doc)
     index_document(session, doc)
+    embeddings.index(session, doc)
     organize.reorganize(session, doc, previous_key)
     session.flush()
     subscriptions.check_increase(session, doc)
@@ -181,46 +257,67 @@ def analyze(session: Session, doc: Document) -> Document:
     return doc
 
 
+def _scan_pages(data: bytes, mime_type: str, read: ReadResult) -> list[bytes]:
+    """Pages to show to the model: those of a scan or photo, when it has vision.
+
+    OCR loses the layout (which amount is the total, a stamp, a ticked box) or fails on a
+    skewed photo; the model reads the image itself. PDFs with text do not need it."""
+    if not (read.ocr_used or not read.text.strip()) or not llm.has_vision():
+        return []
+    return [page_image(data, mime_type, n) for n in range(min(read.page_count, VISION_PAGES))]
+
+
 def _log_analysis(session: Session, doc: Document) -> None:
-    confidence = f"confiance {round(doc.confidence * 100)} %"
+    confidence = T.msg("confidence", n=round(doc.confidence * 100))
+    msg: i18n.Msg
     if doc.status == DocumentStatus.TO_REVIEW:
         missing = json.loads(doc.missing_fields)
-        reasons = [
-            activity.FIELD_NAMES.get(f, f) for f in missing if f not in ("text", "duplicate")
-        ]
+        reasons = [f for f in missing if f not in ("text", "duplicate")]
         original = session.get(Document, doc.duplicate_of) if doc.duplicate_of else None
+        why: i18n.Msg
         if original is not None:
-            why = f"doublon probable de « {original.title} »"
+            why = T.msg("probable_duplicate", title=original.title)
         elif "text" in missing or not doc.text.strip():
-            why = "texte illisible"
+            why = T.msg("unreadable")
         elif reasons:
-            why = "manque " + ", ".join(reasons)
-        elif doc.category == Category.AUTRE:
-            why = "catégorie inconnue"
+            why = T.msg("missing", ingest_missing=reasons)
+        elif doc.category == Category.OTHER:
+            why = T.msg("unknown_category")
         else:
             why = confidence
-        summary = f"« {doc.title} » mis de côté pour vérification ({why})"
+        msg = T.msg("to_review", title=doc.title, why=why)
     else:
-        summary = f"« {doc.title} » classé dans {doc.category.value} ({confidence})"
+        msg = T.msg("classified", title=doc.title, category=doc.category, confidence=confidence)
     activity.log(
         session,
         "analyze",
-        summary,
+        msg,
         document=doc,
         details={
-            "categorie": doc.category.value,
-            "confiance": doc.confidence,
-            "moteur": doc.extractor,
-            "montant": doc.amount,
-            "echeance": doc.due_date,
+            "category": doc.category.value,
+            "confidence": doc.confidence,
+            "extractor": doc.extractor,
+            "amount": doc.amount,
+            "due_date": doc.due_date,
             "reference": doc.reference,
-            "doublon_de": doc.duplicate_of,
+            "duplicate_of": doc.duplicate_of,
         },
     )
 
 
-def trash(session: Session, doc: Document, *, actor: str = "user", reason: str = "") -> None:
-    """Met le document à la corbeille : caché partout, restaurable, fichier conservé."""
+def _with_reason(key: str, title: str, reason: str | i18n.Msg) -> i18n.Msg:
+    if reason:
+        return T.msg(f"{key}_because", title=title, reason=reason)
+    return T.msg(key, title=title)
+
+
+def trash(
+    session: Session, doc: Document, *, actor: str = "user", reason: str | i18n.Msg = ""
+) -> None:
+    """Moves the document to the trash: hidden everywhere, restorable, file kept.
+
+    `reason`: preferably a Msg (e.g. retention.deletion_msg(doc, inline=True)).
+    """
     previous_key = organize.series_key(doc)
     doc.deleted_at = datetime.now(UTC)
     deadlines.sync(session, doc)
@@ -231,38 +328,45 @@ def trash(session: Session, doc: Document, *, actor: str = "user", reason: str =
         refresh_status(freed)
         sync_deadline(session, freed)
     organize.reorganize(session, doc, previous_key)
-    suffix = f" ({reason})" if reason else ""
     activity.log(
-        session, "trash", f"« {doc.title} » mis à la corbeille{suffix}", actor=actor, document=doc
+        session, "trash", _with_reason("trashed", doc.title, reason), actor=actor, document=doc
     )
 
 
-def restore(session: Session, doc: Document, *, actor: str = "user", reason: str = "") -> None:
+def restore(
+    session: Session, doc: Document, *, actor: str = "user", reason: str | i18n.Msg = ""
+) -> None:
     doc.deleted_at = None
     session.add(doc)
     session.flush()
     sync_deadline(session, doc)
     index_document(session, doc)
     organize.reorganize(session, doc, None)
-    suffix = f" ({reason})" if reason else ""
-    activity.log(session, "restore", f"« {doc.title} » restauré{suffix}", actor=actor, document=doc)
+    activity.log(
+        session, "restore", _with_reason("restored", doc.title, reason), actor=actor, document=doc
+    )
 
 
 def purge(session: Session, doc: Document, *, actor: str = "user") -> None:
-    """Suppression définitive (fichier compris). Réservée aux documents déjà à la corbeille."""
+    """Permanent deletion (file included). Only for documents already in the trash."""
     if doc.deleted_at is None:
-        raise ValueError("Seul un document à la corbeille peut être supprimé définitivement")
+        raise ValueError("Only a document in the trash can be permanently deleted")
     for dl in session.exec(select(Deadline).where(Deadline.document_id == doc.id)):
         session.delete(dl)
-    activity.log(
-        session,
-        "purge",
-        f"« {doc.title} » supprimé définitivement",
-        actor=actor,
-        document=doc,
-    )
+    activity.log(session, "purge", T.msg("purged", title=doc.title), actor=actor, document=doc)
+    if doc.id is not None:
+        embeddings.forget(session, doc.id)
     delete_file(doc)
     session.delete(doc)
+
+
+def wait_for_analysis(session: Session, doc: Document, timeout: float = 90) -> Document:
+    """Waits for the background analysis of a document that has just been uploaded."""
+    deadline = time.monotonic() + timeout
+    while doc.status == DocumentStatus.PROCESSING and time.monotonic() < deadline:
+        time.sleep(0.5)
+        session.refresh(doc)
+    return doc
 
 
 def analyze_in_background(doc_id: int) -> None:
@@ -273,7 +377,7 @@ def analyze_in_background(doc_id: int) -> None:
         try:
             analyze(session, doc)
         except Exception:
-            log.exception("Analyse du document %s impossible", doc_id)
+            log.exception("Could not analyse document %s", doc_id)
             session.rollback()
             doc = session.get(Document, doc_id)
             if doc:
@@ -284,14 +388,14 @@ def analyze_in_background(doc_id: int) -> None:
                 activity.log(
                     session,
                     "analyze",
-                    f"« {doc.title} » : analyse impossible, à vérifier à la main",
+                    T.msg("analysis_failed", title=doc.title),
                     document=doc,
                 )
                 session.commit()
 
 
 def seed_demo(session: Session) -> list[tuple[Document, bool]]:
-    """Importe les documents fictifs de démonstration (dates relatives à aujourd'hui)."""
+    """Imports the fictitious demo documents (dates relative to today)."""
     from binder.samples import build_samples
 
     results = []

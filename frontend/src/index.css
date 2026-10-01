@@ -83,38 +83,43 @@
     --sidebar-ring: oklch(0.6 0.08 262);
 }
 
+/* Dark theme: the same navy brand, tinted backgrounds rather than neutral greys. Surfaces get
+   lighter as they come forward (background < sidebar < card < popover); the primary turns into a
+   light periwinkle so that buttons keep their weight on a dark background. */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    /* Night vault: ink surfaces with a faint blue cast, elevation by lightness steps
+       (sidebar < page < card < popover), colour kept for small signals. */
+    --background: oklch(0.168 0.011 256);
+    --foreground: oklch(0.935 0.006 256);
+    --card: oklch(0.203 0.012 256);
+    --card-foreground: oklch(0.935 0.006 256);
+    --popover: oklch(0.228 0.013 256);
+    --popover-foreground: oklch(0.935 0.006 256);
+    --primary: oklch(0.585 0.15 259);
+    --primary-foreground: oklch(0.985 0.003 256);
+    --secondary: oklch(0.25 0.013 256);
+    --secondary-foreground: oklch(0.9 0.008 256);
+    --muted: oklch(0.245 0.012 256);
+    --muted-foreground: oklch(0.69 0.013 256);
+    --accent: oklch(0.262 0.02 258);
+    --accent-foreground: oklch(0.95 0.008 256);
+    --destructive: oklch(0.66 0.17 24);
+    --border: oklch(1 0 0 / 7.5%);
+    --input: oklch(1 0 0 / 11%);
+    --ring: oklch(0.62 0.13 259);
+    --chart-1: oklch(0.7 0.15 25);
+    --chart-2: oklch(0.79 0.12 70);
+    --chart-3: oklch(0.73 0.11 160);
+    --chart-4: oklch(0.68 0.12 259);
+    --chart-5: oklch(0.7 0.1 300);
+    --sidebar: oklch(0.148 0.011 256);
+    --sidebar-foreground: oklch(0.86 0.008 256);
+    --sidebar-primary: oklch(0.585 0.15 259);
+    --sidebar-primary-foreground: oklch(0.985 0.003 256);
+    --sidebar-accent: oklch(0.225 0.016 257);
+    --sidebar-accent-foreground: oklch(0.96 0.006 256);
+    --sidebar-border: oklch(1 0 0 / 6%);
+    --sidebar-ring: oklch(0.62 0.13 259);
 }
 
 @layer base {
@@ -127,4 +132,22 @@
   html {
     @apply font-sans;
     }
+}
+/* Browser surfaces follow the theme: selection, scrollbars, native controls. */
+::selection {
+  background: color-mix(in oklch, var(--primary) 32%, transparent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+}
+:root {
+  caret-color: var(--primary);
+  text-underline-offset: 0.2em;
+}
+/* Links and plain buttons (list rows, chips, nav) get the same 3px ring/50 halo as the controls. */
+a:focus-visible,
+button:not([data-slot]):focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent);
+  outline-offset: 0;
 }

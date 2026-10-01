@@ -1,4 +1,4 @@
-"""Réglages persistants (base chiffrée), typés par des modèles Pydantic."""
+"""Persistent settings (encrypted database), typed by Pydantic models."""
 
 from pydantic import BaseModel
 from sqlmodel import Session

@@ -13,7 +13,7 @@ def by_name(samples: list[Sample], name: str) -> Sample:
 
 def test_upload_classifies_and_creates_deadline(client: TestClient, samples: list[Sample]) -> None:
     doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
-    assert doc["category"] == "Impôts"
+    assert doc["category"] == "taxes"
     assert doc["status"] == "classified"
     assert doc["amount"] == 1240.0
     deadlines = client.get("/api/deadlines").json()
@@ -65,7 +65,7 @@ def test_preview_file_and_export(client: TestClient, samples: list[Sample]) -> N
     doc = upload(client, samples[0])
     assert client.get(f"/api/documents/{doc['id']}/preview").headers["content-type"] == "image/png"
     assert client.get(f"/api/documents/{doc['id']}/file").content.startswith(b"%PDF")
-    r = client.get("/api/export", params={"category": "Impôts"})
+    r = client.get("/api/export", params={"category": "taxes"})
     assert r.headers["content-type"] == "application/zip"
 
 
@@ -83,20 +83,18 @@ def test_data_is_encrypted_at_rest(
 def test_agent_without_llm(client: TestClient, samples: list[Sample]) -> None:
     for s in samples:
         upload(client, s)
-    r = client.post("/api/agent/chat", json={"message": "Trouve mes factures EDF"}).json()
+    r = client.post("/api/agent/chat", json={"message": "Find my EDF invoices"}).json()
     assert r["engine"] == "rules"
     assert len(r["documents"]) == 2
-    r = client.post(
-        "/api/agent/chat", json={"message": "Quels documents arrivent bientôt ?"}
-    ).json()
+    r = client.post("/api/agent/chat", json={"message": "Which documents are due soon?"}).json()
     assert r["deadlines"]
     r = client.post(
-        "/api/agent/chat", json={"message": "Rappelle-moi de payer la cantine le 12/11/2026"}
+        "/api/agent/chat", json={"message": "Remind me to pay the canteen on 12/11/2026"}
     ).json()
     assert r["deadlines"][0]["due_date"] == "2026-11-12"
-    assert "cantine" in r["deadlines"][0]["title"]
-    r = client.post("/api/agent/chat", json={"message": "Exporte mon dossier impôts"}).json()
-    assert "/api/export?category=Impôts" in r["answer"]
+    assert "canteen" in r["deadlines"][0]["title"]
+    r = client.post("/api/agent/chat", json={"message": "Export my tax folder"}).json()
+    assert "/api/export?category=taxes" in r["answer"]
     assert json.dumps(r)
 
 

@@ -41,24 +41,24 @@ def test_watched_folder_imports_once_and_leaves_files(
     drop(inbox, "taxe.pdf", by_name(samples, "taxe-fonciere.pdf").pdf())
     drop(inbox, "2026/orange.pdf", by_name(samples, "facture-orange.pdf").pdf())
     drop(inbox, ".cache/ignore.pdf", by_name(samples, "facture-edf.pdf").pdf())
-    drop(inbox, "notes.txt", b"pas un document")
+    drop(inbox, "notes.txt", b"not a document")
     fresh = drop(inbox, "en-cours.pdf", by_name(samples, "attestation-caf.pdf").pdf())
-    os.utime(fresh)  # vient d'arriver : peut-être encore en copie
+    os.utime(fresh)  # just arrived: may still be being copied
 
     assert client.post("/api/import/run").json()["folder"] == {"imported": 2, "error": None}
     docs = client.get("/api/documents").json()
-    assert {d["category"] for d in docs} == {"Impôts", "Télécom"}
+    assert {d["category"] for d in docs} == {"taxes", "telecom"}
     assert all(d["status"] != "processing" for d in docs)
     assert (inbox / "taxe.pdf").exists()
 
-    # Deuxième passage : rien de neuf, sauf le fichier désormais stable.
+    # Second pass: nothing new, except the file that is now stable.
     os.utime(fresh, (time.time() - 60, time.time() - 60))
     assert client.post("/api/import/run").json()["folder"]["imported"] == 1
 
     log = client.get("/api/activity").json()
     imports = [e for e in log if e["action"] == "import"]
     assert all(e["actor"] == "watcher" for e in imports)
-    assert any("dossier surveillé (2026/orange.pdf)" in e["summary"] for e in imports)
+    assert any("watched folder (2026/orange.pdf)" in e["summary"] for e in imports)
 
 
 def test_trashed_document_is_not_reimported_from_folder(
@@ -71,7 +71,7 @@ def test_trashed_document_is_not_reimported_from_folder(
     client.post("/api/import/run")
     [doc] = client.get("/api/documents").json()
     client.delete(f"/api/documents/{doc['id']}")
-    importers._seen.clear()  # redémarrage de l'application
+    importers._seen.clear()  # application restart
     assert client.post("/api/import/run").json()["folder"]["imported"] == 0
     assert client.get("/api/documents").json() == []
 
@@ -94,7 +94,7 @@ def mail_with(pdf: bytes, *, logo: bytes = b"\x89PNG small") -> bytes:
 
 
 class FakeImap:
-    """Serveur IMAP minimal : messages {uid: octets}, vérifie la lecture seule."""
+    """Minimal IMAP server: messages {uid: bytes}, checks read-only access."""
 
     def __init__(self, messages: dict[int, bytes], uidvalidity: int = 7) -> None:
         self.messages = messages
@@ -154,7 +154,7 @@ def test_mail_attachments_are_imported_without_marking_read(
         assert doc.issuer == "EDF"
         assert cfg.last_uid == 41
 
-        # Nouveau message : seuls les UID suivants sont demandés ; le logo est ignoré.
+        # New message: only the following UIDs are requested; the logo is ignored.
         fake.messages[42] = mail_with(by_name(samples, "facture-orange.pdf").pdf())
         [second] = importers.fetch_mail(session, cfg, factory=fake)
         assert fake.searches[-1] == "(UID 42:*)"
@@ -162,14 +162,14 @@ def test_mail_attachments_are_imported_without_marking_read(
 
     log = client.get("/api/activity").json()
     assert any(
-        e["actor"] == "mail" and "l'e-mail « Votre facture est disponible »" in e["summary"]
+        e["actor"] == "mail" and "the email “Votre facture est disponible”" in e["summary"]
         for e in log
     )
 
 
 def test_mail_error_is_reported_once(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(host: str, port: int) -> Any:
-        raise OSError("connexion refusée")
+    def refuse(host: str, port: int, **_: Any) -> Any:
+        raise OSError("connection refused")
 
     monkeypatch.setattr(importers.imaplib, "IMAP4_SSL", refuse)
     client.put(
@@ -177,7 +177,21 @@ def test_mail_error_is_reported_once(client: TestClient, monkeypatch: pytest.Mon
         json={"mail": {"enabled": True, "host": "imap.test", "user": "me", "password": "x"}},
     )
     for _ in range(2):
-        assert client.post("/api/import/run").json()["mail"]["error"] == "connexion refusée"
-    assert client.get("/api/import/settings").json()["mail"]["last_error"] == "connexion refusée"
+        assert client.post("/api/import/run").json()["mail"]["error"] == "connection refused"
+    assert client.get("/api/import/settings").json()["mail"]["last_error"] == "connection refused"
     errors = [e for e in client.get("/api/activity").json() if e["action"] == "import_error"]
     assert len(errors) == 1
+
+
+def test_import_origin_follows_display_language(
+    client: TestClient, samples: list[Sample], tmp_path: Path
+) -> None:
+    drop(tmp_path / "in", "taxe.pdf", by_name(samples, "taxe-fonciere.pdf").pdf())
+    client.put(
+        "/api/import/settings", json={"folder": {"enabled": True, "path": str(tmp_path / "in")}}
+    )
+    client.post("/api/import/run")
+    # The entry was written in English; it is displayed in French once the user switches.
+    client.put("/api/preferences", json={"language": "fr", "country": "FR", "theme": "system"})
+    imports = [e for e in client.get("/api/activity").json() if e["action"] == "import"]
+    assert any("depuis le dossier surveillé (taxe.pdf)" in e["summary"] for e in imports)

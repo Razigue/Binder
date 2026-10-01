@@ -10,10 +10,13 @@ import { CategoryIcon } from "@/components/CategoryIcon"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useInvalidateAll, useRetention } from "@/hooks/queries"
+import { useT } from "@/i18n"
+import { sorting as messages } from "@/i18n/messages/sorting"
 import { api } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 
 export function SortingPage() {
+  const t = useT(messages)
   const { data, isPending } = useRetention()
   const [unchecked, setUnchecked] = useState<Set<number>>(new Set())
   const [confirming, setConfirming] = useState(false)
@@ -35,12 +38,12 @@ export function SortingPage() {
   return (
     <>
       <PageHeader
-        title="Tri"
-        subtitle="Documents que vous n'êtes plus tenu de conserver. Binder ne supprime rien sans vous."
+        title={t("title")}
+        subtitle={t("subtitle")}
         actions={
           selected.length > 0 && (
             <Button onClick={() => setConfirming(true)}>
-              <Trash2 /> Mettre {selected.length} document{selected.length > 1 ? "s" : ""} à la corbeille
+              <Trash2 /> {t("trashSelected", { count: selected.length })}
             </Button>
           )
         }
@@ -53,9 +56,7 @@ export function SortingPage() {
             ))}
           </div>
         ) : !data?.length ? (
-          <p className="px-5 py-10 text-center text-sm text-muted-foreground">
-            Rien à trier : tous vos documents sont encore dans leur durée de conservation.
-          </p>
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
           <ul className="divide-y">
             {data.map((d) => (
@@ -65,7 +66,7 @@ export function SortingPage() {
                   className="size-4 accent-primary"
                   checked={!unchecked.has(d.id)}
                   onChange={() => toggle(d.id)}
-                  aria-label={`Sélectionner ${d.title}`}
+                  aria-label={t("select", { title: d.title })}
                 />
                 <CategoryIcon category={d.category} />
                 <span className="min-w-0 flex-1">
@@ -80,31 +81,28 @@ export function SortingPage() {
                   variant="ghost"
                   size="sm"
                   disabled={keep.isPending}
-                  onClick={() => keep.mutate(d.id, { onSuccess: () => toast.success(`« ${d.title} » sera conservé`) })}
+                  onClick={() => keep.mutate(d.id, { onSuccess: () => toast.success(t("kept", { title: d.title })) })}
                 >
-                  <Archive /> Garder
+                  <Archive /> {t("keep")}
                 </Button>
               </li>
             ))}
           </ul>
         )}
       </Card>
-      <p className="mt-3 text-xs text-muted-foreground">
-        Durées indicatives pour un particulier, d'après service-public.fr. Un document mis à la corbeille reste
-        restaurable.
-      </p>
+      <p className="mt-3 text-xs text-muted-foreground">{t("footnote")}</p>
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Mettre ${selected.length} document${selected.length > 1 ? "s" : ""} à la corbeille ?`}
-        description="Vous pourrez les restaurer depuis la corbeille tant que vous ne les supprimez pas définitivement."
-        confirmLabel="Mettre à la corbeille"
+        title={t("confirmTitle", { count: selected.length })}
+        description={t("confirmDescription")}
+        confirmLabel={t("confirmLabel")}
         destructive={false}
         onConfirm={async () => {
           const { trashed } = await api.trashDeletable(selected.map((d) => d.id))
           setUnchecked(new Set())
           invalidate()
-          toast.success(`${trashed} document${trashed > 1 ? "s" : ""} mis à la corbeille`)
+          toast.success(t("trashed", { count: trashed }))
         }}
       />
     </>

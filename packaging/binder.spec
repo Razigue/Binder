@@ -1,9 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build : python packaging/build.py  (compile d'abord l'interface React)
-# Linux : Qt WebEngine embarqué. Windows : Edge WebView2. macOS : WebKit, paquet Binder.app.
+# Build: python packaging/build.py  (builds the React interface first)
+# Linux: bundled Qt WebEngine. Windows: Edge WebView2. macOS: WebKit, Binder.app bundle.
 import sys
+from importlib.metadata import version
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 LINUX = sys.platform.startswith("linux")
 MACOS = sys.platform == "darwin"
@@ -15,25 +16,38 @@ elif MACOS:
 else:
     gui_imports = ["webview.platforms.edgechromium", "webview.platforms.winforms", "clr"]
 
+# RapidOCR loads its inference engine by name at runtime: only the ONNX Runtime one is bundled.
+OTHER_OCR_ENGINES = ("openvino", "paddle", "pytorch", "torch", "mnn", "tensorrt")
+
+
+def ocr_module(name):
+    return not any(engine in name.split(".") for engine in OTHER_OCR_ENGINES)
+
+
 hiddenimports = (
     collect_submodules("binder")
     + collect_submodules("uvicorn")
+    + collect_submodules("rapidocr", filter=ocr_module)
     + ["sqlcipher3"]
     + gui_imports
 )
 
-excludes = ["tkinter", "pytest", "mypy", "ruff", "IPython", "PyQt5", "PySide6", "gi"]
+excludes = ["tkinter", "pytest", "mypy", "ruff", "IPython", "PyQt5", "PySide6", "gi", "torch"]
 if not LINUX:
     excludes += ["PyQt6", "qtpy"]
 
 a = Analysis(
     ["binder_app.py"],
     pathex=["../backend/src"],
-    datas=collect_data_files("binder", includes=["static/**/*"]),
+    # Package metadata: binder.__version__, compared with releases by the updater.
+    # RapidOCR: its configuration and OCR models (bundled, never downloaded).
+    datas=collect_data_files("binder", includes=["static/**/*", "mobile/*"])
+    + collect_data_files("rapidocr", includes=["**/*.yaml", "**/*.onnx", "**/*.txt"])
+    + copy_metadata("binder"),
     hiddenimports=hiddenimports,
     excludes=excludes,
 )
-# Allègement : modules Qt inutiles à WebEngine et traductions autres que fr/en.
+# Slimming: Qt modules WebEngine does not need, and translations other than fr/en.
 UNUSED_QT = ("Quick3D", "Multimedia", "Pdf", "Sensors", "ShaderTools", "SpatialAudio")
 
 
@@ -60,7 +74,7 @@ exe = EXE(
     exclude_binaries=True,
     name="Binder",
     console=False,
-    # PyInstaller convertit le PNG en .ico (Windows) ou .icns (macOS) grâce à Pillow.
+    # PyInstaller converts the PNG to .ico (Windows) or .icns (macOS) with Pillow.
     icon="binder.png",
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Binder")
@@ -73,7 +87,7 @@ if MACOS:
         bundle_identifier="fr.binder.app",
         info_plist={
             "CFBundleDisplayName": "Binder",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": version("binder"),
             "NSHighResolutionCapable": True,
         },
     )

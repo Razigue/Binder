@@ -1,11 +1,13 @@
-"""Construit l'application de bureau sur le système courant (Linux, Windows ou macOS).
+"""Builds the desktop application on the current system (Linux, Windows or macOS).
 
     python packaging/build.py
+    python packaging/build.py --version 1.2.0   # release: sets the version (pyproject.toml)
 
-Résultat : packaging/dist/Binder/ (Linux, Windows) ou packaging/dist/Binder.app (macOS).
-Prérequis : uv et Node 20 ou plus dans le PATH.
+Output: packaging/dist/Binder/ (Linux, Windows) or packaging/dist/Binder.app (macOS).
+Requirements: uv and Node 20 or later in the PATH.
 """
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -16,20 +18,27 @@ ROOT = PACKAGING.parent
 
 
 def run(*cmd: str, cwd: Path) -> None:
-    # Sous Windows, npm est un script .cmd : shutil.which le retrouve, pas subprocess seul.
+    # On Windows, npm is a .cmd script: shutil.which finds it, subprocess alone does not.
     exe = shutil.which(cmd[0])
     if exe is None:
-        sys.exit(f"Introuvable dans le PATH : {cmd[0]}")
+        sys.exit(f"Not found in PATH: {cmd[0]}")
     subprocess.run([exe, *cmd[1:]], cwd=cwd, check=True)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--version", help="application version (e.g. 1.2.0, from the tag)")
+    args = parser.parse_args()
+    backend = ROOT / "backend"
+    if args.version:
+        # The embedded version is compared with releases by the automatic update.
+        run("uv", "version", args.version, "--no-sync", cwd=backend)
+
     print("==> Interface")
     run("npm", "ci", "--silent", cwd=ROOT / "frontend")
     run("npm", "run", "build", cwd=ROOT / "frontend")
 
-    print("==> Exécutable")
-    backend = ROOT / "backend"
+    print("==> Executable")
     run("uv", "sync", "--extra", "desktop", "--quiet", cwd=backend)
     run(
         "uv", "run", "pyinstaller", str(PACKAGING / "binder.spec"), "--noconfirm",
@@ -43,7 +52,7 @@ def main() -> None:
         out = PACKAGING / "dist" / "Binder" / "Binder.exe"
     else:
         out = PACKAGING / "dist" / "Binder" / "Binder"
-    print(f"OK : {out.relative_to(ROOT)}")
+    print(f"OK: {out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

@@ -11,11 +11,17 @@ import { CategoryIcon } from "@/components/CategoryIcon"
 import { ExpirationSection } from "@/components/Expirations"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useDeadlines, useInvalidateAll, useToggleDeadline } from "@/hooks/queries"
+import { useT } from "@/i18n"
+import { common } from "@/i18n/messages/common"
+import { deadlines as messages } from "@/i18n/messages/deadlines"
 import { api, type Deadline } from "@/lib/api"
-import { daysLabel, formatAmount, formatDate, parseDate, toIso, urgency, urgencyStyles } from "@/lib/format"
+import {
+  categoryLabel, daysLabel, formatAmount, formatDate, formatDateTime, parseDate, toIso, urgency, urgencyStyles,
+} from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 export function DeadlinesPage() {
+  const t = useT(messages)
   const now = new Date()
   const [month, setMonth] = useState(new Date(now.getFullYear(), now.getMonth(), 1))
   const upcoming = useDeadlines({ start: toIso(now) })
@@ -33,8 +39,8 @@ export function DeadlinesPage() {
   return (
     <>
       <PageHeader
-        title="Échéances"
-        subtitle="Paiements et fins de validité, déduits de vos documents."
+        title={t("title")}
+        subtitle={t("subtitle")}
         actions={<ReminderDialog />}
       />
       <MonthTimeline
@@ -45,22 +51,21 @@ export function DeadlinesPage() {
         }}
       />
       {!!overdue.data?.length && (
-        <DeadlineSection title="En retard" deadlines={overdue.data} />
+        <DeadlineSection title={t("overdue")} deadlines={overdue.data} />
       )}
       <ExpirationSection />
       <DeadlineSection
-        title="Prochaines échéances"
+        title={t("upcoming")}
         deadlines={upcoming.data}
         loading={upcoming.isPending}
-        empty="Aucune échéance à venir. Importez une facture ou un avis pour commencer."
+        empty={t("upcomingEmpty")}
       />
     </>
   )
 }
 
-const MONTH_FMT = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" })
-
 function MonthTimeline({ month, onMonthChange }: { month: Date; onMonthChange: (d: Date) => void }) {
+  const t = useT(messages)
   const last = new Date(month.getFullYear(), month.getMonth() + 1, 0)
   const days = last.getDate()
   const { data = [] } = useDeadlines({ start: toIso(month), end: toIso(last), include_done: true })
@@ -70,38 +75,42 @@ function MonthTimeline({ month, onMonthChange }: { month: Date; onMonthChange: (
     : null
   const ticks = [1, 5, 10, 15, 20, 25, days]
   const shift = (n: number) => onMonthChange(new Date(month.getFullYear(), month.getMonth() + n, 1))
-  const label = MONTH_FMT.format(month)
+  const label = formatDateTime(month.toISOString(), { month: "long", year: "numeric" })
 
   return (
     <Card className="mb-6 gap-0 p-0">
       <div className="flex items-center justify-between px-5 pt-4">
         <h2 className="font-semibold first-letter:uppercase">{label}</h2>
         <div className="flex gap-1">
-          <Button variant="ghost" size="icon-sm" onClick={() => shift(-1)} aria-label="Mois précédent">
+          <Button variant="ghost" size="icon-sm" onClick={() => shift(-1)} aria-label={t("previousMonth")}>
             <ChevronLeft />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => shift(1)} aria-label="Mois suivant">
+          <Button variant="ghost" size="icon-sm" onClick={() => shift(1)} aria-label={t("nextMonth")}>
             <ChevronRight />
           </Button>
         </div>
       </div>
       <div className="px-8 pt-6 pb-4">
         <div className="relative h-12">
-          {ticks.map((t) => (
+          {ticks.map((tick) => (
             <span
-              key={t}
+              key={tick}
               className="absolute top-0 -translate-x-1/2 text-xs text-muted-foreground tabular-nums"
-              style={{ left: `${((t - 1) / (days - 1)) * 100}%` }}
+              style={{ left: `${((tick - 1) / (days - 1)) * 100}%` }}
             >
-              {String(t).padStart(2, "0")}
+              {String(tick).padStart(2, "0")}
             </span>
           ))}
           <div className="absolute top-8 right-0 left-0 h-px bg-border" />
-          {ticks.map((t) => (
-            <span key={`t${t}`} className="absolute top-6 h-4 w-px bg-border" style={{ left: `${((t - 1) / (days - 1)) * 100}%` }} />
+          {ticks.map((tick) => (
+            <span
+              key={`t${tick}`}
+              className="absolute top-6 h-4 w-px bg-border"
+              style={{ left: `${((tick - 1) / (days - 1)) * 100}%` }}
+            />
           ))}
           {todayPos !== null && (
-            <span className="absolute top-5 h-6 w-0.5 rounded bg-primary/40" style={{ left: `${todayPos}%` }} title="Aujourd'hui" />
+            <span className="absolute top-5 h-6 w-0.5 rounded bg-primary/40" style={{ left: `${todayPos}%` }} title={t("today")} />
           )}
           {data.map((d) => {
             const day = parseDate(d.due_date).getDate()
@@ -125,15 +134,17 @@ function MonthTimeline({ month, onMonthChange }: { month: Date; onMonthChange: (
             <div key={d.id} className={cn("-mb-px border-r border-b px-5 py-3", d.done && "opacity-50")}>
               <p className="flex items-center gap-2 text-sm font-medium">
                 <span className={cn("size-2 rounded-full", urgencyStyles[urgency(d.days_left)].dot)} />
-                <span className="truncate">{d.category === "Autre" ? d.title : d.category}</span>
+                <span className="truncate">{d.category === "other" ? d.title : categoryLabel(d.category)}</span>
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">{formatDate(d.due_date, "day")}</p>
-              <p className={cn("text-xs font-medium", urgencyStyles[urgency(d.days_left)].text)}>{formatAmount(d.amount)}</p>
+              {d.amount !== null && (
+                <p className={cn("text-xs font-medium tabular-nums", urgencyStyles[urgency(d.days_left)].text)}>{formatAmount(d.amount)}</p>
+              )}
             </div>
           ))}
         </div>
       ) : (
-        <p className="border-t px-5 py-4 text-sm text-muted-foreground">Aucune échéance ce mois-ci.</p>
+        <p className="border-t px-5 py-4 text-sm text-muted-foreground">{t("monthEmpty")}</p>
       )}
     </Card>
   )
@@ -150,13 +161,15 @@ function DeadlineSection({
   loading?: boolean
   empty?: string
 }) {
+  const t = useT(messages)
+  const tc = useT(common)
   const toggle = useToggleDeadline()
   return (
     <section className="mb-6">
       <h2 className="mb-3 font-semibold">{title}</h2>
       <Card className="gap-0 p-0">
         {loading ? (
-          <p className="p-5 text-sm text-muted-foreground">Chargement…</p>
+          <p className="p-5 text-sm text-muted-foreground">{tc("state.loading")}</p>
         ) : !deadlines?.length ? (
           <p className="p-5 text-sm text-muted-foreground">{empty}</p>
         ) : (
@@ -169,13 +182,13 @@ function DeadlineSection({
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">{d.title}</span>
                     <span className="block text-xs text-muted-foreground">
-                      {d.category}
-                      {d.source === "manual" ? " · rappel" : ""}
+                      {categoryLabel(d.category)}
+                      {d.source === "manual" ? ` · ${t("reminder")}` : ""}
                     </span>
                   </span>
-                  <span className="hidden text-sm sm:block">
+                  <span className="hidden text-sm tabular-nums sm:block">
                     <span className="block">{formatDate(d.due_date, "day")}</span>
-                    <span className="block text-xs text-muted-foreground">{formatAmount(d.amount)}</span>
+                    {d.amount !== null && <span className="block text-xs text-muted-foreground">{formatAmount(d.amount)}</span>}
                   </span>
                   <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap", u.pill)}>
                     {daysLabel(d.days_left)}
@@ -187,11 +200,11 @@ function DeadlineSection({
                   <input
                     type="checkbox"
                     className="size-4 accent-primary"
-                    aria-label={`Marquer « ${d.title} » comme réglée`}
+                    aria-label={t("markPaid", { title: d.title })}
                     onChange={() =>
                       toggle.mutate(
                         { id: d.id, done: true },
-                        { onSuccess: () => toast.success(`« ${d.title} » marquée comme réglée`) },
+                        { onSuccess: () => toast.success(t("markedPaid", { title: d.title })) },
                       )
                     }
                   />
@@ -220,6 +233,7 @@ const rowClass =
   "grid flex-1 grid-cols-[auto_1fr_auto_auto] items-center gap-4 py-3 pr-5 hover:bg-muted/40 sm:grid-cols-[auto_1fr_120px_auto_auto]"
 
 function ReminderDialog() {
+  const t = useT(messages)
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [date, setDate] = useState("")
@@ -232,7 +246,7 @@ function ReminderDialog() {
     try {
       await api.createDeadline({ title: title.trim(), due_date: date, amount: amount ? Number(amount) : null })
       invalidate()
-      toast.success("Rappel créé")
+      toast.success(t("reminderCreated"))
       setOpen(false)
       setTitle("")
       setDate("")
@@ -245,11 +259,11 @@ function ReminderDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" />}>
-        <BellPlus /> Ajouter un rappel
+        <BellPlus /> {t("addReminder")}
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Nouveau rappel</DialogTitle>
+          <DialogTitle>{t("newReminder")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -259,22 +273,22 @@ function ReminderDialog() {
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="r-title">Intitulé</Label>
-            <Input id="r-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Renouveler le passeport" />
+            <Label htmlFor="r-title">{t("reminderTitle")}</Label>
+            <Input id="r-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("reminderPlaceholder")} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="r-date">Date</Label>
+              <Label htmlFor="r-date">{t("date")}</Label>
               <Input id="r-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="r-amount">Montant (optionnel)</Label>
+              <Label htmlFor="r-amount">{t("amountOptional")}</Label>
               <Input id="r-amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={!valid}>
-              Créer le rappel
+              {t("createReminder")}
             </Button>
           </DialogFooter>
         </form>

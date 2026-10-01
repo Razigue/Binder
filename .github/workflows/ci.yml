@@ -1,9 +1,15 @@
 name: CI
 
+# On every branch push and every pull request. The "Release" workflow reuses it before
+# publishing: a tag produces no release if CI fails.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -48,4 +54,5 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm run build

@@ -1,8 +1,8 @@
-"""Abonnements et factures récurrentes : regroupement par émetteur, rythme, hausses.
+"""Subscriptions and recurring bills: grouped by issuer, with their rhythm and price increases.
 
-Une série = au moins deux documents du même émetteur, de même type et de même catégorie,
-avec un montant. Une hausse est signalée quand le dernier montant dépasse le précédent
-de 10 % et d'au moins 2 €.
+A series = at least two documents from the same issuer, of the same type and category, with an
+amount. An increase is flagged when the latest amount exceeds the previous one by 10% and by at
+least 2 (in the user's currency).
 """
 
 from datetime import date
@@ -11,21 +11,46 @@ from statistics import median
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
-from binder.models import Category, Document
+from binder import i18n
+from binder.db import WITHOUT_TEXT
+from binder.models import Category, DocType, Document
 from binder.services import activity
 from binder.services.rules import normalize
 
-RECURRING_TYPES = {"Facture", "Avis d'échéance", "Quittance de loyer", "Échéancier"}
-RECURRING_CATEGORIES = {Category.ENERGIE, Category.TELECOM, Category.ASSURANCE, Category.LOGEMENT}
+T = i18n.catalog(
+    "subscriptions",
+    {
+        "rent": {"en": "Rent", "fr": "Loyer"},
+        "monthly": {"en": "monthly", "fr": "mensuel"},
+        "bimonthly": {"en": "every two months", "fr": "bimestriel"},
+        "quarterly": {"en": "quarterly", "fr": "trimestriel"},
+        "half_yearly": {"en": "every six months", "fr": "semestriel"},
+        "yearly": {"en": "yearly", "fr": "annuel"},
+        "irregular": {"en": "irregular", "fr": "irrégulier"},
+        "increase": {
+            "en": "{label} up {pct:.0f}%: {last:money} instead of {previous:money}",
+            "fr": "Hausse de {pct:.0f} % sur {label} : {last:money} contre {previous:money}",
+        },
+    },
+)
+
+RECURRING_TYPES = {
+    DocType.INVOICE,
+    DocType.PAYMENT_NOTICE,
+    DocType.RENT_RECEIPT,
+    DocType.PAYMENT_SCHEDULE,
+}
+RECURRING_CATEGORIES = {Category.ENERGY, Category.TELECOM, Category.INSURANCE, Category.HOUSING}
 INCREASE_RATIO = 0.10
 INCREASE_MIN = 2.0
 
+# (min days, max days, cadence identifier); labels in T.
 CADENCES = [
-    (25, 35, "mensuel"),
-    (50, 70, "bimestriel"),
-    (80, 100, "trimestriel"),
-    (170, 200, "semestriel"),
-    (330, 400, "annuel"),
+    (25, 35, "monthly"),
+    (50, 70, "bimonthly"),
+    (80, 100, "quarterly"),
+    (170, 200, "half_yearly"),
+    (330, 400, "yearly"),
 ]
 
 
@@ -40,7 +65,10 @@ class Subscription(BaseModel):
     label: str
     category: Category
     doc_type: str | None
+    # Identifier ("monthly", "bimonthly", "quarterly", "half_yearly", "yearly", "irregular")
+    # and its label in the interface language.
     cadence: str
+    cadence_label: str
     interval_days: int | None
     last_amount: float
     previous_amount: float
@@ -56,7 +84,7 @@ def _key(doc: Document) -> str | None:
     if doc.doc_type not in RECURRING_TYPES and doc.category not in RECURRING_CATEGORIES:
         return None
     who = normalize(doc.issuer or "")
-    if not who and doc.doc_type != "Quittance de loyer":
+    if not who and doc.doc_type != DocType.RENT_RECEIPT:
         return None
     return f"{doc.category.name}|{doc.doc_type or ''}|{who}"
 
@@ -67,8 +95,8 @@ def _date(doc: Document) -> date:
 
 def _cadence(interval: float | None) -> str:
     if interval is None:
-        return "irrégulier"
-    return next((name for lo, hi, name in CADENCES if lo <= interval <= hi), "irrégulier")
+        return "irregular"
+    return next((name for lo, hi, name in CADENCES if lo <= interval <= hi), "irregular")
 
 
 def _build(key: str, docs: list[Document]) -> Subscription:
@@ -79,13 +107,15 @@ def _build(key: str, docs: list[Document]) -> Subscription:
     last, previous = docs[-1], docs[-2]
     assert last.amount is not None and previous.amount is not None
     change = (last.amount - previous.amount) / previous.amount if previous.amount else 0.0
-    label = "Loyer" if last.doc_type == "Quittance de loyer" else last.issuer or last.title
+    label = T("rent") if last.doc_type == DocType.RENT_RECEIPT else last.issuer or last.title
+    cadence = _cadence(interval)
     return Subscription(
         key=key,
         label=label,
         category=last.category,
         doc_type=last.doc_type,
-        cadence=_cadence(interval),
+        cadence=cadence,
+        cadence_label=T(cadence),
         interval_days=round(interval) if interval else None,
         last_amount=last.amount,
         previous_amount=previous.amount,
@@ -100,9 +130,22 @@ def _build(key: str, docs: list[Document]) -> Subscription:
     )
 
 
-def detect(session: Session) -> list[Subscription]:
+def detect(session: Session, like: Document | None = None) -> list[Subscription]:
+    """`like`: only the series of this document (same category and type)."""
+    stmt = (
+        select(Document)
+        .options(*WITHOUT_TEXT)
+        .where(col(Document.deleted_at).is_(None), col(Document.amount).is_not(None))
+    )
+    if like is not None:
+        stmt = stmt.where(Document.category == like.category)
+        stmt = stmt.where(
+            col(Document.doc_type).is_(None)
+            if like.doc_type is None
+            else Document.doc_type == like.doc_type
+        )
     groups: dict[str, list[Document]] = {}
-    for doc in session.exec(select(Document).where(col(Document.deleted_at).is_(None))):
+    for doc in session.exec(stmt):
         key = _key(doc)
         if key:
             groups.setdefault(key, []).append(doc)
@@ -111,18 +154,23 @@ def detect(session: Session) -> list[Subscription]:
 
 
 def check_increase(session: Session, doc: Document) -> None:
-    """Après l'analyse d'un document : journalise une hausse s'il est le dernier de sa série."""
+    """After a document is analysed: logs an increase if it is the latest of its series."""
     key = _key(doc)
     if key is None:
         return
-    sub = next((s for s in detect(session) if s.key == key), None)
+    sub = next((s for s in detect(session, like=doc) if s.key == key), None)
     if sub is None or not sub.increase or sub.history[-1].document_id != doc.id:
         return
     activity.log(
         session,
         "increase",
-        f"Hausse de {sub.change_pct:.0f} % sur {sub.label} : "
-        f"{activity.display(sub.last_amount)} contre {activity.display(sub.previous_amount)}",
+        T.msg(
+            "increase",
+            pct=sub.change_pct,
+            label=T.msg("rent") if sub.doc_type == DocType.RENT_RECEIPT else sub.label,
+            last=sub.last_amount,
+            previous=sub.previous_amount,
+        ),
         document=doc,
-        details={"avant": sub.previous_amount, "apres": sub.last_amount},
+        details={"before": sub.previous_amount, "after": sub.last_amount},
     )

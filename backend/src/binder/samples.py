@@ -1,7 +1,8 @@
-"""Documents fictifs annotés : jeu de démonstration et base de l'évaluation.
+"""Annotated fictitious documents: demo set and basis of the evaluation.
 
-Chaque échantillon est un PDF généré à la volée avec ses valeurs attendues. Les dates sont
-relatives à `today` pour que le tableau de bord de démo montre des échéances à venir.
+Each sample is a PDF generated on the fly with its expected values. Their content mirrors real
+French administrative documents, so it stays in French. Dates are relative to `today` so that
+the demo dashboard shows upcoming deadlines.
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Any
 
 import pymupdf
 
-from binder.models import Category
+from binder.models import Category, DocType
 
 
 @dataclass
@@ -23,7 +24,7 @@ class Sample:
         doc = pymupdf.open()
         page = doc.new_page(width=595, height=842)
         page.insert_htmlbox(pymupdf.Rect(48, 48, 547, 794), self.html, css=CSS)
-        # Métadonnées fixes et pas d'identifiant aléatoire : même contenu, mêmes octets.
+        # Fixed metadata and no random identifier: same content, same bytes.
         doc.set_metadata({})
         data = doc.tobytes(no_new_id=True)
         doc.close()
@@ -42,10 +43,12 @@ td { padding: 4pt; border-bottom: 1px solid #e5e7eb; }
 
 
 def _fr(d: date) -> str:
+    """Date as written in French documents (15/10/2026)."""
     return d.strftime("%d/%m/%Y")
 
 
 def _money(v: float) -> str:
+    """Amount as written in French documents (1 240,00 €)."""
     return f"{v:,.2f}".replace(",", " ").replace(".", ",") + " €"
 
 
@@ -66,6 +69,7 @@ MONTHS_FR = [
 
 
 def _long(d: date) -> str:
+    """Date written out in French (15 octobre 2026)."""
     return f"{d.day} {MONTHS_FR[d.month - 1]} {d.year}"
 
 
@@ -87,7 +91,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <table><tr><td>Montant de votre taxe foncière</td><td class="big">{_money(1240)}</td></tr>
         <tr><td>Date limite de paiement</td><td>{_long(d(5))}</td></tr></table>
         <p class="muted">Payez en ligne sur impots.gouv.fr</p>""",
-        category=Category.IMPOTS,
+        category=Category.TAXES,
+        doc_type=DocType.PROPERTY_TAX,
         amount=1240.0,
         due_date=d(5),
         issue_date=d(-20),
@@ -100,7 +105,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <table><tr><td>Revenu fiscal de référence</td><td>32 480 €</td></tr>
         <tr><td>Montant restant à payer</td><td class="big">{_money(1842)}</td></tr>
         <tr><td>Date limite de paiement</td><td>{_fr(d(15))}</td></tr></table>""",
-        category=Category.IMPOTS,
+        category=Category.TAXES,
+        doc_type=DocType.TAX_NOTICE,
         amount=1842.0,
         due_date=d(15),
         issue_date=d(-18),
@@ -113,7 +119,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>Votre contrat d'assurance habitation Raqvam sera renouvelé.</p>
         <table><tr><td>Cotisation annuelle TTC</td><td class="big">{_money(278)}</td></tr>
         <tr><td>Échéance</td><td>{_fr(d(18))}</td></tr></table>""",
-        category=Category.ASSURANCE,
+        category=Category.INSURANCE,
+        doc_type=DocType.PAYMENT_NOTICE,
         amount=278.0,
         due_date=d(18),
         issue_date=d(-25),
@@ -127,7 +134,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
             <p>La MAIF atteste que M. Martin est assuré en responsabilité civile pour le logement
             situé 12 rue des Tilleuls, 69003 Lyon.</p>
             <p>Attestation valable jusqu'au {_fr(d(issued + 365))}.</p>""",
-            category=Category.ASSURANCE,
+            category=Category.INSURANCE,
+            doc_type=DocType.INSURANCE_CERTIFICATE,
             amount=None,
             due_date=None,
             issue_date=d(issued),
@@ -142,7 +150,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <tr><td>Abonnement</td><td>{_money(14.12)}</td></tr>
         <tr><td>Total TTC à payer</td><td class="big">{_money(94.37)}</td></tr></table>
         <p>Montant prélevé le {_fr(d(12))} sur votre compte.</p>""",
-        category=Category.ENERGIE,
+        category=Category.ENERGY,
+        doc_type=DocType.INVOICE,
         amount=94.37,
         due_date=d(12),
         issue_date=d(-12),
@@ -154,7 +163,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>Facture du {_fr(d(-72))} — N° client : 6012 3456 78</p>
         <table><tr><td>Consommation</td><td>268 kWh</td></tr>
         <tr><td>Total TTC à payer</td><td class="big">{_money(81.05)}</td></tr></table>""",
-        category=Category.ENERGIE,
+        category=Category.ENERGY,
+        doc_type=DocType.INVOICE,
         amount=81.05,
         due_date=None,
         issue_date=d(-72),
@@ -167,6 +177,7 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>La CAF certifie avoir versé l'aide au logement (APL) pour un montant mensuel de
         {_money(212.45)}.</p>""",
         category=Category.SOCIAL,
+        doc_type=DocType.CERTIFICATE,
         amount=212.45,
         due_date=None,
         issue_date=d(-9),
@@ -178,7 +189,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>Date du relevé : {_fr(d(-14))}</p><p>IBAN FR76 1820 6000 1234 5678 9012 345</p>
         <table><tr><td>Solde créditeur au {_fr(d(-14))}</td><td>{_money(2310.18)}</td></tr>
         <tr><td>PRLV EDF</td><td>- {_money(81.05)}</td></tr></table>""",
-        category=Category.BANQUE,
+        category=Category.BANK,
+        doc_type=DocType.BANK_STATEMENT,
         amount=2310.18,
         due_date=None,
         issue_date=d(-14),
@@ -192,7 +204,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <tr><td>Charges locatives</td><td>{_money(70)}</td></tr>
         <tr><td>Total</td><td class="big">{_money(850)}</td></tr></table>
         <p>Prochain loyer à payer avant le {_fr(d(25))}.</p>""",
-        category=Category.LOGEMENT,
+        category=Category.HOUSING,
+        doc_type=DocType.RENT_RECEIPT,
         amount=850.0,
         due_date=d(25),
         issue_date=d(-3),
@@ -207,6 +220,7 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <tr><td>Montant total à payer</td><td class="big">{_money(39.99)}</td></tr></table>
         <p>Prélevé le {_fr(d(20))}</p>""",
         category=Category.TELECOM,
+        doc_type=DocType.INVOICE,
         amount=39.99,
         due_date=d(20),
         issue_date=d(-6),
@@ -219,7 +233,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <table><tr><td>Salaire brut</td><td>{_money(2750)}</td></tr>
         <tr><td>Net imposable</td><td>{_money(2201.4)}</td></tr>
         <tr><td>Net à payer</td><td class="big">{_money(2134.56)}</td></tr></table>""",
-        category=Category.TRAVAIL,
+        category=Category.WORK,
+        doc_type=DocType.PAYSLIP,
         amount=2134.56,
         due_date=None,
         issue_date=d(-28),
@@ -231,7 +246,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>CPAM de Paris — Édité le {_fr(d(-11))}</p>
         <table><tr><td>Consultation généraliste</td><td>{_money(30)}</td></tr>
         <tr><td>Montant remboursé</td><td class="big">{_money(23.40)}</td></tr></table>""",
-        category=Category.SANTE,
+        category=Category.HEALTH,
+        doc_type=DocType.REIMBURSEMENT_STATEMENT,
         amount=23.40,
         due_date=None,
         issue_date=d(-11),
@@ -242,7 +258,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         f"""<h1>RÉPUBLIQUE FRANÇAISE</h1><h2>Carte nationale d'identité</h2>
         <p>Nom : MARTIN — Prénom : Camille</p><p>Lieu de naissance : Lyon (69)</p>
         <p>Date de délivrance : {_fr(d(-3585))}</p><p>Date d'expiration : {_fr(d(65))}</p>""",
-        category=Category.IDENTITE,
+        category=Category.IDENTITY,
+        doc_type=DocType.IDENTITY_CARD,
         amount=None,
         due_date=None,
         issue_date=d(-3585),
@@ -257,7 +274,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         <p>Date du contrôle : {_fr(d(-160))}</p><p>Résultat : favorable</p>
         <table><tr><td>Montant TTC</td><td class="big">{_money(78)}</td></tr></table>
         <p>Prochain contrôle à effectuer avant le {_fr(d(570))}</p>""",
-        category=Category.VEHICULE,
+        category=Category.VEHICLE,
+        doc_type=DocType.ROADWORTHINESS_TEST,
         amount=78.0,
         due_date=None,
         issue_date=d(-160),
@@ -268,7 +286,8 @@ def build_samples(today: date | None = None) -> list[Sample]:
         "note-garage.pdf",
         f"""<h1>Garage du Centre</h1><p>Devis réparation du {_fr(d(-2))}</p>
         <p>Remplacement plaquettes de frein : 145 €</p>""",
-        category=Category.AUTRE,
+        category=Category.OTHER,
+        doc_type=DocType.QUOTE,
         amount=145.0,
         due_date=None,
         issue_date=d(-2),

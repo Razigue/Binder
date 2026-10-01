@@ -1,21 +1,22 @@
-"""Point d'entrée de l'application empaquetée (PyInstaller)."""
+"""Entry point of the packaged application (PyInstaller)."""
 
 import multiprocessing
 import os
 import sys
 
-# Application fenêtrée (sans console) : sous Windows, sys.stdout et sys.stderr valent None,
-# ce qui fait planter la configuration des journaux d'uvicorn.
+# Windowed application (no console): on Windows, sys.stdout and sys.stderr are None,
+# which crashes uvicorn's logging configuration.
 for name in ("stdout", "stderr"):
     if getattr(sys, name) is None:
         setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    from binder.cli import main, run_desktop
+    from binder import desktop
+    from binder.cli import main
 
-    # Double-clic : application de bureau. Avec arguments (--seed, …) : CLI habituelle.
+    # Double-click: desktop application. With arguments (--seed, …): the usual CLI.
     if len(sys.argv) == 1:
-        run_desktop()
+        desktop.run()
     else:
         main()

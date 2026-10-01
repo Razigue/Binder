@@ -1,4 +1,4 @@
-"""Tables SQLModel."""
+"""SQLModel tables."""
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -11,18 +11,90 @@ def _now() -> datetime:
 
 
 class Category(StrEnum):
-    IMPOTS = "Impôts"
-    ENERGIE = "Énergie"
-    ASSURANCE = "Assurance"
-    BANQUE = "Banque"
-    LOGEMENT = "Logement"
-    SANTE = "Santé"
-    SOCIAL = "Social"
-    TRAVAIL = "Travail"
-    TELECOM = "Télécom"
-    IDENTITE = "Identité"
-    VEHICULE = "Véhicule"
-    AUTRE = "Autre"
+    """Stable identifiers; labels live in binder.i18n (CATEGORIES)."""
+
+    TAXES = "taxes"
+    ENERGY = "energy"
+    INSURANCE = "insurance"
+    BANK = "bank"
+    HOUSING = "housing"
+    HEALTH = "health"
+    SOCIAL = "social"
+    WORK = "work"
+    TELECOM = "telecom"
+    IDENTITY = "identity"
+    VEHICLE = "vehicle"
+    OTHER = "other"
+
+
+class DocType(StrEnum):
+    """Detected document type. Stable identifiers; labels live in binder.i18n (DOC_TYPES)."""
+
+    IDENTITY_CARD = "identity_card"
+    PASSPORT = "passport"
+    DRIVING_LICENCE = "driving_licence"
+    RESIDENCE_PERMIT = "residence_permit"
+    ROADWORTHINESS_TEST = "roadworthiness_test"
+    VEHICLE_REGISTRATION = "vehicle_registration"
+    BANK_DETAILS = "bank_details"
+    EMPLOYMENT_CONTRACT = "employment_contract"
+    LEASE = "lease"
+    PROPERTY_TAX = "property_tax"
+    HOUSING_TAX = "housing_tax"
+    TAX_NOTICE = "tax_notice"
+    RENT_RECEIPT = "rent_receipt"
+    PAYMENT_NOTICE = "payment_notice"
+    INSURANCE_CERTIFICATE = "insurance_certificate"
+    BANK_STATEMENT = "bank_statement"
+    PAYSLIP = "payslip"
+    REIMBURSEMENT_STATEMENT = "reimbursement_statement"
+    CERTIFICATE = "certificate"
+    QUOTE = "quote"
+    PAYMENT_SCHEDULE = "payment_schedule"
+    INVOICE = "invoice"
+    CONTRACT = "contract"
+
+
+# Enum member names stored by versions before the English identifiers (SQLAlchemy stores
+# member names, not values). Migrated by binder.db.
+LEGACY_CATEGORY_NAMES = {
+    "IMPOTS": "TAXES",
+    "ENERGIE": "ENERGY",
+    "ASSURANCE": "INSURANCE",
+    "BANQUE": "BANK",
+    "LOGEMENT": "HOUSING",
+    "SANTE": "HEALTH",
+    "TRAVAIL": "WORK",
+    "IDENTITE": "IDENTITY",
+    "VEHICULE": "VEHICLE",
+    "AUTRE": "OTHER",
+}
+# doc_type is plain text: former versions stored the French label.
+LEGACY_DOC_TYPES = {
+    "Carte d'identité": DocType.IDENTITY_CARD,
+    "Passeport": DocType.PASSPORT,
+    "Permis de conduire": DocType.DRIVING_LICENCE,
+    "Titre de séjour": DocType.RESIDENCE_PERMIT,
+    "Contrôle technique": DocType.ROADWORTHINESS_TEST,
+    "Carte grise": DocType.VEHICLE_REGISTRATION,
+    "RIB": DocType.BANK_DETAILS,
+    "Contrat de travail": DocType.EMPLOYMENT_CONTRACT,
+    "Bail": DocType.LEASE,
+    "Taxe foncière": DocType.PROPERTY_TAX,
+    "Taxe d'habitation": DocType.HOUSING_TAX,
+    "Avis d'imposition": DocType.TAX_NOTICE,
+    "Quittance de loyer": DocType.RENT_RECEIPT,
+    "Avis d'échéance": DocType.PAYMENT_NOTICE,
+    "Attestation d'assurance": DocType.INSURANCE_CERTIFICATE,
+    "Relevé bancaire": DocType.BANK_STATEMENT,
+    "Bulletin de paie": DocType.PAYSLIP,
+    "Décompte de remboursement": DocType.REIMBURSEMENT_STATEMENT,
+    "Attestation": DocType.CERTIFICATE,
+    "Devis": DocType.QUOTE,
+    "Échéancier": DocType.PAYMENT_SCHEDULE,
+    "Facture": DocType.INVOICE,
+    "Contrat": DocType.CONTRACT,
+}
 
 
 class DocumentStatus(StrEnum):
@@ -40,73 +112,95 @@ class Document(SQLModel, table=True):
     stored_name: str
 
     title: str = ""
-    category: Category = Field(default=Category.AUTRE, index=True)
+    category: Category = Field(default=Category.OTHER, index=True)
     issuer: str | None = None
     amount: float | None = None
     issue_date: date | None = None
     due_date: date | None = Field(default=None, index=True)
-    # Fin de validité (pièce d'identité, attestation, contrôle technique).
+    # End of validity (identity document, certificate, roadworthiness test).
     expiry_date: date | None = Field(default=None, index=True)
     reference: str | None = None
-    # L'utilisateur garde ce document au-delà de la durée de conservation conseillée.
+    # The user keeps this document beyond the recommended retention period.
     keep_forever: bool = False
 
     confidence: float = 0.0
     status: DocumentStatus = Field(default=DocumentStatus.PROCESSING, index=True)
-    # Liste JSON des champs manquants ou douteux.
+    # JSON list of missing or doubtful fields.
     missing_fields: str = "[]"
     extractor: str = "rules"
+    # DocType value (kept as text: unknown values from newer versions stay readable).
     doc_type: str | None = None
-    # Doublon probable (contenu quasi identique à un document déjà présent).
+    # Probable duplicate (content nearly identical to an existing document).
     duplicate_of: int | None = Field(default=None, index=True)
-    # L'utilisateur a confirmé que ce n'est pas un doublon : on ne le signale plus.
+    # The user confirmed it is not a duplicate: no longer flagged.
     duplicate_dismissed: bool = False
-    # Ancienne version d'un document renouvelé (attestation, pièce d'identité…).
+    # Former version of a renewed document (certificate, identity document…).
     superseded_by: int | None = Field(default=None, index=True)
-    # Explication en langage simple (JSON), recalculée quand le document change.
-    explanation: str | None = None
     page_count: int = 0
-    text: str = ""
 
     created_at: datetime = Field(default_factory=_now, index=True)
     updated_at: datetime = Field(default_factory=_now)
-    # Corbeille : un document supprimé reste restaurable jusqu'à sa suppression définitive.
+    # Trash: a deleted document can be restored until it is permanently deleted.
     deleted_at: datetime | None = Field(default=None, index=True)
+
+    # Large columns, last (see HEAVY_COLUMNS): SQLite stores the end of a long row in
+    # overflow pages, read through to reach any column stored after them.
+    # Plain-language explanation (JSON), recomputed when the document or language changes.
+    explanation: str | None = None
+    text: str = ""
+
+
+# Kept at the end of the document table (binder.db rebuilds it when a column follows them).
+HEAVY_COLUMNS = ("explanation", "text")
 
 
 class Deadline(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     document_id: int | None = Field(default=None, foreign_key="document.id", index=True)
     title: str
-    category: Category = Category.AUTRE
+    category: Category = Category.OTHER
     due_date: date = Field(index=True)
     amount: float | None = None
     done: bool = False
-    # "extracted" (paiement déduit d'un document), "expiry" (fin de validité d'un document)
-    # ou "manual" (rappel créé par l'utilisateur ou l'agent).
+    # "extracted" (payment found in a document), "expiry" (end of validity of a document)
+    # or "manual" (reminder created by the user or the agent).
     source: str = "extracted"
     created_at: datetime = Field(default_factory=_now)
 
 
 class Activity(SQLModel, table=True):
-    """Journal lisible de tout ce que Binder (ou l'utilisateur) a fait.
+    """Readable log of everything Binder (or the user) did.
 
-    Pas de clé étrangère vers le document : l'entrée survit à sa suppression définitive.
+    No foreign key to the document: the entry survives its permanent deletion.
     """
 
     id: int | None = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=_now, index=True)
-    # « user » (action dans l'interface), « binder » (automatique), « agent », « watcher ».
+    # "user" (action in the interface), "binder" (automatic), "agent", "watcher".
     actor: str = "binder"
     action: str = Field(index=True)
     summary: str
     document_id: int | None = Field(default=None, index=True)
-    # Détails JSON (ancienne/nouvelle valeur d'un champ, confiance…).
+    # JSON details (old/new field value, confidence…), and "msg": the summary as an
+    # i18n message key + parameters, rendered in the current language when displayed.
     details: str = "{}"
 
 
 class Setting(SQLModel, table=True):
-    """Réglages modifiables depuis l'interface (valeur JSON). Stockés dans la base chiffrée."""
+    """Settings editable from the interface (JSON value). Stored in the encrypted database."""
 
     key: str = Field(primary_key=True)
     value: str = "null"
+
+
+class Embedding(SQLModel, table=True):
+    """Vector of a piece of a document, for semantic search (see services/embeddings.py).
+
+    Recomputed when the document changes; vectors of another model are ignored."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    document_id: int = Field(index=True)
+    chunk: int = 0
+    model: str = Field(index=True)
+    # Normalized float32 values.
+    vector: bytes

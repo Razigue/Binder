@@ -12,14 +12,14 @@ def by_name(samples: list[Sample], name: str) -> Sample:
 
 
 def rescan(sample: Sample) -> Sample:
-    """Même document, octets différents (téléchargé à nouveau, mention en pied de page)."""
+    """Same document, different bytes (downloaded again, footer note)."""
     html = sample.html + "<p class='muted'>Document téléchargé depuis votre espace client</p>"
     return Sample("copie-" + sample.filename, html, sample.expected)
 
 
 def test_standard_name_on_download(client: TestClient, samples: list[Sample]) -> None:
     doc = upload(client, by_name(samples, "facture-edf.pdf"))
-    assert doc["standard_name"] == f"{doc['issue_date']} Facture EDF.pdf"
+    assert doc["standard_name"] == f"{doc['issue_date']} EDF invoice.pdf"
     r = client.get(f"/api/documents/{doc['id']}/file")
     assert "filename*=UTF-8''" in r.headers["content-disposition"]
 
@@ -29,7 +29,7 @@ def test_export_is_sorted_by_category_and_year(client: TestClient, samples: list
     upload(client, by_name(samples, "facture-edf-juillet.pdf"))
     archive = zipfile.ZipFile(io.BytesIO(client.get("/api/export").content))
     names = sorted(n for n in archive.namelist() if n != "index.json")
-    assert all(n.startswith("Énergie/20") and n.endswith("Facture EDF.pdf") for n in names)
+    assert all(n.startswith("Energy/20") and n.endswith("EDF invoice.pdf") for n in names)
     assert len(set(names)) == 2
 
 
@@ -45,8 +45,8 @@ def test_near_duplicate_goes_to_review(client: TestClient, samples: list[Sample]
         for e in client.get("/api/activity", params={"document_id": copy["id"]}).json()
         if e["action"] == "analyze"
     ]
-    assert analysis["summary"].endswith("(doublon probable de « Facture Orange »)")
-    # L'échéance n'est comptée qu'une fois.
+    assert analysis["summary"].endswith("(probable duplicate of “Orange invoice”)")
+    # The deadline is only counted once.
     assert [d["document_id"] for d in client.get("/api/deadlines").json()] == [original["id"]]
 
     kept = client.patch(f"/api/documents/{copy['id']}", json={"validated": True}).json()
@@ -73,21 +73,21 @@ def test_trashing_original_releases_duplicate(client: TestClient, samples: list[
 
 
 def test_latest_version_supersedes_older(client: TestClient, samples: list[Sample]) -> None:
-    # Import dans le désordre : c'est la date du document qui compte.
+    # Imported out of order: the document's date is what counts.
     new = upload(client, by_name(samples, "attestation-maif.pdf"))
     old = upload(client, by_name(samples, "attestation-maif-ancienne.pdf"))
-    assert new["doc_type"] == "Attestation d'assurance"
+    assert new["doc_type"] == "insurance_certificate"
     assert new["status"] == "classified"
     assert client.get(f"/api/documents/{old['id']}").json()["superseded_by"] == new["id"]
     assert client.get(f"/api/documents/{new['id']}").json()["superseded_by"] is None
 
-    # La plus récente part à la corbeille : l'ancienne redevient la version en vigueur.
+    # The most recent one goes to the trash: the older one is current again.
     client.delete(f"/api/documents/{new['id']}")
     assert client.get(f"/api/documents/{old['id']}").json()["superseded_by"] is None
     client.post(f"/api/documents/{new['id']}/restore")
     assert client.get(f"/api/documents/{old['id']}").json()["superseded_by"] == new["id"]
     log = client.get("/api/activity", params={"document_id": old["id"]}).json()
-    assert any("remplacé par une version plus récente" in e["summary"] for e in log)
+    assert any("superseded by a newer version" in e["summary"] for e in log)
 
 
 def test_payslips_are_never_superseded(client: TestClient, samples: list[Sample]) -> None:
