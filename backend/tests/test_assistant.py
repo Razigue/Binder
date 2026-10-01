@@ -3,6 +3,7 @@ anomalies, missing documents, letters with follow-up, packs, sources, briefing, 
 backups and the local AI setup."""
 
 import io
+import sys
 import tarfile
 import zipfile
 from collections.abc import Iterator
@@ -508,7 +509,9 @@ def test_ollama_is_installed_from_its_release(
     monkeypatch.setattr(setup, "asset_name", lambda: name)
     monkeypatch.setattr(setup, "find_ollama", lambda: next(setup.managed_dir().rglob("ollama")))
     binary = setup._install()
-    assert binary == setup.managed_dir() / "bin" / "ollama" and binary.stat().st_mode & 0o100
+    assert binary == setup.managed_dir() / "bin" / "ollama"
+    # Windows has no executable bit: it goes by the file extension.
+    assert sys.platform == "win32" or binary.stat().st_mode & 0o100
 
 
 def test_setup_status_without_ai() -> None:
