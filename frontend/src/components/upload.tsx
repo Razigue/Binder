@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react"
-import { CircleAlert, FileText, Loader2, Smartphone, Upload } from "lucide-react"
+import { CircleAlert, FileText, Loader2, Lock, Smartphone, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useInvalidateAll } from "@/hooks/queries"
@@ -10,7 +10,6 @@ import { api, type Doc } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { ReportView } from "./panels"
 import { PhoneScanPanel } from "./PhoneScan"
-import { LocalBadge } from "./StatusDot"
 
 export const ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
 
@@ -131,7 +130,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 </div>
               )}
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <LocalBadge /> · {t("local")}
+                <Lock className="size-3.5" /> {t("local")}
               </p>
             </>
           )}

@@ -75,7 +75,7 @@ def send(title: str, body: str) -> bool:
     args, env = command
     kwargs: dict[str, Any] = {}
     if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
         subprocess.run(args, env=env, timeout=15, check=True, capture_output=True, **kwargs)
         return True

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ChevronRight, Loader2 } from "lucide-react"
+import { ChevronRight, Hourglass, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/i18n"
@@ -14,6 +14,12 @@ export function StatusBadge({ doc }: { doc: Doc }) {
     return (
       <Badge variant="secondary">
         <Loader2 className="animate-spin" /> {t("processing")}
+      </Badge>
+    )
+  if (doc.status === "waiting")
+    return (
+      <Badge variant="secondary">
+        <Hourglass /> {t("waiting")}
       </Badge>
     )
   if (doc.status === "to_review")

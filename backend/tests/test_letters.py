@@ -1,3 +1,5 @@
+import re
+
 from fastapi.testclient import TestClient
 
 from binder.samples import Sample
@@ -6,6 +8,12 @@ from tests.conftest import upload
 
 def by_name(samples: list[Sample], name: str) -> Sample:
     return next(s for s in samples if s.filename == name)
+
+
+def anonymous(sample: Sample) -> Sample:
+    """The sample without its holder's name and address: no sender can be found."""
+    html = re.sub(r"<p>(?:Titulaire|Souscripteur|Logement)[^<]*</p>", "", sample.html)
+    return Sample(sample.filename, html, sample.expected)
 
 
 def set_locale(client: TestClient, language: str, country: str) -> None:
@@ -48,7 +56,7 @@ def test_letter_to_france_is_in_french_whatever_the_interface_language(
     client: TestClient, samples: list[Sample]
 ) -> None:
     set_locale(client, "en", "FR")
-    doc = upload(client, by_name(samples, "maif-echeance.pdf"))
+    doc = upload(client, anonymous(by_name(samples, "maif-echeance.pdf")))
     letter = client.post(
         "/api/letters", json={"kind": "termination", "document_id": doc["id"]}
     ).json()
@@ -90,7 +98,7 @@ def test_telecom_cancellation_has_no_insurance_clause(
 def test_complaint_without_profile_keeps_placeholders(
     client: TestClient, samples: list[Sample]
 ) -> None:
-    doc = upload(client, by_name(samples, "facture-edf.pdf"))
+    doc = upload(client, anonymous(by_name(samples, "facture-edf.pdf")))
     letter = client.post(
         "/api/letters",
         json={
@@ -107,4 +115,12 @@ def test_complaint_without_profile_keeps_placeholders(
 
 def test_unknown_letter_kind(client: TestClient) -> None:
     assert client.post("/api/letters", json={"kind": "threat"}).status_code == 400
-    assert set(client.get("/api/letters/kinds").json()) == {"termination", "complaint", "request"}
+    assert set(client.get("/api/letters/kinds").json()) == {
+        "termination",
+        "complaint",
+        "request",
+        "payment_plan",
+        "appeal",
+        "formal_notice",
+        "address_change",
+    }

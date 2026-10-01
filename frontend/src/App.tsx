@@ -12,6 +12,8 @@ import { HomePage } from "@/pages/Home"
 
 // Today ships with the app; the other pages load on first visit.
 const AreaPage = lazy(() => import("@/pages/Area").then((m) => ({ default: m.AreaPage })))
+const DocumentsPage = lazy(() => import("@/pages/Documents").then((m) => ({ default: m.DocumentsPage })))
+const PreparePage = lazy(() => import("@/pages/Prepare").then((m) => ({ default: m.PreparePage })))
 const DocumentDetailPage = lazy(() => import("@/pages/DocumentDetail").then((m) => ({ default: m.DocumentDetailPage })))
 const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default: m.HistoryPage })))
 const SettingsPage = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.SettingsPage })))
@@ -33,6 +35,8 @@ export default function App() {
                   <Route element={<AppLayout />}>
                     <Route index element={<HomePage />} />
                     <Route path="area/:area" element={<AreaPage />} />
+                    <Route path="prepare" element={<PreparePage />} />
+                    <Route path="documents" element={<DocumentsPage />} />
                     <Route path="documents/:id" element={<DocumentDetailPage />} />
                     <Route path="history" element={<HistoryPage />} />
                     <Route path="settings" element={<SettingsPage />} />

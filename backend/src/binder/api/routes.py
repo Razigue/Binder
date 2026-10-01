@@ -63,6 +63,7 @@ from binder.services import (
     llm_models,
     organize,
     preferences,
+    profile,
     retention,
     settings_store,
     subscriptions,
@@ -557,15 +558,15 @@ def list_subscriptions(session: SessionDep) -> list[subscriptions.Subscription]:
 
 
 @router.get("/profile")
-def get_profile(session: SessionDep) -> letters.Profile:
-    return settings_store.load(session, letters.PROFILE_KEY, letters.Profile)
+def get_profile(session: SessionDep) -> profile.Profile:
+    return profile.load(session)
 
 
 @router.put("/profile")
-def update_profile(body: letters.Profile, session: SessionDep) -> letters.Profile:
-    settings_store.save(session, letters.PROFILE_KEY, body)
+def update_profile(body: profile.Profile, session: SessionDep) -> profile.Profile:
+    saved = profile.update(session, body.model_dump(exclude={"auto"}))
     session.commit()
-    return body
+    return saved
 
 
 @router.get("/letters/kinds")
@@ -853,3 +854,17 @@ def seed_demo(session: SessionDep) -> dict[str, object]:
     results = ingest.seed_demo(session)
     batch = next((doc.batch for doc, created in results if created), None)
     return {"imported": sum(created for _, created in results), "batch": batch}
+
+
+@router.get("/demo")
+def demo_status(session: SessionDep) -> dict[str, int]:
+    """How many demo documents the library holds (Settings offers to clear them)."""
+    return {"documents": len(ingest.demo_documents(session))}
+
+
+@router.delete("/demo")
+def clear_demo(session: SessionDep) -> dict[str, int]:
+    """Permanently removes the demo documents and what came from them."""
+    removed = ingest.clear_demo(session)
+    session.commit()
+    return {"removed": removed}

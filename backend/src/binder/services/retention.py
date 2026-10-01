@@ -41,6 +41,14 @@ T = i18n.catalog(
         "valid_f": {"en": "As long as it is valid", "fr": "Tant qu'elle est valide"},
         "valid_m": {"en": "As long as it is valid", "fr": "Tant qu'il est valide"},
         "no_obligation": {"en": "No obligation to keep", "fr": "Sans obligation de conservation"},
+        "loan": {
+            "en": "Until 2 years after the last repayment",
+            "fr": "Jusqu'à 2 ans après la dernière échéance",
+        },
+        "warranty": {
+            "en": "As long as the warranty runs",
+            "fr": "Pendant toute la durée de la garantie",
+        },
         "years_one": {"en": "{n} year", "fr": "{n} an"},
         "years_other": {"en": "{n} years", "fr": "{n} ans"},
         "tax_years": {
@@ -109,6 +117,17 @@ BY_TYPE: dict[str, Rule] = {
     # Even once replaced, it can prove coverage for a past claim.
     DocType.INSURANCE_CERTIFICATE: Rule("years", years=2),
     DocType.QUOTE: Rule("no_obligation"),
+    DocType.LOAN_STATEMENT: Rule("loan"),
+    DocType.ANNUAL_TAX_STATEMENT: Rule("tax_years", years=3, end_of_year=True),
+    DocType.DONATION_RECEIPT: Rule("tax_years", years=3, end_of_year=True),
+    DocType.CHILDCARE_CERTIFICATE: Rule("tax_years", years=3, end_of_year=True),
+    DocType.CIVIL_STATUS: FOREVER,
+    DocType.FAMILY_RECORD_BOOK: FOREVER,
+    DocType.PENSION_STATEMENT: Rule("until_retirement"),
+    DocType.SCHOOL_CERTIFICATE: Rule("years", years=1),
+    # Proof of payment of a fine: the time the fine itself can still be claimed.
+    DocType.FINE: Rule("years", years=3),
+    DocType.PURCHASE_RECEIPT: Rule("warranty"),
 }
 
 BY_CATEGORY: dict[Category, Rule] = {
@@ -123,6 +142,8 @@ BY_CATEGORY: dict[Category, Rule] = {
     Category.WORK: Rule("until_retirement"),
     Category.IDENTITY: Rule("valid_f", until_replaced=True),
     Category.VEHICLE: Rule("vehicle_owned"),
+    Category.FAMILY: Rule("years", years=2),
+    Category.PURCHASES: Rule("warranty"),
 }
 
 
@@ -141,6 +162,8 @@ def _add_years(d: date, years: int) -> date:
 
 def keep_until(doc: Document) -> date | None:
     rule = rule_for(doc)
+    if rule is not None and rule.key == "warranty":
+        return doc.expiry_date
     if rule is None or rule.years is None:
         return None
     base = doc.issue_date or doc.due_date or doc.created_at.date()

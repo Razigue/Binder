@@ -222,11 +222,10 @@ class Splash:
 
 
 # --- Title bar -------------------------------------------------------------------------------
-# The main window keeps its native frame: pywebview's frameless windows lose resizing, Snap and
-# native dragging on Windows (the form gets no border at all, dragging is emulated in JavaScript,
-# and the WebView2 control covers the client area, so hit-testing cannot be added back). Instead
-# the native title bar is painted in the app's colours: caption and text colours on Windows 11
-# (DWM attributes), light or dark appearance on macOS. On Linux the window manager draws it.
+# On Windows the interface draws the title bar (logo, title, window buttons) on a window that
+# keeps its native frame: see winframe.py. The DWM caption colours below still tint the window
+# border and the system dark mode. On macOS the native title bar follows the app's light/dark
+# choice; on Linux the window manager draws it.
 
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_CAPTION_COLOR = 35
@@ -298,6 +297,9 @@ class WindowApi:
         self._watching = False
         # Set once the interface has sent its colours: the window is shown already painted.
         self._styled = threading.Event()
+        self._frame: Any = None  # winframe.CustomFrame once installed
+        # Set once the frame is settled (custom or not): the interface asks before drawing.
+        self._framed = threading.Event()
 
     def set_title_bar(self, background: str, foreground: str, dark: bool) -> None:
         """Called by the interface at startup and whenever its theme changes."""
@@ -311,9 +313,46 @@ class WindowApi:
         finally:
             self._styled.set()
 
+    def window_state(self) -> dict[str, bool]:
+        """`custom`: the interface draws the title bar. `maximized`: for the maximise button."""
+        self._framed.wait(5)
+        frame = self._frame
+        return {"custom": frame is not None, "maximized": bool(frame and frame.maximized())}
+
+    def drag(self) -> None:
+        """Mouse pressed on the title bar: Windows moves the window (Snap included)."""
+        if self._frame:
+            self._frame.drag()
+
+    def minimize(self) -> None:
+        if self._frame:
+            self._frame.minimize()
+
+    def toggle_maximize(self) -> None:
+        if self._frame:
+            self._frame.toggle_maximize()
+
+    def snap_layouts(self) -> None:
+        if self._frame:
+            self._frame.snap_layouts()
+
+    def close(self) -> None:
+        if self._window is not None:
+            self._window.destroy()
+
     def _attach(self, window: Any, dark: bool) -> None:
         """Paints the interface's colours if already sent, otherwise defaults for `dark`."""
         self._window = window
+        if sys.platform == "win32":
+            from binder import winframe
+
+            try:
+                frame = winframe.CustomFrame(window)
+                frame.install()
+                self._frame = frame
+            except Exception:
+                log.exception("Could not hide the native caption")
+        self._framed.set()
         if self._colors is None:
             self._colors = (*(CAPTION_DARK if dark else CAPTION_LIGHT), dark)
         try:
@@ -456,6 +495,9 @@ class Desktop:
         root = updater.install_root()
         if root is None:
             return False
+        manager = updater.installed() if self.finish_update is None else None
+        if manager is not None:
+            return self._update_installed(splash, manager)
         if self.finish_update is not None:
             splash.status(splash.t("installing"))
             updater.finish(self.finish_update, root)
@@ -479,6 +521,28 @@ class Desktop:
         new_root = updater.prepare(root, release, splash.progress(text))
         splash.status(splash.t("installing"))
         updater.install(root, new_root)
+        return True
+
+    def _update_installed(self, splash: Splash, manager: Any) -> bool:
+        """Velopack: downloads the update, then applies it once this process has exited."""
+        if not get_settings().auto_update:
+            return False
+        splash.status(splash.t("checking"))
+        try:
+            info = manager.check_for_updates()
+        except Exception as e:  # offline, GitHub unreachable
+            log.info("Could not check for updates: %s", e)
+            return False
+        if info is None:
+            return False
+        version = str(info.TargetFullRelease.Version)
+        log.info("Updating %s → %s", __version__, version)
+        text = splash.t("downloading", version=version)
+        splash.status(text, 0.0)
+        size, report = updater.download_size(info), splash.progress(text)
+        manager.download_updates(info, lambda percent: report(size * int(percent) // 100, size))
+        splash.status(splash.t("installing"))
+        manager.wait_exit_then_apply_updates(info, silent=True, restart=True)
         return True
 
     def _start_server(self) -> str:

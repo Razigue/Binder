@@ -151,3 +151,11 @@ button:not([data-slot]):focus-visible {
   outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent);
   outline-offset: 0;
 }
+/* Desktop window with the app's own title bar (--titlebar-height, set by TitleBar.tsx): layers
+   that cover the window start below it, so the window can still be moved and closed. */
+[data-slot="dialog-overlay"],
+[data-slot="sheet-overlay"],
+[data-slot="sheet-content"]:is([data-side="left"], [data-side="right"]) {
+  top: var(--titlebar-height, 0px);
+  height: auto;
+}

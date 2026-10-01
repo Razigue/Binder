@@ -58,12 +58,12 @@ components:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.background}"
     rounded: "{rounded.base}"
-    height: "32px"
-    padding: "0 10px"
+    height: "40px"
+    padding: "0 16px"
   input:
     rounded: "{rounded.base}"
-    height: "32px"
-    padding: "4px 10px"
+    height: "40px"
+    padding: "4px 12px"
   card:
     backgroundColor: "{colors.card}"
     rounded: "{rounded.xl}"
@@ -94,7 +94,7 @@ carries the brand; colour elsewhere is a signal (urgency, category), never ornam
 - Navy brand, cool near-white surfaces, one accent family.
 - Colour only for meaning: urgency (red/amber/emerald) and category tones.
 - Flat surfaces, hairline rings and borders, generous 12px-based radii.
-- Plain sentences as headings and hints; a "Local" badge on every page.
+- Plain sentences as headings and hints; no status badges or pulsing dots.
 
 ## Colors
 
@@ -135,10 +135,19 @@ i18n catalogs; never all-caps outside the sidebar overline.
 
 ## Layout
 
-Fixed 240px sidebar (`md`+): Today, then the six life areas (with a count of cards that need
-attention), "Ask Binder", and small Mailbox / History / Trash links pinned bottom; below `md` it
-becomes a horizontal scrolling tab strip. An ask bar (Ctrl K) is fixed at the bottom of every page. Content in a centred
-`max-w-6xl` column, `px-4 py-6` mobile, `px-10 py-8` desktop. Page header then content, `mb-7`.
+Fixed 240px sidebar (`md`+): "Ask Binder" first (opens the agent, Ctrl K anywhere), then Today,
+Prepare (every letter, file and life event Binder handles, and what it is following) and Documents
+(search across everything), then "Your life" with the seven life areas (with a count of cards that
+need attention), and History / Trash / Settings links pinned bottom; below `md` it becomes a
+horizontal scrolling tab strip led by "Ask Binder". Today opens on the agent's composer (a sentence,
+examples, attach); every other page has the ask bar fixed at the bottom. Content in a centred
+full width (no centred column), `px-4 py-6` mobile, `px-8 py-8` desktop. Page header then content,
+`mb-7`. Today: greeting and one-sentence summary, the agent composer, then "To do", "Binder has a
+question" and "Also worth a look"; side column "In progress" (journeys, letters to send or awaiting
+an answer) and "Coming up". Area pages: main column + 24-28rem side column from `xl` (coming up,
+recurring bills, the area's "Prepare" shortcuts). Prepare: tiles in a 2-3 column grid by section,
+"In progress" on the side when there is any. Settings: one section per row, title and description on the
+left (16-20rem), cards on the right.
 Grids: `sm:grid-cols-3` stats, `lg:grid-cols-2` sections, gaps 16-24px. Lists are full-width rows
 (`px-5 py-3`) divided by hairlines inside a card.
 
@@ -158,9 +167,9 @@ circles with a 4px soft ring.
 
 Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 
-- **Buttons:** 32px high, 12px radius, 14px/500. Variants: default (navy, hover `/80`), outline,
+- **Buttons:** 40px high (sm 36px; comfortable click targets), 12px radius, 14px/500. Variants: default (navy, hover `/80`), outline,
   secondary, ghost, destructive (soft red tint), link. Press nudges 1px down.
-- **Inputs:** 32px, 1px `input` border, transparent bg (dark `input/30`), focus ring halo.
+- **Inputs:** 40px, 1px `input` border, transparent bg (dark `input/30`), focus ring halo.
 - **Cards:** white, ring hairline, 16px padding (12px `sm`). Section cards: title row + "See all →"
   link, then divided list.
 - **List row:** category icon tile · title (truncate) + category · right-aligned reason (urgency
@@ -168,7 +177,7 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Stat card:** neutral link card: big number, label with a small muted icon, hint. The number
   turns red or amber only when it is non-zero and calls for action.
 - **Badges:** 20px pill, 12px/500.
-- **Navigation:** 14px/500 rows with 16px Lucide icon, `gap-3`; active = `sidebar-accent` fill.
+- **Navigation:** 14px/500 rows with 16px Lucide icon, `gap-3`, at least 40px high; active = `sidebar-accent` fill.
 - **Agent:** opened from the nav or the ask bar as a side sheet, not a route.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
   (the urgency in words), amount right-aligned, then its actions as buttons: one primary,

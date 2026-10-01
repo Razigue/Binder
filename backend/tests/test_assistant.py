@@ -75,8 +75,8 @@ def feed_items(client: TestClient) -> list[dict[str, Any]]:
 def test_feed_lists_what_needs_the_user(client: TestClient, demo: dict[str, Any]) -> None:
     items = feed_items(client)
     kinds = {i["kind"] for i in items}
-    # The recovery code comes first, then the demo's report.
-    assert items[0]["kind"] == "recovery" and len(items[0]["extra"]["code"]) == 29
+    # The demo's report comes first; the recovery code lives in Settings.
+    assert items[0]["kind"] == "report" and "recovery" not in kinds
     assert {"report", "deadline", "expiry", "question"} <= kinds
     report = next(i for i in items if i["kind"] == "report")
     assert report["actions"][0] == {
@@ -86,7 +86,7 @@ def test_feed_lists_what_needs_the_user(client: TestClient, demo: dict[str, Any]
         "params": {"batch": demo["batch"]},
     }
     # Urgent cards before the rest.
-    tones = [i["tone"] for i in items if i["kind"] not in ("recovery", "report", "briefing")]
+    tones = [i["tone"] for i in items if i["kind"] not in ("report", "briefing")]
     assert tones == sorted(tones, key=feed.TONE_RANK.__getitem__)
 
 
@@ -148,10 +148,6 @@ def test_dismissed_cards_stay_hidden(client: TestClient, demo: dict[str, Any]) -
     seen = report["actions"][1]
     client.post("/api/actions", json={"type": seen["type"], "params": seen["params"]})
     assert "report" not in {i["kind"] for i in feed_items(client)}
-    recovery = feed_items(client)[0]
-    client.post("/api/actions", json={"type": "confirm_recovery", "params": {}})
-    assert recovery["key"] not in {i["key"] for i in feed_items(client)}
-    assert client.get("/api/backup").json()["code"] is None
     assert client.post("/api/actions", json={"type": "explode"}).status_code == 400
 
 
@@ -181,7 +177,7 @@ def test_import_report_groups_a_drop_of_files(client: TestClient, samples: list[
 def test_areas_and_household(client: TestClient, demo: dict[str, Any]) -> None:
     summary = {a["area"]: a for a in client.get("/api/areas").json()}
     assert list(summary) == list(areas.AREAS)
-    assert summary["money"]["label"] == "Money" and summary["money"]["documents"] >= 3
+    assert summary["money"]["label"] == "Money" and summary["money"]["documents"] >= 2
     housing = client.get("/api/areas/housing").json()
     titles = {d["filename"] for d in housing["documents"]}
     # Home insurance lives with the home, not with money.
@@ -286,6 +282,23 @@ def test_missing_documents(client: TestClient, session: Session) -> None:
     assert [m.expected for m in gaps] == [date(2026, 6, 1)]
 
 
+def test_demo_tells_a_french_household_story(
+    client: TestClient, demo: dict[str, Any], session: Session
+) -> None:
+    # Each part of the agent has something to show on the demo documents.
+    kinds = {(a.kind, a.title) for a in anomalies.detect(session)}
+    assert ("overpayment_claim", "CAF claims an overpayment") in kinds
+    assert ("double_payment", "Debited twice: ORANGE") in kinds
+    assert any(kind == "price_increase" and "EDF" in title for kind, title in kinds)
+    assert [m.key for m in missing.detect(session)] == ["essential:rib"]
+    names = {m.name for m in household.members(session)}
+    assert {"Camille Martin", "Thomas Martin", "Hugo Martin"} <= names
+    assert household.main_person(session) == "Camille Martin"
+    assert household.home_address(session) == ("12 rue des Tilleuls", "69003 Lyon")
+    deadlines = client.get("/api/deadlines").json()
+    assert deadlines[0]["amount"] == 1240.0
+
+
 # --- Letters --------------------------------------------------------------------------------
 
 
@@ -293,11 +306,11 @@ def test_letter_in_words_pdf_and_follow_up(client: TestClient, demo: dict[str, A
     edf = next(d for d in client.get("/api/documents").json() if d["filename"] == "facture-edf.pdf")
     r = client.post(
         "/api/letters",
-        json={"purpose": "Ask to pay the bill in three instalments", "document_id": edf["id"]},
+        json={"purpose": "Ask why the meter reading was estimated", "document_id": edf["id"]},
     )
     letter = r.json()
     assert letter["id"] and letter["recipient"] == "EDF" and letter["kind"] == "custom"
-    assert "in order to ask to pay the bill in three instalments" in letter["body"]
+    assert "in order to ask why the meter reading was estimated" in letter["body"]
     assert "Camille Martin" in letter["body"]
     pdf = client.get(f"/api/letters/{letter['id']}/pdf")
     assert pdf.content[:4] == b"%PDF" and "attachment" in pdf.headers["content-disposition"]
@@ -352,7 +365,7 @@ def test_pack_for_any_purpose_is_exported(client: TestClient, demo: dict[str, An
 
 def test_sources_of_each_figure(client: TestClient, demo: dict[str, Any]) -> None:
     tax = next(
-        d for d in client.get("/api/documents").json() if d["filename"] == "taxe-fonciere.pdf"
+        d for d in client.get("/api/documents").json() if d["filename"] == "avis-imposition.pdf"
     )
     found = {
         s["field"]: s["boxes"] for s in client.get(f"/api/documents/{tax['id']}/sources").json()
@@ -473,9 +486,8 @@ def test_model_suits_the_machine() -> None:
     assert setup.asset_name("darwin", "arm64") == "ollama-darwin.tgz"
 
 
-def test_ollama_is_installed_from_its_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def fake_ollama(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Serves a tiny Ollama release archive; returns the URLs asked for."""
     import hashlib
 
     raw = io.BytesIO()
@@ -485,33 +497,97 @@ def test_ollama_is_installed_from_its_release(
         info.size, info.mode = len(script), 0o755
         tar.addfile(info, io.BytesIO(script))
     archive = zstandard.ZstdCompressor().compress(raw.getvalue())
-    name = "ollama-linux-amd64.tar.zst"
+    asked: list[str] = []
 
     def serve(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/latest"):
-            return httpx.Response(
-                200,
-                json={
-                    "assets": [
-                        {
-                            "name": name,
-                            "size": len(archive),
-                            "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
-                            "browser_download_url": "https://example.test/o.tar.zst",
-                        }
-                    ]
-                },
-            )
+        asked.append(str(request.url))
         return httpx.Response(200, content=archive)
 
     updater.transport = httpx.MockTransport(serve)
     setup._state.stop.clear()
-    monkeypatch.setattr(setup, "asset_name", lambda: name)
-    monkeypatch.setattr(setup, "find_ollama", lambda: next(setup.managed_dir().rglob("ollama")))
-    binary = setup._install()
+    sha = hashlib.sha256(archive).hexdigest()
+    monkeypatch.setattr(setup, "_asset", lambda: ("ollama-linux-amd64.tar.zst", sha))
+    monkeypatch.setattr(setup, "_executable_name", lambda: "ollama")
+    return asked
+
+
+def test_ollama_is_installed_from_its_pinned_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = fake_ollama(monkeypatch)
+    binary = setup._install(setup.managed_dir(), foreground=True)
     assert binary == setup.managed_dir() / "bin" / "ollama"
+    assert asked == [
+        f"https://github.com/ollama/ollama/releases/download/{setup.OLLAMA_VERSION}/"
+        "ollama-linux-amd64.tar.zst"
+    ]
+    assert setup.installed_version(setup.managed_dir()) == setup.OLLAMA_VERSION
     # Windows has no executable bit: it goes by the file extension.
     assert sys.platform == "win32" or binary.stat().st_mode & 0o100
+
+
+def test_corrupted_ollama_download_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ollama(monkeypatch)
+    monkeypatch.setattr(setup, "_asset", lambda: ("ollama-linux-amd64.tar.zst", "0" * 64))
+    with pytest.raises(RuntimeError):
+        setup._install(setup.managed_dir(), foreground=True)
+    assert not setup.managed_dir().exists()
+    assert not setup.managed_dir().with_name("ollama.partial").exists()
+
+
+def test_pinned_ollama_takes_over_at_next_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ollama(monkeypatch)
+    old = setup.managed_dir() / "ollama"
+    old.parent.mkdir(parents=True)
+    old.write_text("old")
+    # In use this session: the pinned version is fetched next to it, not over it.
+    setup._upgrade()
+    assert old.read_text() == "old"
+    assert setup.installed_version(setup._next_dir()) == setup.OLLAMA_VERSION
+    setup._apply_upgrade()
+    assert setup.installed_version(setup.managed_dir()) == setup.OLLAMA_VERSION
+    assert setup.find_ollama() == setup.managed_dir() / "bin" / "ollama"
+    assert not setup._next_dir().exists()
+    assert not setup.managed_dir().with_name("ollama.old").exists()
+
+
+def test_models_of_the_users_ollama_are_linked(tmp_path: Path) -> None:
+    source, target = tmp_path / "user-models", tmp_path / "binder-models"
+    manifest = source / "manifests" / "registry.ollama.ai" / "library" / "qwen3.5" / "9b"
+    blob = source / "blobs" / "sha256-abc"
+    for path, text in ((manifest, "{}"), (blob, "weights")):
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+    assert setup.adopt_models(source, target)
+    linked = target / "blobs" / "sha256-abc"
+    assert linked.read_text() == "weights"
+    assert linked.stat().st_nlink == 2  # the same file: no disk space used
+    assert blob.read_text() == "weights"
+    assert (target / manifest.relative_to(source)).is_file()
+
+
+def test_binder_runs_its_own_ollama(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path / "no-user-models"))
+    monkeypatch.setenv("BINDER_LLM_ENABLED", "true")
+    monkeypatch.setenv("BINDER_AUTO_SETUP", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(setup, "_state", setup._State())
+    monkeypatch.setattr(setup, "_run", lambda: None)
+    setup.start()
+    url = httpx.URL(get_settings().ollama_url)
+    assert url.host == "127.0.0.1" and url.port != 11434
+    assert setup._owned()
+    assert setup._models_dir() == get_settings().data_dir / "models"
+
+
+def test_an_ollama_chosen_by_the_user_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BINDER_LLM_ENABLED", "true")
+    monkeypatch.setenv("BINDER_AUTO_SETUP", "true")
+    monkeypatch.setenv("BINDER_OLLAMA_URL", "http://localhost:11434")
+    get_settings.cache_clear()
+    monkeypatch.setattr(setup, "_state", setup._State())
+    monkeypatch.setattr(setup, "_run", lambda: None)
+    setup.start()
+    assert get_settings().ollama_url == "http://localhost:11434"
+    assert not setup._owned()
 
 
 def test_setup_status_without_ai() -> None:
@@ -565,3 +641,79 @@ def test_deadline_and_document_states(session: Session, demo: dict[str, Any]) ->
     assert open_deadlines
     reviewed = session.exec(select(Document).where(Document.status == DocumentStatus.TO_REVIEW))
     assert all(d.area is None or d.category != Category.OTHER for d in reviewed)
+
+
+def test_recovery_code_is_shown_in_settings_until_noted(client: TestClient) -> None:
+    info = client.get("/api/backup").json()
+    assert len(info["code"]) == 29 and not info["confirmed"]
+    noted = client.post("/api/backup/confirm").json()
+    assert noted["code"] is None and noted["confirmed"]
+    renewed = client.post("/api/backup/code").json()
+    assert renewed["code"] and renewed["code"] != info["code"] and not renewed["confirmed"]
+
+
+def test_demo_data_can_be_cleared(client: TestClient, demo: dict[str, Any]) -> None:
+    assert client.get("/api/demo").json()["documents"] == demo["imported"]
+    assert client.delete("/api/demo").json() == {"removed": demo["imported"]}
+    assert client.get("/api/demo").json()["documents"] == 0
+    assert not client.get("/api/documents").json()
+    assert not client.get("/api/deadlines").json()
+    assert client.get("/api/activity").json()[0]["summary"] == (
+        f"Demo data cleared ({demo['imported']} documents)"
+    )
+
+
+def test_profile_notes_reach_the_agent(client: TestClient, session: Session) -> None:
+    from binder.agent import tools
+
+    body = {"name": "Camille Martin", "notes": "Tenant, two children, self-employed."}
+    assert client.put("/api/profile", json=body).json()["notes"] == body["notes"]
+    user = tools.overview(session)["user"]
+    assert user["about"] == body["notes"] and user["name"] == "Camille Martin"
+
+
+def test_profile_is_completed_from_the_documents(client: TestClient, demo: dict[str, Any]) -> None:
+    learned = client.get("/api/profile").json()
+    assert learned["name"] == "Camille Martin" and learned["city"] == "Lyon"
+    assert learned["address"].startswith("12 rue des Tilleuls")
+    assert set(learned["auto"]) == {"name", "address", "city"}
+    # What the user types is theirs: Binder no longer touches it.
+    mine = client.put("/api/profile", json={**learned, "name": "Camille Martin-Durand"}).json()
+    assert "name" not in mine["auto"] and "address" in mine["auto"]
+    client.delete("/api/demo")
+    after = client.get("/api/profile").json()
+    assert after["name"] == "Camille Martin-Durand"
+    assert after["address"] == "" and after["auto"] == []
+
+
+def test_own_contact_details_appear_with_several_issuers(session: Session) -> None:
+    from binder.models import Document
+    from binder.services import household
+
+    def doc(n: int, issuer: str, text: str) -> Document:
+        return Document(
+            filename=f"{n}.pdf", mime_type="application/pdf", size=1, sha256=str(n),
+            stored_name=str(n), issuer=issuer, text=text,
+        )  # fmt: skip
+
+    session.add(
+        doc(1, "EDF", "Client : camille@example.org, 06 12 34 56 78. service-client@edf.fr")
+    )
+    session.add(doc(2, "Orange", "camille@example.org - tél. 06.12.34.56.78 - 01 40 00 00 00"))
+    session.add(doc(3, "EDF", "Contact : 07 99 99 99 99, contact@edf.fr"))
+    session.flush()
+    assert household.contact_details(session) == {
+        "email": "camille@example.org",
+        "phone": "06 12 34 56 78",
+    }
+
+
+def test_agent_saves_what_the_user_tells_about_themselves(session: Session) -> None:
+    from binder.agent import tools
+
+    result = tools.call(session, "update_profile", {"phone": "06 11 22 33 44", "note": "Tenant."})
+    assert result.changed and result.payload["phone"] == "06 11 22 33 44"
+    tools.call(session, "update_profile", {"note": "Two children."})
+    user = tools.overview(session)["user"]
+    assert user["about"].splitlines() == ["Tenant.", "Two children."]
+    assert "phone" not in user["unknown"]

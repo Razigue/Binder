@@ -1,6 +1,6 @@
-"""Background work while Binder runs: automatic import, system notifications, the weekly
-briefing and the daily backup. One thread, each task at its own pace; a failing task never
-stops the others."""
+"""Background work while Binder runs: automatic import, documents that waited for the local AI,
+system notifications, the weekly briefing and the daily backup. One thread, each task at its own
+pace; a failing task never stops the others."""
 
 import logging
 import threading
@@ -12,7 +12,7 @@ from sqlmodel import Session
 from binder import i18n
 from binder.config import get_settings
 from binder.db import get_engine
-from binder.services import backup, briefing, feed, importers, notify, reports
+from binder.services import backup, briefing, feed, importers, ingest, notify, reports
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +86,8 @@ class Scheduler:
                     return importers.run(session, mail=mail)
 
                 self._run("import", imports)
+            if settings.llm_enabled:
+                self._run("waiting", ingest.analyze_waiting)
             if self._due("briefing", BRIEFING_INTERVAL):
                 self._run("briefing", weekly)
             if settings.notifications and self._due("alerts", ALERT_INTERVAL):
@@ -96,4 +98,9 @@ class Scheduler:
 
 def enabled() -> bool:
     settings = get_settings()
-    return settings.auto_import or settings.notifications or settings.auto_backup
+    return (
+        settings.auto_import
+        or settings.notifications
+        or settings.auto_backup
+        or settings.llm_enabled
+    )

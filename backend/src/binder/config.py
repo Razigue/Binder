@@ -44,12 +44,17 @@ class Settings(BaseSettings):
     embed_model: str = "qwen3-embedding:0.6b"
     # Reasoning before each agent step (slower, rarely better on short requests).
     llm_think: bool = False
+    # The agent can look up general facts online (legal delays, procedures): only the query
+    # leaves the machine, and queries carrying personal data are refused (services/websearch.py).
+    web_search: bool = True
+    web_search_url: str = "https://html.duckduckgo.com/html/"
 
     # Background automatic import (watched folder, mailbox).
     auto_import: bool = True
     # Local AI with no steps: Ollama installed and started, model downloaded at first launch.
     auto_setup: bool = True
-    ollama_release_url: str = "https://api.github.com/repos/ollama/ollama/releases/latest"
+    # Ollama release downloads (the version and checksums are pinned in services/setup.py).
+    ollama_download_url: str = "https://github.com/ollama/ollama/releases/download"
     # System notifications (deadlines, anomalies, weekly briefing).
     notifications: bool = True
     # Daily encrypted backup, restorable elsewhere with the recovery code.
@@ -60,6 +65,8 @@ class Settings(BaseSettings):
     # Desktop app update at launch, from GitHub releases.
     auto_update: bool = True
     update_url: str = "https://api.github.com/repos/Razigue/Binder/releases/latest"
+    # Same releases, read by Velopack when Binder was installed with the installer.
+    update_repo: str = "https://github.com/Razigue/Binder"
 
     # System locale override, e.g. "fr_FR" (default: detected from the operating system).
     locale: str | None = None

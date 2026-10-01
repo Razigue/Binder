@@ -37,6 +37,14 @@ T = i18n.catalog(
         "question": {"en": "One question for you", "fr": "Une question pour vous"},
         "summary_filed_one": {"en": "{n} document filed", "fr": "{n} document rangé"},
         "summary_filed_other": {"en": "{n} documents filed", "fr": "{n} documents rangés"},
+        "summary_waiting_one": {
+            "en": "{n} waiting for the local AI",
+            "fr": "{n} en attente de l'IA locale",
+        },
+        "summary_waiting_other": {
+            "en": "{n} waiting for the local AI",
+            "fr": "{n} en attente de l'IA locale",
+        },
         "summary_questions_one": {"en": "{n} question", "fr": "{n} question"},
         "summary_questions_other": {"en": "{n} questions", "fr": "{n} questions"},
         "summary_to_pay": {
@@ -81,7 +89,7 @@ def source_of(batch: str) -> str:
 def _facts(doc: Document) -> list[str]:
     facts = []
     area = doc.area or areas.area_of(doc)
-    if area and doc.status != DocumentStatus.PROCESSING:
+    if area and doc.status not in (DocumentStatus.PROCESSING, DocumentStatus.WAITING):
         facts.append(T("filed", area=areas.label(area)))
     if doc.due_date and doc.due_date >= date.today():
         if doc.amount is not None:
@@ -136,6 +144,7 @@ def build(session: Session, batch: str) -> ImportReport | None:
             )
         )
     processing = sum(d.status == DocumentStatus.PROCESSING for d in docs)
+    waiting = sum(d.status == DocumentStatus.WAITING for d in docs)
     to_pay = round(
         sum(
             d.amount or 0
@@ -146,7 +155,9 @@ def build(session: Session, batch: str) -> ImportReport | None:
     )
     asked = sum(i.question is not None for i in items)
     noted = sum(len(i.events) for i in items)
-    parts = [T.plural("summary_filed", len(docs) - processing - asked)]
+    parts = [T.plural("summary_filed", len(docs) - processing - waiting - asked)]
+    if waiting:
+        parts.append(T.plural("summary_waiting", waiting))
     if asked:
         parts.append(T.plural("summary_questions", asked))
     if to_pay:

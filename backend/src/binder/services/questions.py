@@ -1,7 +1,7 @@
 """One-tap questions instead of a review queue.
 
 When Binder is unsure about a document, it asks one plain question in the Today feed, with the
-likely answers as buttons: the amounts or dates it saw in the document, the six life areas, "yes,
+likely answers as buttons: the amounts or dates it saw in the document, the life areas, "yes,
 it's a duplicate"… Answering fixes the document; when nothing is left to ask, it is filed.
 """
 

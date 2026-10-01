@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,7 @@ from binder import i18n, updater
 from binder.config import get_settings
 from binder.db import reset_engine
 from binder.samples import Sample, build_samples
-from binder.services import llm, llm_models
+from binder.services import llm, llm_models, websearch
 
 TODAY = date(2026, 9, 30)
 
@@ -23,13 +24,19 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setenv("BINDER_AUTO_SETUP", "false")
     monkeypatch.setenv("BINDER_NOTIFICATIONS", "false")
     monkeypatch.setenv("BINDER_AUTO_BACKUP", "false")
+    # No web search unless a test serves its own pages (test_websearch, test_lawcheck).
+    monkeypatch.setenv("BINDER_WEB_SEARCH", "false")
     monkeypatch.delenv("BINDER_DB_KEY", raising=False)
     # Deterministic language whatever the machine's locale; tests switch to fr_FR when needed.
     monkeypatch.setenv("BINDER_LOCALE", "en_US")
     get_settings.cache_clear()
     i18n.system_locale.cache_clear()
     reset_engine()
+    # Even when a test turns it on, nothing reaches the network.
+    websearch.transport = httpx.MockTransport(lambda r: httpx.Response(503))
     yield tmp_path
+    websearch.transport = None
+    websearch._seen.clear()
     for name in list(llm_models._downloads):
         llm_models.cancel_download(name)
     llm.transport = updater.transport = None

@@ -32,6 +32,8 @@ desktop = [
     # Native web engine on Windows (Edge WebView2) and macOS (WebKit), Qt WebEngine on Linux.
     "pywebview>=6.2.1",
     "pywebview[qt]>=6.2.1; sys_platform == 'linux'",
+    # Installer and delta updates (Setup.exe, .pkg, AppImage), see binder.updater.
+    "velopack>=1.2.161",
 ]
 
 [build-system]

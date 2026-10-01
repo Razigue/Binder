@@ -131,7 +131,7 @@ def backfill(session: Session, limit: int = 20) -> int:
     missing = session.exec(
         select(Document)
         .where(col(Document.deleted_at).is_(None))
-        .where(Document.status != DocumentStatus.PROCESSING)
+        .where(col(Document.status).not_in((DocumentStatus.PROCESSING, DocumentStatus.WAITING)))
         .where(col(Document.id).not_in(done_ids))
         .limit(limit)
     ).all()

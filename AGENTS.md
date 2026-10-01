@@ -41,11 +41,15 @@ shell-specific calls, UTF-8 I/O).
 ## Rules
 
 - **Local only.** Never add network calls that send document data off the machine. Ollama
-  (`localhost`), the update check and the first-run download of Ollama and its models are the
-  only outbound traffic.
-- **AI first, rules as fallback.** Binder is sold as an AI agent; never present the no-model mode
-  as a feature in user-facing text. Every feature still needs a rules path so demos and tests run
-  with `BINDER_LLM_ENABLED=false`.
+  (`localhost`), the update check, the first-run download of Ollama and its models, and the
+  agent's web search (`services/websearch.py`: general queries only, personal data refused) are
+  the only outbound traffic.
+- **AI first; rules for the demo only.** Binder is an AI agent: the local model reads, files and
+  acts. The rules path and intent router exist only so the demo documents (`samples.py`) and the
+  tests run without a model (`BINDER_LLM_ENABLED=false`, a modest machine for a presentation);
+  never present them as a feature. With the model enabled but not ready, real documents wait
+  (`waiting`) and are read once it is. A feature needs a rules path that works on the demo
+  data, not on real documents: do not grow the rules to generalise, improve the model path.
 - **Nothing is deleted silently.** Use the trash, `superseded_by` or the review queue; log actions
   through `services/activity.py`.
 - **Encryption.** Files go through `security.py`; never write plaintext documents to disk.

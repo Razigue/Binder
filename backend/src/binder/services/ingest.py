@@ -8,12 +8,12 @@ import time
 import uuid
 from datetime import UTC, datetime
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, or_, select
 
 from binder import i18n, security
 from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
-from binder.models import Category, Deadline, Document, DocumentStatus
+from binder.models import Category, Correspondence, Deadline, Document, DocumentStatus
 from binder.schemas import Extraction
 from binder.services import (
     activity,
@@ -25,6 +25,7 @@ from binder.services import (
     learning,
     llm,
     organize,
+    profile,
     rules,
     subscriptions,
     undo,
@@ -67,6 +68,11 @@ T = i18n.catalog(
             "en": "“{title}” filed under {category:category} ({confidence})",
             "fr": "« {title} » classé dans {category:category} ({confidence})",
         },
+        "waiting": {
+            "en": "“{title}” is waiting for the local AI: Binder will read it as soon as it is "
+            "ready",
+            "fr": "« {title} » attend l'IA locale : Binder le lira dès qu'elle sera prête",
+        },
         "analysis_failed": {
             "en": "“{title}”: analysis failed, check it manually",
             "fr": "« {title} » : analyse impossible, à vérifier à la main",
@@ -85,9 +91,18 @@ T = i18n.catalog(
             "en": "“{title}” permanently deleted",
             "fr": "« {title} » supprimé définitivement",
         },
+        "demo_cleared_one": {
+            "en": "Demo data cleared ({n} document)",
+            "fr": "Données de démonstration effacées ({n} document)",
+        },
+        "demo_cleared_other": {
+            "en": "Demo data cleared ({n} documents)",
+            "fr": "Données de démonstration effacées ({n} documents)",
+        },
         "separator": {"en": ", ", "fr": ", "},
     },
 )
+DEMO_BATCH = "demo-"
 
 
 def _render_missing(fields: list[str], language: i18n.Language) -> str:
@@ -202,7 +217,10 @@ def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
     if merged.category == Category.OTHER and by_rules.category != Category.OTHER:
         merged.category = by_rules.category
     merged.title = merged.title or by_rules.title
-    merged.doc_type = by_rules.doc_type
+    merged.doc_type = by_llm.doc_type or by_rules.doc_type
+    if merged.due_date is not None and merged.due_date == merged.expiry_date:
+        # "Next inspection before…": an end of validity, not a payment (as in the rules).
+        merged.due_date = None
     if by_rules.category == merged.category:
         merged.confidence = round(max(by_llm.confidence, by_rules.confidence), 2)
     else:
@@ -251,20 +269,72 @@ def sync_deadline(session: Session, doc: Document) -> None:
     deadlines.sync(session, doc)
 
 
-def analyze(session: Session, doc: Document) -> Document:
-    previous_key = organize.series_key(doc)
-    doc.duplicate_of = None
-    data = load_file(doc)
-    read = read_document(data, doc.mime_type)
-    images = _scan_pages(data, doc.mime_type, read)
+def is_demo(doc: Document) -> bool:
+    return (doc.batch or "").startswith(DEMO_BATCH)
+
+
+def waits_for_ai(doc: Document) -> bool:
+    """Real documents are read by the local model only.
+
+    The rules are tuned on the demo documents: on a real one they would file it badly and the
+    user would have to correct what the model gets right. So while the model is being set up
+    (or cannot run), real documents wait; demos keep running on modest machines. With the
+    model switched off in the configuration (tests, BINDER_LLM_ENABLED=false), the rules read
+    everything."""
+    return get_settings().llm_enabled and not is_demo(doc) and not llm.is_available()
+
+
+def _wait(session: Session, doc: Document) -> Document:
+    if doc.status != DocumentStatus.WAITING:
+        doc.status = DocumentStatus.WAITING
+        doc.title = doc.title or doc.filename
+        session.add(doc)
+        activity.log(session, "analyze", T.msg("waiting", title=doc.title), document=doc)
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+def analyze_waiting(session: Session, limit: int = 3) -> int:
+    """Reads the documents that waited for the local AI, once it is ready. Returns how many;
+    a few per call, so that the background loop keeps its pace."""
+    if not llm.is_available():
+        return 0
+    ids = session.exec(
+        select(Document.id)
+        .where(Document.status == DocumentStatus.WAITING, col(Document.deleted_at).is_(None))
+        .order_by(col(Document.id))
+        .limit(limit)
+    ).all()
+    for doc_id in ids:
+        if doc_id is not None:
+            analyze_in_background(doc_id)
+    return len(ids)
+
+
+def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadResult, Extraction]:
+    """Reading and extraction of a file, before anything about the library is applied (past
+    corrections, duplicates): what the evaluation measures (scripts/evaluate.py)."""
+    model = use_llm and llm.is_available()
+    read = read_document(data, mime_type)
+    images = _scan_pages(data, mime_type, read) if model else []
     if images and not read.text.strip():
         read.text = llm.transcribe(images)
-    doc.text = read.text
-    doc.page_count = read.page_count
     by_rules = rules.extract(read.text)
-    by_llm = llm.extract(read.text, images) if read.text.strip() and llm.is_available() else None
+    by_llm = llm.extract(read.text, images) if read.text.strip() and model else None
     ext = merge(by_rules, by_llm)
     ext.person = ext.person or household.detect(read.text)
+    return read, ext
+
+
+def analyze(session: Session, doc: Document) -> Document:
+    if waits_for_ai(doc):
+        return _wait(session, doc)
+    previous_key = organize.series_key(doc)
+    doc.duplicate_of = None
+    read, ext = extract(load_file(doc), doc.mime_type)
+    doc.text = read.text
+    doc.page_count = read.page_count
     learned = learning.apply(session, read.text, ext)
     if not read.text.strip():
         ext.confidence = 0.0
@@ -281,6 +351,7 @@ def analyze(session: Session, doc: Document) -> Document:
     index_document(session, doc)
     embeddings.index(session, doc)
     organize.reorganize(session, doc, previous_key)
+    profile.learn(session)
     session.flush()
     subscriptions.check_increase(session, doc)
     anomalies.check_new(session, doc)
@@ -361,6 +432,7 @@ def trash(
         refresh_status(freed)
         sync_deadline(session, freed)
     organize.reorganize(session, doc, previous_key)
+    profile.learn(session)
     activity.log(
         session, "trash", _with_reason("trashed", doc.title, reason), actor=actor, document=doc
     )
@@ -433,7 +505,7 @@ def seed_demo(session: Session) -> list[tuple[Document, bool]]:
     from binder.samples import build_samples
 
     results = []
-    batch = new_batch("demo")
+    batch = new_batch(DEMO_BATCH.rstrip("-"))
     for sample in build_samples():
         doc, created = store(
             session, sample.pdf(), sample.filename, "application/pdf", actor="demo", batch=batch
@@ -442,3 +514,50 @@ def seed_demo(session: Session) -> list[tuple[Document, bool]]:
             analyze(session, doc)
         results.append((doc, created))
     return results
+
+
+def demo_documents(session: Session) -> list[Document]:
+    """Documents imported by `seed_demo`, trashed ones included."""
+    return list(session.exec(select(Document).where(col(Document.batch).startswith(DEMO_BATCH))))
+
+
+def clear_demo(session: Session) -> int:
+    """Permanently removes the demo documents and what came from them (reminders, letters).
+
+    The user asks for it explicitly; one entry in the history sums it up.
+    """
+    docs = demo_documents(session)
+    ids = {doc.id for doc in docs if doc.id is not None}
+    if not ids:
+        return 0
+    for deadline in session.exec(select(Deadline).where(col(Deadline.document_id).in_(ids))):
+        session.delete(deadline)
+    for letter in session.exec(
+        select(Correspondence).where(col(Correspondence.document_id).in_(ids))
+    ):
+        session.delete(letter)
+    # Real documents flagged against a demo one are freed.
+    for doc in session.exec(
+        select(Document).where(
+            or_(col(Document.duplicate_of).in_(ids), col(Document.superseded_by).in_(ids))
+        )
+    ):
+        if doc.id in ids:
+            continue
+        if doc.duplicate_of in ids:
+            doc.duplicate_of = None
+        if doc.superseded_by in ids:
+            doc.superseded_by = None
+        refresh_status(doc)
+        session.add(doc)
+    for doc in docs:
+        assert doc.id is not None
+        unindex_document(session, doc.id)
+        embeddings.forget(session, doc.id)
+        delete_file(doc)
+        session.delete(doc)
+    activity.log(session, "purge", T.plural_msg("demo_cleared", len(docs)), actor="user")
+    session.flush()
+    # The details Binder took from the demo documents go with them.
+    profile.learn(session)
+    return len(docs)

@@ -1,9 +1,9 @@
-"""Life areas: the six places the interface files paperwork under.
+"""Life areas: the seven places the interface files paperwork under.
 
 Categories stay the fine-grained classification (rules, retention, folders); areas are what the
-user browses: Housing, Money, Work & benefits, Health, Identity, Vehicle. Insurance goes where
-the insured thing lives (home, car, health); a document still uncategorised has no area until
-the user answers the question Binder asks about it.
+user browses: Housing, Money, Work & benefits, Family, Health, Identity, Vehicle. Insurance goes
+where the insured thing lives (home, car, health); a document still uncategorised has no area
+until the user answers the question Binder asks about it.
 """
 
 from typing import Literal
@@ -14,8 +14,8 @@ from binder import i18n
 from binder.models import Category, Document
 from binder.services.rules import normalize
 
-Area = Literal["housing", "money", "work", "health", "identity", "vehicle"]
-AREAS: tuple[Area, ...] = ("housing", "money", "work", "health", "identity", "vehicle")
+Area = Literal["housing", "money", "work", "family", "health", "identity", "vehicle"]
+AREAS: tuple[Area, ...] = ("housing", "money", "work", "family", "health", "identity", "vehicle")
 
 T = i18n.catalog(
     "areas",
@@ -23,6 +23,7 @@ T = i18n.catalog(
         "housing": {"en": "Housing", "fr": "Logement"},
         "money": {"en": "Money", "fr": "Argent"},
         "work": {"en": "Work & benefits", "fr": "Travail & aides"},
+        "family": {"en": "Family", "fr": "Famille"},
         "health": {"en": "Health", "fr": "Santé"},
         "identity": {"en": "Identity", "fr": "Identité"},
         "vehicle": {"en": "Vehicle", "fr": "Véhicule"},
@@ -36,6 +37,8 @@ BY_CATEGORY: dict[Category, Area] = {
     Category.TAXES: "money",
     Category.BANK: "money",
     Category.INSURANCE: "money",
+    Category.PURCHASES: "money",
+    Category.FAMILY: "family",
     Category.WORK: "work",
     Category.SOCIAL: "work",
     Category.HEALTH: "health",
@@ -47,6 +50,7 @@ DEFAULT_CATEGORY: dict[Area, Category] = {
     "housing": Category.HOUSING,
     "money": Category.BANK,
     "work": Category.WORK,
+    "family": Category.FAMILY,
     "health": Category.HEALTH,
     "identity": Category.IDENTITY,
     "vehicle": Category.VEHICLE,

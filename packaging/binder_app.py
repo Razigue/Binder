@@ -12,6 +12,11 @@ for name in ("stdout", "stderr"):
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    # Installer hooks (install, update, uninstall): Velopack handles them and exits. Started
+    # normally, or from the portable archive, it returns at once.
+    import velopack
+
+    velopack.App().run()
     from binder import desktop
     from binder.cli import main
 

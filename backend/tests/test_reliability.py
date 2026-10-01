@@ -12,19 +12,19 @@ def by_name(samples: list[Sample], name: str) -> Sample:
 
 
 def test_delete_goes_to_trash_then_restore(client: TestClient, samples: list[Sample]) -> None:
-    doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    doc = upload(client, by_name(samples, "avis-imposition.pdf"))
     assert client.delete(f"/api/documents/{doc['id']}").status_code == 204
 
     assert client.get(f"/api/documents/{doc['id']}").status_code == 404
     assert client.get("/api/documents").json() == []
-    assert client.get("/api/documents", params={"q": "taxe"}).json() == []
+    assert client.get("/api/documents", params={"q": "impot"}).json() == []
     assert client.get("/api/deadlines").json() == []
     assert client.get("/api/stats").json()["trashed"] == 1
     assert [d["id"] for d in client.get("/api/trash").json()] == [doc["id"]]
 
     r = client.post(f"/api/documents/{doc['id']}/restore")
     assert r.status_code == 200
-    assert client.get("/api/documents", params={"q": "taxe"}).json()[0]["id"] == doc["id"]
+    assert client.get("/api/documents", params={"q": "impot"}).json()[0]["id"] == doc["id"]
     assert [d["document_id"] for d in client.get("/api/deadlines").json()] == [doc["id"]]
 
 
@@ -104,7 +104,7 @@ def _document_columns() -> list[str]:
 
 
 def test_large_columns_are_moved_last(client: TestClient, samples: list[Sample]) -> None:
-    doc = upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    doc = upload(client, by_name(samples, "avis-imposition.pdf"))
     assert _document_columns()[-2:] == ["explanation", "text"]
     # Previous layout: a column stored after the text (here re-added by the migration).
     with get_engine().begin() as conn:
@@ -115,18 +115,18 @@ def test_large_columns_are_moved_last(client: TestClient, samples: list[Sample])
     detail = client.get(f"/api/documents/{doc['id']}").json()
     assert detail["title"] == doc["title"] and detail["text"] == doc["text"]
     assert [d["document_id"] for d in client.get("/api/deadlines").json()] == [doc["id"]]
-    assert client.get("/api/documents", params={"q": "taxe"}).json()[0]["id"] == doc["id"]
+    assert client.get("/api/documents", params={"q": "impot"}).json()[0]["id"] == doc["id"]
     with get_engine().connect() as conn:
         assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
         indexes = {row[1] for row in conn.execute(text("PRAGMA index_list(document)"))}
     assert {"ix_document_sha256", "ix_document_deleted_at"} <= indexes
     # The unique index still rejects a second copy of the same file.
-    upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    upload(client, by_name(samples, "avis-imposition.pdf"))
     assert len(client.get("/api/documents").json()) == 1
 
 
 def test_unknown_columns_prevent_the_rebuild(client: TestClient, samples: list[Sample]) -> None:
-    upload(client, by_name(samples, "taxe-fonciere.pdf"))
+    upload(client, by_name(samples, "avis-imposition.pdf"))
     # Database written by a newer version: its column must not be lost.
     with get_engine().begin() as conn:
         conn.execute(text("ALTER TABLE document ADD COLUMN future TEXT DEFAULT 'kept'"))

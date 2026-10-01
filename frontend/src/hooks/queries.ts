@@ -109,3 +109,24 @@ export function useFeed() {
     },
   })
 }
+
+export function useJourneys() {
+  return useQuery({ queryKey: ["journeys"], queryFn: api.journeys })
+}
+
+export function useJourneyKinds() {
+  return useQuery({ queryKey: ["journeyKinds"], queryFn: api.journeyKinds, staleTime: Infinity })
+}
+
+export function useJourney(id: number | null) {
+  return useQuery({ queryKey: ["journey", id], queryFn: () => api.journey(id!), enabled: id !== null })
+}
+
+/** Letters Binder wrote, most recent first: drafts, sent ones awaiting an answer, answered. */
+export function useLetters() {
+  return useQuery({ queryKey: ["letters"], queryFn: api.letters })
+}
+
+export function useProfile() {
+  return useQuery({ queryKey: ["profile"], queryFn: api.profile, staleTime: 60_000 })
+}

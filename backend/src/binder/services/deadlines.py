@@ -11,6 +11,7 @@ T = i18n.catalog(
     "deadlines",
     {
         "expiry_title": {"en": "Expiry: {title}", "fr": "Fin de validité : {title}"},
+        "warranty_title": {"en": "End of warranty: {title}", "fr": "Fin de garantie : {title}"},
     },
 )
 
@@ -21,6 +22,8 @@ NOTICE_DAYS: dict[str, int] = {
     DocType.RESIDENCE_PERMIT: 120,
     DocType.DRIVING_LICENCE: 90,
     DocType.ROADWORTHINESS_TEST: 30,
+    # Time to have a fault repaired while it is still covered.
+    DocType.PURCHASE_RECEIPT: 45,
 }
 DEFAULT_NOTICE_DAYS = 30
 
@@ -68,5 +71,8 @@ def sync(session: Session, doc: Document) -> None:
         doc,
         "expiry",
         doc.expiry_date if expiring else None,
-        T("expiry_title", title=doc.title),
+        T(
+            "warranty_title" if doc.doc_type == DocType.PURCHASE_RECEIPT else "expiry_title",
+            title=doc.title,
+        ),
     )
