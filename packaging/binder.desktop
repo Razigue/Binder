@@ -1,8 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Binder
-GenericName=Coffre-fort administratif
-Comment=Vos documents et vos échéances, 100 % local
+GenericName=AI paperwork agent
+GenericName[fr]=Agent administratif IA
+Comment=Your AI administrative agent, 100% local
+Comment[fr]=Votre agent administratif IA, 100 % local
 Exec=@BINDER_BIN@
 Icon=binder
 Terminal=false

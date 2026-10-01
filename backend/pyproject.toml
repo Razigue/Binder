@@ -1,7 +1,7 @@
 [project]
 name = "binder"
 version = "0.1.0"
-description = "Coffre-fort administratif intelligent, 100 % local"
+description = "Binder: AI administrative agent, 100% local"
 authors = [
     { name = "Razigue Ben Hmida", email = "razigue.benhmida@epitech.eu" }
 ]
@@ -10,11 +10,16 @@ dependencies = [
     "cryptography>=50.0.2",
     "fastapi>=0.142.2",
     "httpx>=0.28.1",
+    "opencv-python-headless>=5.0.0.93",
     "pillow>=12.3.0",
     "pydantic-settings>=2.15.0",
     "pymupdf>=1.28.2",
     "python-multipart>=0.0.32",
-    # Wheels Linux, macOS (Intel, Apple Silicon) et Windows ; s'importe comme `sqlcipher3`.
+    # OCR of photos and scans; its models ship inside the wheel (nothing downloaded at runtime).
+    "rapidocr>=3.9.2",
+    "onnxruntime>=1.30.0",
+    # Linux, macOS (Intel, Apple Silicon) and Windows wheels; imported as `sqlcipher3`.
+    "segno>=1.6.6",
     "sqlcipher3-wheels>=0.5.7",
     "sqlmodel>=0.0.47",
     "uvicorn[standard]>=0.54.0",
@@ -22,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 desktop = [
-    # Moteur web natif sous Windows (Edge WebView2) et macOS (WebKit), Qt WebEngine sous Linux.
+    # Native web engine on Windows (Edge WebView2) and macOS (WebKit), Qt WebEngine on Linux.
     "pywebview>=6.2.1",
     "pywebview[qt]>=6.2.1; sys_platform == 'linux'",
 ]
@@ -42,6 +47,11 @@ dev = [
 [project.scripts]
 binder = "binder.cli:main"
 
+[tool.uv]
+# RapidOCR asks for the GUI build of OpenCV; the headless build above provides the same `cv2`
+# module without needing a display (servers, CI).
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -56,8 +66,8 @@ ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# PyMuPDF n'est que partiellement typé.
-module = ["binder.samples", "binder.services.text"]
+# PyMuPDF is only partially typed.
+module = ["binder.samples", "binder.services.text", "binder.services.scan_image"]
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]

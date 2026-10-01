@@ -25,7 +25,7 @@ export function useDocuments(p: { q?: string; category?: Category; status?: Docu
   return useQuery({
     queryKey: keys.documents(p),
     queryFn: () => api.documents(p),
-    // Tant qu'un document est en cours d'analyse, on rafraîchit la liste.
+    // Refresh the list while a document is being analysed.
     refetchInterval: (q) => (q.state.data?.some((d) => d.status === "processing") ? 1500 : false),
   })
 }

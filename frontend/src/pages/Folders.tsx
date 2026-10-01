@@ -8,29 +8,32 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { Chip } from "@/pages/Documents"
 import { useDocuments } from "@/hooks/queries"
+import { useT } from "@/i18n"
+import { folders as messages } from "@/i18n/messages/folders"
 import { api, folderExportUrl, type FolderPiece } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-const STATUS: Record<FolderPiece["status"], { icon: typeof CheckCircle2; tone: string; label: string }> = {
-  ok: { icon: CheckCircle2, tone: "text-emerald-600", label: "Prêt" },
-  partial: { icon: Clock, tone: "text-amber-600", label: "Incomplet" },
-  outdated: { icon: AlertTriangle, tone: "text-amber-600", label: "À renouveler" },
-  missing: { icon: CircleDashed, tone: "text-muted-foreground", label: "Manquant" },
+const STATUS: Record<FolderPiece["status"], { icon: typeof CheckCircle2; tone: string }> = {
+  ok: { icon: CheckCircle2, tone: "text-emerald-600 dark:text-emerald-400" },
+  partial: { icon: Clock, tone: "text-amber-600 dark:text-amber-400" },
+  outdated: { icon: AlertTriangle, tone: "text-amber-600 dark:text-amber-400" },
+  missing: { icon: CircleDashed, tone: "text-muted-foreground" },
 }
 
 export function FoldersPage() {
+  const t = useT(messages)
   const folders = useQuery({ queryKey: ["folders"], queryFn: api.folders })
   const docs = useDocuments({ limit: 500 })
-  const [selected, setSelected] = useState("location")
-  const folder = folders.data?.find((f) => f.key === selected)
+  const [selected, setSelected] = useState("rental")
+  const folder = folders.data?.find((f) => f.key === selected) ?? folders.data?.[0]
   const titles = new Map(docs.data?.map((d) => [d.id, d.title]))
 
   return (
     <>
-      <PageHeader title="Dossiers" subtitle="Rassemblez les pièces d'une démarche et voyez ce qui manque." />
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
       <div className="mb-4 flex flex-wrap gap-2">
         {folders.data?.map((f) => (
-          <Chip key={f.key} active={f.key === selected} onClick={() => setSelected(f.key)}>
+          <Chip key={f.key} active={f.key === folder?.key} onClick={() => setSelected(f.key)}>
             {f.title} <span>{f.ready}/{f.total}</span>
           </Chip>
         ))}
@@ -50,11 +53,11 @@ export function FoldersPage() {
                 />
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                {folder.complete ? "Dossier complet" : `${folder.ready} pièce${folder.ready > 1 ? "s" : ""} prête${folder.ready > 1 ? "s" : ""} sur ${folder.total}`}
+                {folder.complete ? t("complete") : t("ready", { count: folder.ready, total: folder.total })}
               </p>
             </div>
             <Button variant="outline" render={<a href={folderExportUrl(folder.key)} />} nativeButton={false}>
-              <Download /> Exporter le dossier
+              <Download /> {t("export")}
             </Button>
           </div>
           <ul className="divide-y">
@@ -67,13 +70,13 @@ export function FoldersPage() {
                   <div className="min-w-0 flex-1 text-sm">
                     <p className="font-medium">
                       {p.label}
-                      {p.optional && <span className="ml-2 text-xs font-normal text-muted-foreground">facultatif</span>}
+                      {p.optional && <span className="ml-2 text-xs font-normal text-muted-foreground">{t("optional")}</span>}
                     </p>
                     {p.document_ids.length > 0 && (
                       <p className="mt-1 flex flex-wrap gap-1.5">
                         {p.document_ids.map((id) => (
                           <Link key={id} to={`/documents/${id}`} className="rounded-md border px-2 py-0.5 text-xs hover:bg-muted">
-                            {titles.get(id) ?? `Document ${id}`}
+                            {titles.get(id) ?? t("document", { id })}
                           </Link>
                         ))}
                       </p>
@@ -85,7 +88,7 @@ export function FoldersPage() {
                       </p>
                     )}
                   </div>
-                  <span className={cn("text-xs font-medium", s.tone)}>{s.label}</span>
+                  <span className={cn("text-xs font-medium", s.tone)}>{t(`status.${p.status}`)}</span>
                 </li>
               )
             })}

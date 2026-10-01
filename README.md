@@ -1,152 +1,179 @@
 # Binder
 
-Coffre-fort administratif intelligent, **100 % local**.
+Your AI administrative agent, running entirely on your computer.
 
-Vous déposez vos papiers (PDF, photos). Binder les classe, extrait les informations clés
-(montant, dates, référence, émetteur), suit les échéances et répond à vos questions.
-Rien ne quitte votre machine : la base est chiffrée (SQLCipher), les fichiers aussi (Fernet),
-et l'IA tourne en local via Ollama.
+Drop in your bills, notices, payslips and certificates. Binder's AI files them, reads the key
+information (amount, dates, reference, sender), tells you what needs your attention and by when,
+explains letters in plain language, answers your questions about your documents and acts for you:
+reminders, letters, folders, payments to mark.
 
-## Fonctionnalités
+**Everything stays on your computer.** Your documents and the database are encrypted, and the
+AI runs locally. Nothing is sent to an online service.
 
-**Automatiser**
-- **Dépôt** : glisser-déposer de PDF, JPG ou PNG.
-- **Import automatique** : dossier surveillé (sous-dossiers compris) et pièces jointes d'une boîte
-  mail IMAP. Lecture seule : aucun fichier déplacé, aucun message marqué comme lu.
-- **Classement** : Impôts, Énergie, Assurance, Banque, Logement, Santé, Social, Travail, Télécom,
-  Identité, Véhicule ; type de document détecté (facture, attestation, carte d'identité…).
-- **Renommage** : nom normalisé « AAAA-MM-JJ Titre Émetteur.pdf » au téléchargement et à l'export.
-- **Doublons** : copie exacte ignorée ; doublon probable (autre scan) mis en vérification.
-- **Versions** : une attestation ou une pièce d'identité plus récente remplace l'ancienne
-  (marquée, jamais supprimée). Les bulletins de paie sont tous conservés.
-- **Extraction** : montant, dates d'émission, d'échéance et de fin de validité, référence,
-  émetteur, avec un score de confiance.
-- **Échéances et expirations** : paiements, fins de validité avec délai de renouvellement
-  (90 jours pour une carte d'identité, 120 pour un passeport…), rappels manuels.
-- **Conservation** : durées conseillées (service-public.fr), page « Tri » qui propose les
-  documents à trier ; rien n'est supprimé sans vous.
+- [Install](#install)
+- [First steps](#first-steps)
+- [Adding documents](#adding-documents)
+- [Using Binder day to day](#using-binder-day-to-day)
+- [Settings](#settings)
+- [Your data](#your-data)
+- [Questions](#questions)
 
-**Aider**
-- **En bref** : chaque courrier expliqué simplement, avec ce qu'il faut faire et avant quand.
-- **Agent** : répond en citant le document source ; hors IA, répond aux questions
-  « combien », « quand », « quand expire », « explique-moi ».
-- **Dossiers** : location, prêt immobilier, aide au logement CAF ; pièces trouvées, manquantes
-  ou trop anciennes, export ZIP numéroté.
-- **Courriers types** : résiliation, réclamation, demande de document, préremplis.
-- **Abonnements** : factures récurrentes regroupées, rythme, estimation annuelle, alerte en cas
-  de hausse de plus de 10 %.
-- **Recherche** plein texte (FTS5) et **export** ZIP rangé par catégorie et par année.
+## Install
 
-**Rester fiable**
-- Un document incomplet, douteux ou en double part dans la file « À vérifier ».
-- Supprimer met à la corbeille ; l'effacement définitif demande une confirmation explicite.
-- **Historique** lisible de tout ce que Binder, l'agent et vous avez fait, par document.
+Download the archive for your system from the
+[latest release](https://github.com/Razigue/Binder/releases/latest), then extract it.
 
-## Architecture
-
-```
-backend/   Python 3.12, FastAPI, SQLModel sur SQLCipher, PyMuPDF, Ollama
-  src/binder/
-    services/text.py     lecture PDF (PyMuPDF), OCR des scans (docTR ou Tesseract si installés)
-    services/rules.py    classement et extraction par règles
-    services/llm.py      client Ollama : extraction en JSON structuré, appels d'outils
-    services/ingest.py   pipeline : stockage chiffré → lecture → extraction → échéances → index
-    agent/               outils + boucle d'agent maison
-    api/routes.py        API REST
-frontend/  React, TypeScript, Vite, Tailwind CSS, shadcn/ui, TanStack Query
-```
-
-L'extraction combine deux moteurs : le modèle local (Qwen) quand il est disponible, et des règles
-déterministes qui comblent ses trous et servent de repli. Sans Ollama, l'application reste
-entièrement utilisable ; l'agent passe alors par un routeur d'intentions.
-
-## Démarrage
-
-Prérequis : [uv](https://docs.astral.sh/uv/), Node 20 ou plus, et [Ollama](https://ollama.com) (optionnel).
-
-```bash
-# Modèle local (recommandé)
-ollama pull qwen3.5:9b
-
-# Interface (compilée dans backend/src/binder/static)
-cd frontend && npm install && npm run build
-
-# Serveur
-cd ../backend && uv sync
-uv run binder --seed      # optionnel : documents de démonstration
-uv run binder             # http://127.0.0.1:8765
-uv run --extra desktop binder --desktop   # fenêtre native (pywebview)
-```
-
-### Application de bureau (Linux, Windows, macOS)
-
-Binder tourne sur les trois systèmes. La fenêtre utilise le moteur web du système sous Windows
-(Edge WebView2, présent par défaut sur Windows 10 et 11) et macOS (WebKit), Qt WebEngine sous Linux.
-
-```bash
-python packaging/build.py     # interface + exécutable PyInstaller pour le système courant
-```
-
-| Système | Résultat |
+| System | Open |
 |---|---|
-| Linux | `packaging/dist/Binder/Binder` ; `./packaging/install-linux.sh` l'ajoute au menu (`--uninstall` pour retirer) |
-| Windows | `packaging\dist\Binder\Binder.exe` |
-| macOS | `packaging/dist/Binder.app` |
+| Windows 10 / 11 | `Binder\Binder.exe` |
+| macOS | `Binder.app`: move it to **Applications** first |
+| Linux | `Binder/Binder` |
 
-PyInstaller ne compile pas pour un autre système : le workflow GitHub « Application de bureau »
-(lancement manuel ou tag `v*`) construit les trois versions et les publie en artefacts.
-L'application n'est pas signée : au premier lancement, macOS demande clic droit → Ouvrir et
-Windows SmartScreen « Informations complémentaires » → Exécuter quand même.
+Binder is not code-signed yet, so the first launch asks for confirmation:
+- **Windows**: SmartScreen shows "Windows protected your PC": click **More info**, then **Run
+  anyway**.
+- **macOS**: right-click `Binder.app`, then **Open**.
 
-L'application embarque son serveur sur un port libre de 127.0.0.1 : fermer la fenêtre arrête tout.
-Sous Linux, environ 580 Mo, dont 200 Mo pour le moteur web Chromium de Qt. Ollama reste à installer à part.
+Binder updates itself: at launch it checks for a newer version, downloads it, verifies it and
+restarts. Without internet, it simply starts as usual.
 
-En développement : `uv run binder` d'un côté, `npm run dev` de l'autre (http://localhost:5173,
-les appels `/api` sont relayés vers le backend).
+## First steps
 
-### Configuration
+1. **Open Binder.** The welcome screen invites you to drop your first documents. No document at
+   hand? Click **Load demo documents** to explore with fictitious examples.
+2. **Turn on the local AI.** It is what reads, files and explains your documents, and what powers
+   the agent.
+   1. Install [Ollama](https://ollama.com) and start it.
+   2. In **Settings → Local AI**, pick a Qwen model (the **Recommended** one suits most
+      computers) and click **Download**. Binder uses it as soon as it is ready.
+   3. Also download **Qwen 3 Embedding** (0.6 GB) for smart search: it finds documents by
+      meaning ("proof of address" finds your rent receipt and energy bills).
+3. **Check your language and country** in **Settings → Language & region**. The country sets the
+   currency and date formats, and the language of your letters.
 
-Par variables d'environnement, ou dans un fichier `backend/.env` :
+## Adding documents
 
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `BINDER_DATA_DIR` | voir ci-dessous | base, fichiers chiffrés, clé |
-| `BINDER_DB_KEY` | générée dans `DATA_DIR/key` | secret maître du chiffrement |
-| `BINDER_LLM_MODEL` | `qwen3.5:9b` | modèle Ollama |
-| `BINDER_LLM_ENABLED` | `true` | `false` pour n'utiliser que les règles |
-| `BINDER_OLLAMA_URL` | `http://localhost:11434` | |
-| `BINDER_PORT` | `8765` | |
-| `BINDER_AUTO_IMPORT` | `true` | `false` pour couper l'import automatique en tâche de fond |
+Accepted formats: PDF, JPG, PNG.
 
-Dossier de données par défaut : `~/.local/share/binder` (Linux, ou `$XDG_DATA_HOME/binder`),
-`~/Library/Application Support/Binder` (macOS), `%LOCALAPPDATA%\Binder` (Windows).
+- **Drag and drop** files onto the Home page, or use **+ Import**.
+- **Scan with your phone**: click **Scan with my phone**, connect the phone to the same Wi-Fi as
+  your computer and scan the QR code. Each page is captured automatically when you hold still.
+  The phone warns that the connection is not private: that is expected, the page comes from Binder
+  on your own network. Tap **Advanced**, then **Proceed** (once per phone). If the phone cannot
+  connect, allow Binder on private networks in your firewall.
+- **Watched folder**: in **Settings → Automatic import**, choose a folder. Every PDF, JPG or PNG
+  dropped in it (subfolders included) is imported.
+- **Mailbox**: in the same section, enter your IMAP server and an app password. Binder imports the
+  attachments of new messages every 5 minutes.
 
-> ⚠️ Perdre la clé, c'est perdre l'accès aux données. Sauvegardez `DATA_DIR/key`.
+Binder only reads: it never moves your files, never deletes your emails and never marks them as
+read.
 
-### OCR
+Once a document is in, Binder:
+- files it by category (Taxes, Energy, Insurance, Bank, Housing, Health, Social benefits, Work,
+  Telecom, Identity, Vehicle) and recognises its type (invoice, certificate, identity card…);
+- reads the amount, dates, reference and sender, with a confidence score;
+- gives it a clear name, "YYYY-MM-DD Title Sender.pdf", used when you download or export it;
+- ignores exact copies, and flags a probable duplicate (another scan of the same letter);
+- keeps the latest version of a certificate or identity document and marks the older one as
+  replaced, without deleting it. Payslips are all kept.
 
-Les PDF avec du texte sont lus directement. Pour les photos et les scans, installez un moteur OCR :
-`uv pip install "python-doctr[torch]"` (recommandé) ou `pytesseract` avec `tesseract-ocr-fra`.
-Sans OCR, une photo est importée mais part en vérification.
+When something is missing or doubtful, the document goes to **To review**: open it, check or
+correct the information, then click **Validate**.
 
-## Qualité
+Photos and scans are read by the built-in text recognition (OCR), on your computer. With the
+local AI, Binder also looks at the page itself, like you would: it reads a crumpled photo, a table
+or a stamp that text recognition gets wrong.
 
-```bash
-cd backend
-uv run pytest               # API, chiffrement au repos, extraction, agent
-uv run ruff check . && uv run mypy src
-uv run python scripts/evaluate.py          # précision des règles
-uv run python scripts/evaluate.py --llm    # règles + modèle local
-```
+## Using Binder day to day
 
-L'évaluation porte pour l'instant sur 12 documents fictifs générés par `binder/samples.py`.
-Les règles ont été mises au point sur ces mêmes documents, donc leur score n'est pas une mesure
-de généralisation. Le jeu de 100 documents annotés reste à constituer.
+**Home** shows what needs your attention today: upcoming deadlines, documents to check, expiring
+documents, price increases, and recent documents.
 
-## Feuille de route
+**Documents**: browse by category, open a document to see its preview, the extracted information
+and its history. **In short** explains the letter in plain language: what it is, what to do, and
+by when. From a document you can also write a letter, export it, or move it to the trash.
 
-- Jeu d'évaluation de 100 documents, comparaison modèles locaux et API
-- Recherche sémantique (sqlite-vec, nomic-embed-text)
-- Notifications système pour les échéances et les hausses
-- Installeurs signés Windows (MSI) et macOS (DMG notarisé)
-- Clé protégée par le trousseau du système ou une phrase de passe
+**Search**: finds any word in your documents, even inside their text. With smart search
+installed, it also finds documents by meaning.
+
+**Agent**: your paperwork assistant. Ask in your own words, it looks through your documents and
+acts for you, and you see each step as it works:
+- questions: "What is my reference tax income?", "How much did I pay for electricity over my
+  last two bills?", "What is my car's registration number?";
+- follow-up: "What should I do with this tax notice?", "Do I have papers to renew soon?",
+  "What is missing for my rental application?", "Have my subscriptions gone up?";
+- actions: "Remind me to renew my ID card a month before it expires", "I paid the property tax,
+  mark it as paid", "The garage quote is €165, correct it", "Write a letter to cancel my Orange
+  subscription", "Move last year's insurance certificate to the trash".
+
+Each answer cites the documents it comes from; click a citation to open it. The agent only
+changes something when you ask, logs it in **History**, and a trashed document can be restored.
+Attach a file or take a photo in the conversation to ask about it straight away.
+
+**Tracking**
+- **Deadlines**: payments and expiry dates taken from your documents, in a list and a calendar.
+  Mark a bill as paid, or add your own reminder ("Renew passport"). Identity documents are flagged
+  ahead of time to leave room for renewal (90 days for an identity card, 120 for a passport).
+- **Subscriptions**: recurring bills grouped by provider, with their frequency and a yearly
+  estimate. Binder warns you when an amount rises by more than 10%.
+
+**Paperwork**
+- **Folders**: the documents a procedure needs (renting a home, a mortgage, CAF housing benefit).
+  Binder shows what is ready, missing or too old, and exports the folder as a numbered ZIP.
+- **Letters**: cancellation, dispute or document request, prefilled with the details of your
+  documents. Fill in the parts in [square brackets], then copy or download. Letters to
+  French-speaking administrations (France, Belgium, Luxembourg, Monaco) are always written in
+  French.
+
+**Upkeep**
+- **Sorting**: documents you no longer need to keep, based on the recommended retention periods
+  (service-public.fr). Nothing is deleted unless you choose to.
+- **History**: everything Binder, the agent and you did, document by document.
+- **Trash**: deleted documents stay here and can be restored. Deleting permanently asks for
+  confirmation.
+
+**Export**: from **Documents**, export everything (or one category) as a ZIP sorted by category and
+year.
+
+## Settings
+
+| Section | What you can change |
+|---|---|
+| Language & region | English or French, country (currency, date format, letters). Automatic follows your system. |
+| Appearance | Light, dark, or automatic (follows your system). |
+| Local AI | Download, choose or delete a model; smart search model. |
+| Automatic import | Watched folder and mailbox, and a **Check now** button. |
+
+## Your data
+
+Binder keeps everything in one folder on your computer:
+
+| System | Folder |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Binder` |
+| macOS | `~/Library/Application Support/Binder` |
+| Linux | `~/.local/share/binder` |
+
+> ⚠️ **Back up the `key` file in this folder.** It unlocks your encrypted documents: without it,
+> they cannot be recovered. To back up Binder, copy the whole folder while Binder is closed.
+
+Your mailbox password is stored in the encrypted database, on this computer only.
+
+## Questions
+
+**Does Binder need internet?** No. It only connects to check for updates, and to download an AI
+model when you ask for one.
+
+**Which model should I choose?** The one marked **Recommended**. Smaller models are faster on
+modest computers; the largest needs a powerful machine.
+
+**A document is in the wrong category or has a wrong amount.** Open it, correct the information,
+then click **Save and validate**. Binder keeps your correction.
+
+**Can I undo a deletion?** Yes, from the **Trash**, as long as you have not deleted it permanently.
+
+---
+
+Developers: see [docs/development.md](docs/development.md),
+[docs/configuration.md](docs/configuration.md) and [docs/release.md](docs/release.md).

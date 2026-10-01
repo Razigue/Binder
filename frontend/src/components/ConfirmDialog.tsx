@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
+import { useT } from "@/i18n"
+import { common } from "@/i18n/messages/common"
 
-/** Demande un accord explicite avant une action irréversible. */
+/** Asks for explicit consent before an irreversible action. */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   destructive?: boolean
   onConfirm: () => Promise<unknown> | void
 }) {
+  const t = useT(common)
   const [busy, setBusy] = useState(false)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -32,7 +35,7 @@ export function ConfirmDialog({
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Annuler
+            {t("action.cancel")}
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}

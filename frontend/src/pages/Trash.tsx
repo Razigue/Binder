@@ -8,10 +8,13 @@ import { CategoryIcon } from "@/components/CategoryIcon"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { usePurgeDocument, useRestoreDocument, useTrash } from "@/hooks/queries"
+import { useT } from "@/i18n"
+import { trash as messages } from "@/i18n/messages/trash"
 import type { Doc } from "@/lib/api"
-import { formatDate } from "@/lib/format"
+import { categoryLabel, formatDate } from "@/lib/format"
 
 export function TrashPage() {
+  const t = useT(messages)
   const trash = useTrash()
   const restore = useRestoreDocument()
   const purge = usePurgeDocument()
@@ -20,8 +23,8 @@ export function TrashPage() {
   return (
     <>
       <PageHeader
-        title="Corbeille"
-        subtitle="Les documents supprimés restent ici, restaurables, tant que vous ne les effacez pas définitivement."
+        title={t("title")}
+        subtitle={t("subtitle")}
       />
       <Card className="gap-0 p-0">
         {trash.isPending ? (
@@ -31,7 +34,7 @@ export function TrashPage() {
             ))}
           </div>
         ) : !trash.data?.length ? (
-          <p className="px-5 py-10 text-center text-sm text-muted-foreground">La corbeille est vide.</p>
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
           <ul className="divide-y">
             {trash.data.map((d) => (
@@ -40,7 +43,7 @@ export function TrashPage() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{d.title || d.filename}</span>
                   <span className="block text-xs text-muted-foreground">
-                    {d.category} · supprimé le {formatDate(d.deleted_at)}
+                    {categoryLabel(d.category)} · {t("deletedOn", { date: formatDate(d.deleted_at) })}
                   </span>
                 </span>
                 <Button
@@ -48,13 +51,13 @@ export function TrashPage() {
                   size="sm"
                   disabled={restore.isPending}
                   onClick={() =>
-                    restore.mutate(d.id, { onSuccess: () => toast.success(`« ${d.title} » restauré`) })
+                    restore.mutate(d.id, { onSuccess: () => toast.success(t("restored", { title: d.title })) })
                   }
                 >
-                  <RotateCcw /> Restaurer
+                  <RotateCcw /> {t("restore")}
                 </Button>
                 <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setTarget(d)}>
-                  <Trash2 /> Supprimer définitivement
+                  <Trash2 /> {t("purge")}
                 </Button>
               </li>
             ))}
@@ -64,18 +67,13 @@ export function TrashPage() {
       <ConfirmDialog
         open={target !== null}
         onOpenChange={(open) => !open && setTarget(null)}
-        title="Supprimer définitivement ?"
-        description={
-          <>
-            « {target?.title} » et son fichier seront effacés de votre machine. Cette action est
-            irréversible.
-          </>
-        }
-        confirmLabel="Supprimer définitivement"
+        title={t("confirmTitle")}
+        description={t("confirmDescription", { title: target?.title ?? "" })}
+        confirmLabel={t("purge")}
         onConfirm={async () => {
           if (!target) return
           await purge.mutateAsync(target.id)
-          toast.success("Document supprimé définitivement")
+          toast.success(t("purged"))
         }}
       />
     </>

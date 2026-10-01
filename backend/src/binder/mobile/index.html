@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Binder · Scan</title>
+  <link rel="stylesheet" href="scan.css">
+  <script src="scan.js" defer></script>
+</head>
+<body>
+  <main id="camera" class="camera" hidden>
+    <video id="video" playsinline muted autoplay></video>
+    <svg id="overlay" class="overlay" aria-hidden="true">
+      <polygon id="quad" points=""></polygon>
+    </svg>
+    <div id="flash" class="flash"></div>
+
+    <header class="top">
+      <span id="docLabel" class="pill"></span>
+      <div class="top-actions">
+        <button id="autoBtn" class="chip" type="button" aria-pressed="true"></button>
+        <button id="torchBtn" class="icon-btn" type="button" hidden aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+        </button>
+      </div>
+    </header>
+    <p id="hint" class="hint" role="status" aria-live="polite"></p>
+
+    <footer class="bottom">
+      <div id="tray" class="tray" aria-live="polite"></div>
+      <div class="controls">
+        <button id="nextBtn" class="side-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 12v6M9 15h6"/></svg>
+          <span id="nextLabel"></span>
+        </button>
+        <button id="shutter" class="shutter" type="button">
+          <svg viewBox="0 0 80 80" aria-hidden="true">
+            <circle class="ring-track" cx="40" cy="40" r="36"/>
+            <circle id="ring" class="ring" cx="40" cy="40" r="36"/>
+          </svg>
+          <span class="shutter-core"></span>
+        </button>
+        <button id="finishBtn" class="side-btn primary" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>
+          <span id="finishLabel"></span>
+        </button>
+      </div>
+    </footer>
+  </main>
+
+  <section id="fallback" class="screen" hidden>
+    <div class="screen-body">
+      <h1 id="fallbackTitle"></h1>
+      <p id="fallbackText"></p>
+      <label class="big-btn">
+        <input id="fileInput" type="file" accept="image/*" capture="environment" multiple hidden>
+        <span id="fallbackBtn"></span>
+      </label>
+      <div id="fallbackTray" class="tray tray-static"></div>
+      <div class="row">
+        <button id="fallbackNext" class="ghost-btn" type="button"></button>
+        <button id="fallbackFinish" class="big-btn" type="button" disabled></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="message" class="screen" hidden>
+    <div class="screen-body center">
+      <div id="messageIcon" class="badge"></div>
+      <h1 id="messageTitle"></h1>
+      <p id="messageText"></p>
+      <button id="messageBtn" class="big-btn" type="button" hidden></button>
+    </div>
+  </section>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <h2 id="sheetTitle"></h2>
+      <img id="sheetImage" alt="" hidden>
+      <p id="sheetText"></p>
+      <div class="row">
+        <button id="sheetCancel" class="ghost-btn" type="button"></button>
+        <button id="sheetConfirm" class="big-btn" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+</body>
+</html>

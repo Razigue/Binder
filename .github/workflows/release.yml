@@ -1,0 +1,87 @@
+name: Release
+
+# Pushing a v* tag (e.g. v1.2.0): full CI, build for Linux, Windows and macOS, then a GitHub
+# release with the three archives. The installed application updates itself from it.
+# Manual run: builds the archives (run artifacts) without publishing a release.
+# Archive names are shared with binder.updater.ASSETS: change both together.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: ci
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Binder-linux-x64
+          - os: windows-latest
+            name: Binder-windows-x64
+          - os: macos-latest
+            name: Binder-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            uv run --no-project packaging/build.py --version "${GITHUB_REF_NAME#v}"
+          else
+            uv run --no-project packaging/build.py
+          fi
+      - name: Archive
+        shell: bash
+        run: |
+          cd packaging/dist
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ditto -c -k --keepParent Binder.app ../../${{ matrix.name }}.zip
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z a ../../${{ matrix.name }}.zip Binder
+          else
+            tar czf ../../${{ matrix.name }}.tar.gz Binder
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum Binder-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # v1.2.0-beta.1: pre-release, ignored by the automatic update.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

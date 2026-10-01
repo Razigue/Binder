@@ -1,7 +1,7 @@
-"""Évaluation de l'extraction sur les documents fictifs annotés.
+"""Evaluation of the extraction on the annotated fictitious documents.
 
-uv run python scripts/evaluate.py            # règles seules
-uv run python scripts/evaluate.py --llm      # règles + modèle Ollama configuré
+uv run python scripts/evaluate.py            # rules only
+uv run python scripts/evaluate.py --llm      # rules + configured Ollama model
 """
 
 import argparse
@@ -13,17 +13,17 @@ from binder.schemas import Extraction
 from binder.services import ingest, llm, rules
 from binder.services.text import read_document
 
-FIELDS = ["category", "amount", "issue_date", "due_date", "expiry_date", "reference"]
+FIELDS = ["category", "doc_type", "amount", "issue_date", "due_date", "expiry_date", "reference"]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--llm", action="store_true")
     args = parser.parse_args()
-    # La console Windows (cp1252) ne sait pas afficher ✓ et ✗.
+    # The Windows console (cp1252) cannot display ✓ and ✗.
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     if args.llm and not llm.is_available():
-        raise SystemExit("Modèle indisponible : vérifiez `ollama list` et BINDER_LLM_MODEL")
+        raise SystemExit("Model unavailable: check `ollama list` and BINDER_LLM_MODEL")
 
     hits = dict.fromkeys(FIELDS, 0)
     samples = build_samples()
@@ -39,16 +39,16 @@ def main() -> None:
             if getattr(result, field) == expected:
                 hits[field] += 1
             else:
-                errors.append(f"{field}={getattr(result, field)!r} (attendu {expected!r})")
+                errors.append(f"{field}={getattr(result, field)!r} (expected {expected!r})")
         print(f"{'✓' if not errors else '✗'} {sample.filename:28} {'; '.join(errors)}")
 
     elapsed = time.perf_counter() - started
     total = len(samples) * len(FIELDS)
-    print("\nPrécision par champ :")
+    print("\nAccuracy per field:")
     for field in FIELDS:
         print(f"  {field:12} {hits[field] / len(samples):6.1%}")
-    print(f"  {'global':12} {sum(hits.values()) / total:6.1%}")
-    print(f"\n{len(samples)} documents en {elapsed:.1f} s")
+    print(f"  {'overall':12} {sum(hits.values()) / total:6.1%}")
+    print(f"\n{len(samples)} documents in {elapsed:.1f} s")
 
 
 if __name__ == "__main__":

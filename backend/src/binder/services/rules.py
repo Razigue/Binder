@@ -1,19 +1,44 @@
-"""Classement et extraction par règles.
+"""Rule-based classification and extraction.
 
-Sert de filet de sécurité quand le modèle local n'est pas disponible, et de point de
-comparaison pour l'évaluation. Tout est fait sur un texte normalisé (minuscules, sans accents).
+Serves as a safety net when the local model is unavailable, and as a baseline for the
+evaluation. Everything works on normalized text (lowercase, no accents). The keywords and
+patterns below match the content of French documents: they stay in French.
 """
 
 import re
 import unicodedata
 from datetime import date
+from functools import cache
+from itertools import islice
 
-from binder.models import Category
+from binder import i18n
+from binder.models import Category, DocType
 from binder.schemas import Extraction
 
-# Poids = nombre de mots de l'expression : une expression longue est plus discriminante.
+# Generated document titles (user-visible, in the current language).
+T = i18n.catalog(
+    "rules",
+    {
+        "untitled": {"en": "Document", "fr": "Document"},
+        "with_year": {"en": "{label} {year}", "fr": "{label} {year}"},
+        "quote_from": {"en": "Quote from {name}", "fr": "Devis {name}"},
+        # Types whose title names the issuer: "EDF invoice" / "Facture EDF".
+        "invoice": {"en": "{issuer} invoice", "fr": "Facture {issuer}"},
+        "certificate": {"en": "{issuer} certificate", "fr": "Attestation {issuer}"},
+        "insurance_certificate": {
+            "en": "{issuer} insurance certificate",
+            "fr": "Attestation d'assurance {issuer}",
+        },
+        "contract": {"en": "{issuer} contract", "fr": "Contrat {issuer}"},
+        "payment_notice": {"en": "{issuer} payment notice", "fr": "Avis d'échéance {issuer}"},
+        "payment_schedule": {"en": "{issuer} payment schedule", "fr": "Échéancier {issuer}"},
+        "quote": {"en": "{issuer} quote", "fr": "Devis {issuer}"},
+    },
+)
+
+# Weight = number of words in the expression: a long expression is more discriminating.
 CATEGORY_KEYWORDS: dict[Category, list[str]] = {
-    Category.IMPOTS: [
+    Category.TAXES: [
         "avis d'impot",
         "impot sur le revenu",
         "taxe fonciere",
@@ -25,7 +50,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "prelevement a la source",
         "revenu fiscal de reference",
     ],
-    Category.ENERGIE: [
+    Category.ENERGY: [
         "edf",
         "engie",
         "totalenergies",
@@ -38,7 +63,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "consommation d'eau",
         "facture d'energie",
     ],
-    Category.ASSURANCE: [
+    Category.INSURANCE: [
         "assurance habitation",
         "assurance auto",
         "contrat d'assurance",
@@ -54,7 +79,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "sinistre",
         "responsabilite civile",
     ],
-    Category.BANQUE: [
+    Category.BANK: [
         "releve de compte",
         "releve bancaire",
         "iban",
@@ -70,7 +95,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "banque populaire",
         "credit mutuel",
     ],
-    Category.IDENTITE: [
+    Category.IDENTITY: [
         "carte nationale d'identite",
         "carte d'identite",
         "passeport",
@@ -78,7 +103,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "titre de sejour",
         "lieu de naissance",
     ],
-    Category.VEHICULE: [
+    Category.VEHICLE: [
         "controle technique",
         "certificat d'immatriculation",
         "carte grise",
@@ -86,7 +111,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "vehicule",
         "kilometrage",
     ],
-    Category.LOGEMENT: [
+    Category.HOUSING: [
         "quittance de loyer",
         "loyer",
         "bail",
@@ -96,7 +121,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "syndic",
         "depot de garantie",
     ],
-    Category.SANTE: [
+    Category.HEALTH: [
         "assurance maladie",
         "ameli",
         "cpam",
@@ -118,7 +143,7 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "urssaf",
         "attestation de paiement",
     ],
-    Category.TRAVAIL: [
+    Category.WORK: [
         "bulletin de paie",
         "bulletin de salaire",
         "fiche de paie",
@@ -142,31 +167,32 @@ CATEGORY_KEYWORDS: dict[Category, list[str]] = {
     ],
 }
 
-# (motif, titre) — le premier motif trouvé donne le type de document.
-DOC_TYPES: list[tuple[str, str]] = [
-    (r"carte nationale d'identite|carte d'identite", "Carte d'identité"),
-    (r"passeport", "Passeport"),
-    (r"permis de conduire", "Permis de conduire"),
-    (r"titre de sejour", "Titre de séjour"),
-    (r"controle technique", "Contrôle technique"),
-    (r"certificat d'immatriculation|carte grise", "Carte grise"),
-    (r"releve d'identite bancaire|(?<![a-z])rib(?![a-z])", "RIB"),
-    (r"contrat de travail", "Contrat de travail"),
-    (r"contrat de location|(?<![a-z])bail (?:d'habitation|de location)", "Bail"),
-    (r"taxe fonciere", "Taxe foncière"),
-    (r"taxe d'habitation", "Taxe d'habitation"),
-    (r"avis d'impot|impot sur le revenu", "Avis d'imposition"),
-    (r"quittance de loyer", "Quittance de loyer"),
-    (r"avis d'echeance", "Avis d'échéance"),
-    (r"attestation d'assurance", "Attestation d'assurance"),
-    (r"releve (?:de compte|bancaire)", "Relevé bancaire"),
-    (r"bulletin de (?:paie|salaire)|fiche de paie", "Bulletin de paie"),
-    (r"decompte de remboursement", "Décompte de remboursement"),
-    (r"attestation", "Attestation"),
-    (r"devis", "Devis"),
-    (r"echeancier", "Échéancier"),
-    (r"facture", "Facture"),
-    (r"contrat", "Contrat"),
+# (pattern, type): the first matching pattern gives the document type. Order matters: specific
+# types before generic ones ("attestation d'assurance" before "attestation").
+DOC_TYPES: list[tuple[str, DocType]] = [
+    (r"carte nationale d'identite|carte d'identite", DocType.IDENTITY_CARD),
+    (r"passeport", DocType.PASSPORT),
+    (r"permis de conduire", DocType.DRIVING_LICENCE),
+    (r"titre de sejour", DocType.RESIDENCE_PERMIT),
+    (r"controle technique", DocType.ROADWORTHINESS_TEST),
+    (r"certificat d'immatriculation|carte grise", DocType.VEHICLE_REGISTRATION),
+    (r"releve d'identite bancaire|(?<![a-z])rib(?![a-z])", DocType.BANK_DETAILS),
+    (r"contrat de travail", DocType.EMPLOYMENT_CONTRACT),
+    (r"contrat de location|(?<![a-z])bail (?:d'habitation|de location)", DocType.LEASE),
+    (r"taxe fonciere", DocType.PROPERTY_TAX),
+    (r"taxe d'habitation", DocType.HOUSING_TAX),
+    (r"avis d'impot|impot sur le revenu", DocType.TAX_NOTICE),
+    (r"quittance de loyer", DocType.RENT_RECEIPT),
+    (r"avis d'echeance", DocType.PAYMENT_NOTICE),
+    (r"attestation d'assurance", DocType.INSURANCE_CERTIFICATE),
+    (r"releve (?:de compte|bancaire)", DocType.BANK_STATEMENT),
+    (r"bulletin de (?:paie|salaire)|fiche de paie", DocType.PAYSLIP),
+    (r"decompte de remboursement", DocType.REIMBURSEMENT_STATEMENT),
+    (r"attestation", DocType.CERTIFICATE),
+    (r"devis", DocType.QUOTE),
+    (r"echeancier", DocType.PAYMENT_SCHEDULE),
+    (r"facture", DocType.INVOICE),
+    (r"contrat", DocType.CONTRACT),
 ]
 
 ISSUERS: dict[str, str] = {
@@ -204,22 +230,23 @@ ISSUERS: dict[str, str] = {
     "securitest": "Sécuritest",
 }
 
-# Champs attendus par catégorie : s'ils manquent, le document part en vérification.
+# Expected fields per category: if they are missing, the document goes to review.
 REQUIRED_FIELDS: dict[Category, list[str]] = {
-    Category.IMPOTS: ["amount", "due_date"],
-    Category.ENERGIE: ["amount", "due_date"],
-    Category.ASSURANCE: ["amount", "due_date"],
+    Category.TAXES: ["amount", "due_date"],
+    Category.ENERGY: ["amount", "due_date"],
+    Category.INSURANCE: ["amount", "due_date"],
     Category.TELECOM: ["amount", "due_date"],
-    Category.LOGEMENT: ["amount"],
-    Category.TRAVAIL: ["amount"],
-    Category.BANQUE: ["issue_date"],
-    Category.SANTE: ["issue_date"],
+    Category.HOUSING: ["amount"],
+    Category.WORK: ["amount"],
+    Category.BANK: ["issue_date"],
+    Category.HEALTH: ["issue_date"],
     Category.SOCIAL: ["issue_date"],
-    Category.IDENTITE: ["expiry_date"],
-    Category.VEHICULE: [],
-    Category.AUTRE: [],
+    Category.IDENTITY: ["expiry_date"],
+    Category.VEHICLE: [],
+    Category.OTHER: [],
 }
 
+# French month names, to read dates written out in documents ("15 octobre 2026").
 MONTHS = {
     "janvier": 1,
     "fevrier": 2,
@@ -270,6 +297,7 @@ _REF_VALUE_RE = re.compile(r"[:\s]\s*([a-z0-9][a-z0-9\-/ ]{3,30}[a-z0-9])")
 _SPECIAL = {"’": "'", " ": " ", " ": " "}
 
 
+@cache
 def _fold(char: str) -> str:
     if char in _SPECIAL:
         return _SPECIAL[char]
@@ -280,30 +308,44 @@ def _fold(char: str) -> str:
 
 
 def normalize(text: str) -> str:
-    """Minuscules sans accents. Conserve la longueur pour pouvoir revenir au texte d'origine."""
-    return "".join(_fold(c) for c in text)
+    """Lowercase without accents. Keeps the length so as to map back to the original text."""
+    if text.isascii():
+        return text.lower()
+    return "".join(map(_fold, text))
+
+
+def _word_re(keyword: str) -> re.Pattern[str]:
+    return re.compile(r"(?<![a-z])" + re.escape(keyword) + r"(?![a-z])")
+
+
+_CATEGORY_RES = {
+    category: [(kw, _word_re(kw), len(kw.split())) for kw in keywords]
+    for category, keywords in CATEGORY_KEYWORDS.items()
+}
+_ISSUER_RES = [(key, _word_re(key), name) for key, name in ISSUERS.items()]
 
 
 def _score_categories(norm: str) -> dict[Category, float]:
     scores: dict[Category, float] = {}
-    for category, keywords in CATEGORY_KEYWORDS.items():
+    for category in CATEGORY_KEYWORDS:
         total = 0.0
-        for kw in keywords:
-            hits = len(re.findall(r"(?<![a-z])" + re.escape(kw) + r"(?![a-z])", norm))
-            total += min(hits, 3) * len(kw.split())
+        for kw, pattern, weight in _CATEGORY_RES[category]:
+            # Substring test first: most keywords are absent, and only 3 hits count.
+            if kw in norm:
+                total += sum(1 for _ in islice(pattern.finditer(norm), 3)) * weight
         if total:
             scores[category] = total
-    # « assurance maladie » ne doit pas faire pencher vers l'assurance habitation/auto.
-    if Category.SANTE in scores and Category.ASSURANCE in scores and "assurance maladie" in norm:
-        scores[Category.ASSURANCE] = max(0.0, scores[Category.ASSURANCE] - 2)
+    # "assurance maladie" (national health insurance) must not tip towards home/car insurance.
+    if Category.HEALTH in scores and Category.INSURANCE in scores and "assurance maladie" in norm:
+        scores[Category.INSURANCE] = max(0.0, scores[Category.INSURANCE] - 2)
     return scores
 
 
 def classify(norm: str) -> tuple[Category, float]:
-    """Retourne la catégorie et une confiance entre 0 et 1."""
+    """Returns the category and a confidence between 0 and 1."""
     scores = _score_categories(norm)
     if not scores:
-        return Category.AUTRE, 0.2
+        return Category.OTHER, 0.2
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     best, best_score = ranked[0]
     second = ranked[1][1] if len(ranked) > 1 else 0.0
@@ -340,7 +382,7 @@ def _date_after_keyword(lines: list[str], keywords: str) -> date | None:
         m = pattern.search(line)
         if not m:
             continue
-        # Date sur la même ligne après le mot-clé, sinon sur la ligne suivante (tableaux).
+        # Date on the same line after the keyword, otherwise on the next line (tables).
         dates = find_dates(line[m.start() :]) or find_dates(" ".join(lines[i + 1 : i + 2]))
         if dates:
             return dates[0]
@@ -376,7 +418,7 @@ def extract_reference(lines: list[str], original_lines: list[str]) -> str | None
         value = _REF_VALUE_RE.search(line, m.end())
         if value and any(c.isdigit() for c in value[1]):
             start, end = value.span(1)
-            # « Facture n° 2026-884512 du 24/09/2026 » : la référence s'arrête avant « du ».
+            # "Facture n° 2026-884512 du 24/09/2026": the reference stops before "du".
             cut = re.search(r"\s+(?:du|le|au|en date)\s", value[1])
             if cut:
                 end = start + cut.start()
@@ -384,65 +426,76 @@ def extract_reference(lines: list[str], original_lines: list[str]) -> str | None
     return None
 
 
+# Types whose title names the issuer (message keys of T).
+TITLED_WITH_ISSUER = {
+    DocType.INVOICE,
+    DocType.CERTIFICATE,
+    DocType.INSURANCE_CERTIFICATE,
+    DocType.CONTRACT,
+    DocType.PAYMENT_NOTICE,
+    DocType.PAYMENT_SCHEDULE,
+    DocType.QUOTE,
+}
+# Yearly tax documents: the title gives the year.
+TITLED_WITH_YEAR = {DocType.PROPERTY_TAX, DocType.HOUSING_TAX, DocType.TAX_NOTICE}
+
+
 def detect_title(
     norm: str, category: Category, issuer: str | None, year: int | None, first_line: str = ""
 ) -> str:
-    base = detect_doc_type(norm)
-    if base is None:
-        # Document inconnu : sa première ligne (souvent l'en-tête de l'émetteur) parle mieux.
-        base = category.value if category != Category.AUTRE else first_line[:60] or "Document"
-    with_issuer = {
-        "Facture",
-        "Attestation",
-        "Attestation d'assurance",
-        "Contrat",
-        "Avis d'échéance",
-        "Échéancier",
-        "Devis",
-    }
-    if issuer and base in with_issuer:
-        base = f"{base} {issuer}"
-    elif base == "Devis" and first_line and "devis" not in normalize(first_line):
-        # Émetteur inconnu (artisan, garage) : son nom est en général en tête du document.
-        base = f"Devis {first_line[:50]}"
-    if year and base in {"Taxe foncière", "Taxe d'habitation", "Avis d'imposition"}:
-        base = f"{base} {year}"
-    return base
+    """Title in the current language: "EDF invoice" / "Facture EDF", "Property tax 2026"…"""
+    doc_type = detect_doc_type(norm)
+    if doc_type is None:
+        # Unknown document: its first line (often the issuer's letterhead) says more.
+        if category != Category.OTHER:
+            return i18n.category_label(category)
+        return first_line[:60] or T("untitled")
+    if issuer and doc_type in TITLED_WITH_ISSUER:
+        return T(doc_type.value, issuer=issuer)
+    if doc_type == DocType.QUOTE and first_line and "devis" not in normalize(first_line):
+        # Unknown issuer (craftsman, garage): its name usually heads the document.
+        return T("quote_from", name=first_line[:50])
+    label = i18n.doc_type_label(doc_type)
+    if year and doc_type in TITLED_WITH_YEAR:
+        return T("with_year", label=label, year=year)
+    return label
 
 
 def detect_issuer(norm: str) -> str | None:
     best: tuple[int, str] | None = None
-    for key, name in ISSUERS.items():
-        m = re.search(r"(?<![a-z])" + re.escape(key) + r"(?![a-z])", norm)
+    for key, pattern, name in _ISSUER_RES:
+        m = pattern.search(norm) if key in norm else None
         if m and (best is None or m.start() < best[0]):
             best = (m.start(), name)
     return best[1] if best else None
 
 
-# Documents sans montant ni échéance, quelle que soit leur catégorie.
-INFORMATIVE_TYPES = (
-    "Attestation",
-    "Relevé bancaire",
-    "Contrat",
-    "Devis",
-    "Carte grise",
-    "RIB",
-    "Bail",
-)
-# Documents dont la validité compte : sans date de fin, ils partent en vérification.
-EXPIRING_TYPES = (
-    "Carte d'identité",
-    "Passeport",
-    "Permis de conduire",
-    "Titre de séjour",
-    "Contrôle technique",
-)
+# Documents without amount or due date, whatever their category.
+INFORMATIVE_TYPES = {
+    DocType.CERTIFICATE,
+    DocType.INSURANCE_CERTIFICATE,
+    DocType.BANK_STATEMENT,
+    DocType.CONTRACT,
+    DocType.EMPLOYMENT_CONTRACT,
+    DocType.QUOTE,
+    DocType.VEHICLE_REGISTRATION,
+    DocType.BANK_DETAILS,
+    DocType.LEASE,
+}
+# Documents whose validity matters: without an end date, they go to review.
+EXPIRING_TYPES = {
+    DocType.IDENTITY_CARD,
+    DocType.PASSPORT,
+    DocType.DRIVING_LICENCE,
+    DocType.RESIDENCE_PERMIT,
+    DocType.ROADWORTHINESS_TEST,
+}
 
 
 def required_fields(category: Category, doc_type: str | None) -> list[str]:
     if doc_type in EXPIRING_TYPES:
         return ["expiry_date"]
-    if doc_type and doc_type.startswith(INFORMATIVE_TYPES):
+    if doc_type in INFORMATIVE_TYPES:
         return ["issue_date"]
     return REQUIRED_FIELDS[category]
 
@@ -453,12 +506,12 @@ def missing_for(category: Category, fields: dict[str, object]) -> list[str]:
     return [f for f in required if fields.get(f) in (None, "")]
 
 
-def detect_doc_type(norm: str) -> str | None:
-    return next((title for pattern, title in DOC_TYPES if re.search(pattern, norm)), None)
+def detect_doc_type(norm: str) -> DocType | None:
+    return next((doc_type for pattern, doc_type in DOC_TYPES if re.search(pattern, norm)), None)
 
 
 def extract(text: str) -> Extraction:
-    # NFKC défait les ligatures typographiques (« ﬁ ») fréquentes dans les PDF.
+    # NFKC undoes typographic ligatures ("ﬁ"), frequent in PDFs.
     text = unicodedata.normalize("NFKC", text)
     norm = normalize(text)
     original_lines = [line for line in text.replace("’", "'").splitlines() if line.strip()]
@@ -469,7 +522,7 @@ def extract(text: str) -> Extraction:
     expiry = _date_after_keyword(lines, EXPIRY_KEYWORDS)
     due = _date_after_keyword(lines, DUE_KEYWORDS)
     if due is not None and due == expiry:
-        # « Prochain contrôle à présenter avant le… » : une fin de validité, pas un paiement.
+        # "Prochain contrôle à présenter avant le…": an end of validity, not a payment.
         due = None
     issue = _date_after_keyword(lines, ISSUE_KEYWORDS)
     if issue is None:

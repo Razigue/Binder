@@ -1,42 +1,45 @@
 import { Link } from "react-router-dom"
-import { Bot, FolderInput, Mail, Sparkles, User } from "lucide-react"
+import { BookLock, Bot, FlaskConical, FolderInput, Mail, User } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useT } from "@/i18n"
+import type { Translate } from "@/i18n/core"
+import { activity } from "@/i18n/messages/activity"
 import type { Activity, Actor } from "@/lib/api"
+import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-const ACTORS: Record<Actor, { label: string; icon: typeof User; tone: string }> = {
-  user: { label: "Vous", icon: User, tone: "bg-slate-100 text-slate-600" },
-  binder: { label: "Binder", icon: Sparkles, tone: "bg-primary/10 text-primary" },
-  agent: { label: "Agent", icon: Bot, tone: "bg-violet-50 text-violet-600" },
-  watcher: { label: "Dossier surveillé", icon: FolderInput, tone: "bg-sky-50 text-sky-600" },
-  mail: { label: "Boîte mail", icon: Mail, tone: "bg-sky-50 text-sky-600" },
-  demo: { label: "Démonstration", icon: Sparkles, tone: "bg-slate-100 text-slate-500" },
+const ACTORS: Record<Actor, { icon: typeof User; tone: string }> = {
+  user: { icon: User, tone: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300" },
+  binder: { icon: BookLock, tone: "bg-primary/10 text-primary" },
+  agent: { icon: Bot, tone: "bg-primary/10 text-primary" },
+  watcher: { icon: FolderInput, tone: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
+  mail: { icon: Mail, tone: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
+  demo: { icon: FlaskConical, tone: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-300" },
 }
 
-const DAY = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-const TIME = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" })
-
-function dayLabel(date: Date): string {
+function dayLabel(iso: string, t: Translate<(typeof activity)["en"]>): string {
+  const date = new Date(iso)
   const today = new Date()
   const yesterday = new Date(today.getTime() - 86_400_000)
-  if (date.toDateString() === today.toDateString()) return "Aujourd'hui"
-  if (date.toDateString() === yesterday.toDateString()) return "Hier"
-  const label = DAY.format(date)
+  if (date.toDateString() === today.toDateString()) return t("today")
+  if (date.toDateString() === yesterday.toDateString()) return t("yesterday")
+  const label = formatDateTime(iso, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
   return label[0].toUpperCase() + label.slice(1)
 }
 
-/** Historique groupé par jour. `linkDocuments` ajoute un lien vers le document concerné. */
+/** Activity log grouped by day. `linkDocuments` links each entry to its document. */
 export function ActivityList({
   entries,
   loading,
   linkDocuments = true,
-  empty = "Aucune activité pour l'instant.",
+  empty,
 }: {
   entries?: Activity[]
   loading?: boolean
   linkDocuments?: boolean
   empty?: string
 }) {
+  const t = useT(activity)
   if (loading)
     return (
       <div className="space-y-2 p-4">
@@ -45,11 +48,11 @@ export function ActivityList({
         ))}
       </div>
     )
-  if (!entries?.length) return <p className="px-5 py-8 text-center text-sm text-muted-foreground">{empty}</p>
+  if (!entries?.length) return <p className="px-5 py-8 text-center text-sm text-muted-foreground">{empty ?? t("empty")}</p>
 
   const groups: { day: string; items: Activity[] }[] = []
   for (const entry of entries) {
-    const day = dayLabel(new Date(entry.created_at))
+    const day = dayLabel(entry.created_at, t)
     const last = groups.at(-1)
     if (last?.day === day) last.items.push(entry)
     else groups.push({ day, items: [entry] })
@@ -62,18 +65,25 @@ export function ActivityList({
           <h3 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">{g.day}</h3>
           <ul className="divide-y">
             {g.items.map((a) => {
-              const actor = ACTORS[a.actor] ?? ACTORS.binder
+              const actorKey: Actor = a.actor in ACTORS ? a.actor : "binder"
+              const actor = ACTORS[actorKey]
+              const actorLabel = t(`actor.${actorKey}`)
               const Icon = actor.icon
               const body = (
                 <>
-                  <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", actor.tone)} title={actor.label}>
+                  <span
+                    className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", actor.tone)}
+                    title={actorLabel}
+                  >
                     <Icon className="size-3.5" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm">{a.summary}</span>
-                    <span className="block text-xs text-muted-foreground">{actor.label}</span>
+                    <span className="block text-xs text-muted-foreground">{actorLabel}</span>
                   </span>
-                  <time className="shrink-0 text-xs text-muted-foreground tabular-nums">{TIME.format(new Date(a.created_at))}</time>
+                  <time className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {formatDateTime(a.created_at, { hour: "2-digit", minute: "2-digit" })}
+                  </time>
                 </>
               )
               const linkable = linkDocuments && a.document_id !== null && !["purge"].includes(a.action)
