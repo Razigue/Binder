@@ -96,7 +96,6 @@ export function Timeline({
       </Card>
     )
   }
-  if (deadlines.length === 0) return null
   const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + span)
   const tallest = Math.min(STACK, Math.max(1, ...stacks.map((s) => s.items.length)))
   const height = AXIS + DOT / 2 + (tallest - 1) * STEP + 10
