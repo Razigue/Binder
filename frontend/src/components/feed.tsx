@@ -95,8 +95,8 @@ export function FeedCard({ item }: { item: FeedItem }) {
   const [preview, setPreview] = useState(false)
   const Icon = KIND_ICON[item.kind]
   const tone = TONE_STYLE[item.tone]
-  // A question is a judgment call about a document: let the user read it before answering.
-  const previewable = item.kind === "question" && item.document_ids.length === 1
+  // Any card tied to a document can be read on the spot, without leaving Today.
+  const previewable = item.document_ids.length > 0
 
   return (
     <li className="flex gap-4 px-5 py-4">
@@ -133,7 +133,7 @@ export function FeedCard({ item }: { item: FeedItem }) {
           <div className="mt-3 flex flex-wrap gap-2">
             {previewable && (
               <Button size="sm" variant="outline" onClick={() => setPreview(true)}>
-                <EyeIcon /> {t("seeDocument")}
+                <EyeIcon /> {t("seeDocuments", { count: item.document_ids.length })}
               </Button>
             )}
             {item.actions.map((action, i) => {
@@ -161,12 +161,17 @@ export function FeedCard({ item }: { item: FeedItem }) {
               <DialogTitle className="text-base">{item.title}</DialogTitle>
               <DialogDescription className="sr-only">{item.title}</DialogDescription>
             </DialogHeader>
-            {/* White backing on purpose: it is a picture of a paper page, in both themes. */}
-            <img
-              src={previewUrl(item.document_ids[0])}
-              alt={item.title}
-              className="w-full rounded bg-white shadow-sm dark:brightness-[0.88]"
-            />
+            <div className="space-y-4">
+              {item.document_ids.map((id) => (
+                // White backing on purpose: it is a picture of a paper page, in both themes.
+                <img
+                  key={id}
+                  src={previewUrl(id)}
+                  alt={item.title}
+                  className="w-full rounded bg-white shadow-sm dark:brightness-[0.88]"
+                />
+              ))}
+            </div>
           </DialogContent>
         </Dialog>
       )}
