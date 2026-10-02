@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { VaultIcon, CheckCircleIcon, FlaskIcon, CircleNotchIcon, ArrowCounterClockwiseIcon, UploadSimpleIcon } from "@phosphor-icons/react"
+import { VaultIcon, CheckCircleIcon, FlaskIcon, CircleNotchIcon, ArrowCounterClockwiseIcon, UploadSimpleIcon, DeviceMobileIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AboutYou, answered, EssentialsList } from "@/components/essentials"
 import { FeedCard } from "@/components/feed"
 import { UpgradeOffer } from "@/components/upgrade"
 import { PageHeader } from "@/components/layout/AppLayout"
@@ -16,6 +17,7 @@ import { usePanels } from "@/components/panels"
 import { useUpload } from "@/components/upload"
 import { useFeed, useInvalidateAll, useProfile } from "@/hooks/queries"
 import { useT } from "@/i18n"
+import { essentials as essentialsMessages } from "@/i18n/messages/essentials"
 import { today } from "@/i18n/messages/today"
 import { api, type FeedItem, type SetupStatus } from "@/lib/api"
 import { formatSize, formatDate, toIso } from "@/lib/format"
@@ -149,29 +151,6 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
   )
 }
 
-function DropBar() {
-  const t = useT(today)
-  const { uploadFiles, open } = useUpload()
-  return (
-    <div
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault()
-        uploadFiles(e.dataTransfer.files)
-      }}
-      className="flex flex-wrap items-center justify-center gap-6 rounded-xl border-2 border-dashed bg-card/60 px-6 py-6 sm:justify-between"
-    >
-      <div className="flex-1 text-center">
-        <p className="flex items-center justify-center gap-2 text-sm font-medium">
-          <UploadSimpleIcon className="size-4" /> {t("dropHere")}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("dropHint")}</p>
-      </div>
-      <Button onClick={open}>{t("import")}</Button>
-    </div>
-  )
-}
-
 function Welcome({ setup }: { setup: SetupStatus }) {
   const t = useT(today)
   const invalidate = useInvalidateAll()
@@ -184,13 +163,45 @@ function Welcome({ setup }: { setup: SetupStatus }) {
       if (r.batch) panels.showReport(r.batch)
     },
   })
+  const te = useT(essentialsMessages)
+  const upload = useUpload()
+  const profile = useProfile()
+  // Three taps first, then the papers to have; skipping goes straight to them.
+  const [asking, setAsking] = useState<boolean | null>(null)
+  const ask = asking ?? (profile.data !== undefined && !answered(profile.data))
   return (
-    <>
+    <div className="mx-auto max-w-3xl">
       <PageHeader title={t("welcome")} subtitle={t("welcomeSubtitle")} />
       <SetupCard setup={setup} />
-      <DropBar />
-      <div className="mt-6 flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
-        <p>{t("noDocument")}</p>
+      {!profile.data ? (
+        <Skeleton className="h-64 w-full rounded-xl" />
+      ) : ask ? (
+        <section className="space-y-3">
+          <div>
+            <h2 className="font-semibold">{te("title")}</h2>
+            <p className="text-sm text-muted-foreground">{te("subtitle")}</p>
+          </div>
+          <AboutYou onDone={() => setAsking(false)} />
+        </section>
+      ) : (
+        <section className="space-y-4">
+          <div>
+            <h2 className="font-semibold">{te("papersTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{te("papersSubtitle")}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="lg" onClick={upload.scanWithPhone}>
+              <DeviceMobileIcon /> {te("scanFirst")}
+            </Button>
+            <Button size="lg" variant="outline" onClick={upload.open}>
+              <UploadSimpleIcon /> {te("chooseFile")}
+            </Button>
+          </div>
+          <EssentialsList onChange={() => setAsking(true)} />
+        </section>
+      )}
+      <div className="mt-8 flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
+        <p>{te("exploring")}</p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="outline" onClick={() => demo.mutate()} disabled={demo.isPending}>
             <FlaskIcon /> {demo.isPending ? t("demoLoading") : t("demo")}
@@ -201,7 +212,7 @@ function Welcome({ setup }: { setup: SetupStatus }) {
         </div>
       </div>
       <RestoreDialog open={restoring} onOpenChange={setRestoring} />
-    </>
+    </div>
   )
 }
 

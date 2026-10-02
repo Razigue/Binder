@@ -804,6 +804,7 @@ def _profile_payload(p: profile.Profile) -> dict[str, Any]:
     fields = {f: getattr(p, f) for f in profile.FIELDS}
     return {
         **{k: v for k, v in fields.items() if v},
+        **{k: v for k in profile.CHOICES if (v := getattr(p, k))},
         "about": p.notes.strip() or None,
         "unknown": [k for k, v in fields.items() if not v] or None,
     }

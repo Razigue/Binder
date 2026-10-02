@@ -346,6 +346,22 @@ export interface Folder {
   pieces: FolderPiece[]
 }
 
+export const SITUATIONS = ["student", "employee", "self_employed", "job_seeker", "retired"] as const
+export type Situation = (typeof SITUATIONS)[number]
+export const HOUSINGS = ["tenant", "owner", "hosted"] as const
+export type Housing = (typeof HOUSINGS)[number]
+
+/** A paper the user should have, for their profile, and whether Binder holds it. */
+export interface EssentialPaper {
+  key: string
+  area: Area
+  title: string
+  why: string
+  keep: string
+  present: boolean
+  document_id: number | null
+}
+
 export interface Profile {
   name: string
   address: string
@@ -354,6 +370,10 @@ export interface Profile {
   phone: string
   /** What the agent must know about the user, in their own words. */
   notes: string
+  /** The three answers of the first launch ("" while unanswered). */
+  situation?: Situation | ""
+  housing?: Housing | ""
+  vehicle?: "yes" | "no" | ""
   /** Fields Binder filled from the documents (it keeps them up to date until the user edits). */
   auto: string[]
 }
@@ -742,6 +762,7 @@ export const api = {
   reportSeen: (batch: string) => request<void>(`/reports/${encodeURIComponent(batch)}/seen`, { method: "POST" }),
   areas: () => request<AreaSummary[]>("/areas"),
   calendar: () => request<CalendarEntry[]>("/calendar"),
+  essentials: () => request<EssentialPaper[]>("/essentials"),
   household: () => request<Member[]>("/household"),
   sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
   prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),

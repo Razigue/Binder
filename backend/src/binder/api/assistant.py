@@ -25,6 +25,7 @@ from binder.services import (
     areas,
     backup,
     calendar,
+    essentials,
     feed,
     folders,
     household,
@@ -33,6 +34,7 @@ from binder.services import (
     llm_models,
     organize,
     preferences,
+    profile,
     questions,
     reports,
     setup,
@@ -271,6 +273,12 @@ def list_areas(session: SessionDep) -> list[AreaSummary]:
             )
         )
     return out
+
+
+@router.get("/essentials")
+def get_essentials(session: SessionDep) -> list[essentials.PaperOut]:
+    """The papers the user should have, from the three answers of the first launch."""
+    return essentials.papers(session, profile.load(session))
 
 
 @router.get("/calendar")

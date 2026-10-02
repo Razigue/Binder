@@ -12,7 +12,7 @@ choice, and what is left. One commit per step.
 | 3 | Navigation and To do | done |
 | 4 | My papers | done |
 | 5 | Life events (Démarches) | done |
-| 6 | First launch | to do |
+| 6 | First launch | done (not checked on screen) |
 | 7 | Glossary and accessibility | to do |
 
 ## Decisions
@@ -135,7 +135,22 @@ choice, and what is left. One commit per step.
   at the bottom.
 - **Removed**: `pages/Prepare.tsx`, the per-area `PrepareCard`, and their messages.
 
+### Step 6: first launch
+
+- **Answers** in the existing profile (`Profile.situation`, `housing`, `vehicle`, validated
+  against `profile.CHOICES`; additive JSON fields), given to the agent with the profile.
+- **Papers to have**: `services/essentials.py` (static table, i18n, works without the model),
+  `GET /api/essentials`: why, how long to keep, present or missing (missing first).
+- **Welcome screen**: three screens of one question, then the list with "Scan my first paper"
+  and "Choose a file"; demo and restore stay at the bottom. "Skip for now" goes to the list.
+- **Not done**: the visual check of these screens (usage limit), and a link to the list from My
+  papers once documents exist.
+
 ## Left to do
 
-- Steps 6 and 7.
+- Step 6: check the welcome screens on desktop and at 390 px; link to the list from My papers.
+- Step 7: glossary (tap a term for one sentence), "Print" / "Send by post" as main letter
+  actions, text size setting.
+- README / DESIGN for step 6.
+- `DocumentDetail`'s preview to reuse `DocumentPage`.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.
