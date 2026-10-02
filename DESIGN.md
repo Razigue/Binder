@@ -143,8 +143,11 @@ bottom bar of four 64px cells: the three places (icon over label) and a round na
 the agent opens from ＋ or Ctrl K. Content `px-4 pt-6 pb-28` mobile (room for the bottom bar),
 `px-8 py-8` desktop. Page header then content, `mb-7`. To do: a centred column (`max-w-3xl`),
 greeting and one-sentence summary, then one card per item, urgent first, the import report on
-top; empty state: a large green check and "All in order ✓". Prepare: tiles in a 2-3 column grid
-by section, "In progress" on the side when there is any. Settings: one section per row, title and
+top; empty state: a large green check and "All in order ✓". My papers: the area tiles, then
+search, person chips and the list; tabs Documents / Calendar / Archives. Life events: "In
+progress" on top when there is any, the eight life events as large rows in a 1-2-3 column grid
+(icon tile, title, one-line hint, chevron), each opening a dialog of its sub-actions (same rows,
+smaller), then "Other procedures" and the "Ask Binder" fallback. Settings: one section per row, title and
 description on the left (16-20rem), cards on the right.
 Grids: `sm:grid-cols-3` stats, `lg:grid-cols-2` sections, gaps 16-24px. Lists are full-width rows
 (`px-5 py-3`) divided by hairlines inside a card.

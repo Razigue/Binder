@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { CaretRightIcon, CheckCircleIcon, NotePencilIcon, ListChecksIcon, EnvelopeIcon, XIcon } from "@phosphor-icons/react"
@@ -36,8 +35,8 @@ export function useOngoing() {
   return { journeys, letters, count: journeys.length + letters.length }
 }
 
-/** The "In progress" card: on Today (a few rows and a link to the rest) and on Prepare (all). */
-export function Ongoing({ limit }: { limit?: number }) {
+/** The "In progress" card, on top of Life events. */
+export function Ongoing() {
   const t = useT(messages)
   const panels = usePanels()
   const { journeys, letters, count } = useOngoing()
@@ -45,16 +44,11 @@ export function Ongoing({ limit }: { limit?: number }) {
   const rows = [
     ...journeys.map((j) => <JourneyRow key={`j${j.id}`} journey={j} onOpen={() => panels.showJourney(j.id)} />),
     ...letters.map((l) => <LetterRow key={`l${l.id}`} letter={l} />),
-  ].slice(0, limit)
+  ]
   return (
     <Card className="gap-0 p-0">
-      <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-3">
+      <div className="px-5 pt-4 pb-3">
         <h2 className="font-semibold">{t("ongoing")}</h2>
-        {limit !== undefined && count > limit && (
-          <Link to="/procedures" className="text-sm font-medium text-primary hover:underline">
-            {t("seeAll")}
-          </Link>
-        )}
       </div>
       <ul className="divide-y border-t">{rows}</ul>
     </Card>

@@ -11,7 +11,7 @@ choice, and what is left. One commit per step.
 | 2 | Questions (filter, grouping, cap, panel with the document) | done |
 | 3 | Navigation and To do | done |
 | 4 | My papers | done |
-| 5 | Life events (Démarches) | to do |
+| 5 | Life events (Démarches) | done |
 | 6 | First launch | to do |
 | 7 | Glossary and accessibility | to do |
 
@@ -121,7 +121,21 @@ choice, and what is left. One commit per step.
   harmless) but the interface no longer calls it; the area's recurring bills are no longer shown
   in the interface (the agent still lists them: "How much do my subscriptions cost?").
 
+### Step 5: life events
+
+- **Frontend only**: the eight life events are groupings of what already exists (checklists,
+  letter kinds, file kinds, a question to the agent, adding a paper), defined in
+  `pages/Procedures.tsx`. No new backend: every sub-action already works without the model
+  (letter templates, folder rules, the journeys' own steps), and the questions go to the agent.
+  "I'm starting a job" and "I'm retiring" have no checklist of their own (none existed): a
+  file and a question to the agent stand in.
+- **Kept**: the checklists of the income tax return, the ID renewal and mortgage files, and any
+  other letter or file, under "Other procedures".
+- **In progress** sits on top of the page (it left To do in step 3); the finished letters stay
+  at the bottom.
+- **Removed**: `pages/Prepare.tsx`, the per-area `PrepareCard`, and their messages.
+
 ## Left to do
 
-- Steps 5 to 7.
+- Steps 6 and 7.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.

@@ -134,13 +134,18 @@ When nothing needs you, To do says **All in order ✓**.
 Binder also sends **system notifications** for urgent deadlines, anomalies, documents arriving
 by email and the weekly briefing, while it is open.
 
-**Prepare** gathers everything Binder does on request, in one page: life events, letters and
-files, each one tap away, and what it is following for you. Letters you sent show when Binder
-plans the reminder; once the date has passed, **Write a reminder** drafts it, and **I got an
-answer** closes the letter.
+**Life events** starts from what is happening to you: "I'm moving", "I'm starting a job", "We're
+having a child", "I'm retiring", "A loved one has died", "I got a letter I don't understand",
+"I want to stop a subscription", "I want to dispute a bill or a fine". Each one opens what
+Binder can do about it: a checklist, the letters, the files to put together, a question to ask.
+Other procedures (the income tax return, renewing an ID card, a mortgage file, any other letter
+or file) sit below. On top, **In progress** follows what is under way: checklists and letters
+(to send, awaiting an answer, to follow up). Letters you sent show when Binder plans the
+reminder; once the date has passed, **Write a reminder** drafts it, and **I got an answer**
+closes the letter.
 
-**Life events**: in **Prepare**, start "Moving house", "A birth", "Death of a relative" or "Income
-tax return". Binder builds the checklist from your own documents, each step with its deadline:
+**Checklists** ("Moving house", "A birth", "Death of a relative", "Income tax return"): Binder
+builds them from your own documents, each step with its deadline:
 the suppliers, bank and insurers to tell about a move (one tap writes each letter, and the step
 ticks itself once you mark the letter as sent), the time limits after a birth or a death, the
 donation and childcare receipts of the year with their total and the boxes to fill in. The next

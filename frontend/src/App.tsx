@@ -12,7 +12,7 @@ import { HomePage } from "@/pages/Home"
 
 // To do ships with the app; the other pages load on first visit.
 const PapersPage = lazy(() => import("@/pages/Papers").then((m) => ({ default: m.PapersPage })))
-const PreparePage = lazy(() => import("@/pages/Prepare").then((m) => ({ default: m.PreparePage })))
+const ProceduresPage = lazy(() => import("@/pages/Procedures").then((m) => ({ default: m.ProceduresPage })))
 const DocumentDetailPage = lazy(() => import("@/pages/DocumentDetail").then((m) => ({ default: m.DocumentDetailPage })))
 const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default: m.HistoryPage })))
 const SettingsPage = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.SettingsPage })))
@@ -40,7 +40,7 @@ export default function App() {
                   <Route element={<AppLayout />}>
                     <Route index element={<HomePage />} />
                     <Route path="papers" element={<PapersPage />} />
-                    <Route path="procedures" element={<PreparePage />} />
+                    <Route path="procedures" element={<ProceduresPage />} />
                     {/* Former addresses (activity log, agent answers, bookmarks). */}
                     <Route path="area/:area" element={<AreaRedirect />} />
                     <Route path="prepare" element={<Navigate to="/procedures" replace />} />
