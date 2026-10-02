@@ -13,7 +13,7 @@ from sqlmodel import Session, col, or_, select
 
 from binder import i18n, security
 from binder.config import get_settings
-from binder.db import get_engine, index_document, unindex_document
+from binder.db import get_engine, in_use, index_document, unindex_document
 from binder.models import (
     Activity,
     Category,
@@ -34,6 +34,7 @@ from binder.services import (
     llm,
     organize,
     profile,
+    relevance,
     rules,
     subscriptions,
     undo,
@@ -195,7 +196,7 @@ def _render_doubts(doubts: list[str], language: i18n.Language) -> str:
 
 i18n.register_param_renderer("ingest_doubts", _render_doubts)
 
-REVIEW_THRESHOLD = 0.6
+REVIEW_THRESHOLD = relevance.CONFIDENT
 # Pages of a scan shown to the model: administrative documents say what matters up front, and
 # the last page of a longer one is added (totals, signature).
 VISION_PAGES = 3
@@ -368,7 +369,10 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
     elif missing or doubts or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.OTHER:
-        doc.status = DocumentStatus.TO_REVIEW
+        # Only what changes something today is asked; the rest is filed as it is, the missing
+        # fields shown as not filled in.
+        asked = relevance.worth_asking(doc)
+        doc.status = DocumentStatus.TO_REVIEW if asked else DocumentStatus.CLASSIFIED
     else:
         doc.status = DocumentStatus.CLASSIFIED
     doc.updated_at = datetime.now(UTC)
@@ -445,8 +449,59 @@ def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadR
     if several_documents(read.pages):
         reading.append(verify.SEVERAL_DOCUMENTS)
     ext = merge(by_rules, by_llm, reading)
+    if by_llm is not None:
+        _read_again(data, mime_type, read, ext, images)
     ext.person = ext.person or household.detect(read.text)
     return read, ext
+
+
+def _read_again(
+    data: bytes, mime_type: str, read: ReadResult, ext: Extraction, images: list[bytes]
+) -> None:
+    """Before asking the user, the model reads the document a second time: a doubted value it
+    reads again the same way, from the other view of the page when it can (the image after the
+    text, or the text alone after the image), is settled. Only with the model: without it the
+    rules have nothing new to say."""
+    doubted = {d.partition(":")[2] for d in ext.doubts if d.partition(":")[2]}
+    if not doubted:
+        return
+    other = [] if images else _scan_pages(data, mime_type, read, any_pdf=True)
+    second = llm.extract(read.text, other)
+    if second is None:
+        return
+    second.doubts = verify.check(second, read.text, scanned=bool(other))
+    still = {d.partition(":")[2] for d in second.doubts if d.partition(":")[2]}
+    kept = []
+    for doubt in ext.doubts:
+        field = doubt.partition(":")[2]
+        value = getattr(ext, field, None) if field else None
+        if value is not None and field not in still and getattr(second, field, None) == value:
+            continue
+        kept.append(doubt)
+    if len(kept) == len(ext.doubts):
+        return
+    ext.doubts = kept
+    ext.confidence = verify.confidence(
+        ext.doubts, ext.missing_fields, known_category=ext.category != Category.OTHER
+    )
+
+
+def _same_source(session: Session, ext: Extraction) -> None:
+    """With the model, a document it could not place goes where the other documents of the
+    same sender are, when they all agree (compared before asking the user)."""
+    if ext.category != Category.OTHER or not ext.issuer or not llm.is_available():
+        return
+    rows = session.exec(
+        select(Document.category, Document.doc_type).where(
+            in_use(), Document.issuer == ext.issuer, Document.status == DocumentStatus.CLASSIFIED
+        )
+    ).all()
+    found = {category for category, _ in rows if category != Category.OTHER}
+    if len(found) == 1:
+        ext.category = Category(found.pop())
+        ext.doc_type = ext.doc_type or next((t for _, t in rows if t), None)
+        ext.missing_fields = rules.missing_for(ext.category, ext.model_dump())
+        ext.confidence = verify.confidence(ext.doubts, ext.missing_fields)
 
 
 def _link_own_letter(session: Session, doc: Document, data: bytes) -> None:
@@ -470,6 +525,7 @@ def analyze(session: Session, doc: Document) -> Document:
     doc.text = read.text
     doc.page_count = read.page_count
     learned = learning.apply(session, read.text, ext)
+    _same_source(session, ext)
     if not read.text.strip():
         ext.confidence = 0.0
         if ext.title == rules.T("untitled"):
@@ -511,12 +567,16 @@ def _archive_if_old(session: Session, doc: Document) -> None:
         archive.archive(session, doc, reason, actor="binder")
 
 
-def _scan_pages(data: bytes, mime_type: str, read: ReadResult) -> list[bytes]:
+def _scan_pages(
+    data: bytes, mime_type: str, read: ReadResult, *, any_pdf: bool = False
+) -> list[bytes]:
     """Pages to show to the model: those of a scan or photo, when it has vision.
 
     OCR loses the layout (which amount is the total, a stamp, a ticked box) or fails on a
-    skewed photo; the model reads the image itself. PDFs with text do not need it."""
-    if not (read.ocr_used or not read.text.strip()) or not llm.has_vision():
+    skewed photo; the model reads the image itself. PDFs with text do not need it, unless
+    `any_pdf` (a second reading, from the image)."""
+    scanned = read.ocr_used or not read.text.strip()
+    if not (scanned or any_pdf) or not llm.has_vision():
         return []
     return [page_image(data, mime_type, n) for n in vision_pages(read.page_count)]
 

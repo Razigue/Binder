@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from "@/components/ui/textarea"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { JourneyDialog } from "@/components/journey"
+import { QuestionsDialog, type QuestionsRequest } from "@/components/questions"
 import { useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { feed } from "@/i18n/messages/feed"
@@ -20,6 +21,8 @@ interface Panels {
   showLetter: (letter: Letter) => void
   showReport: (batch: string) => void
   showJourney: (id: number) => void
+  /** The question panel: every question, or those about these documents. */
+  showQuestions: (documentIds?: number[]) => void
 }
 
 const PanelsContext = createContext<Panels | null>(null)
@@ -39,11 +42,14 @@ export function PanelsProvider({ children }: { children: ReactNode }) {
   const showLetter = useCallback((l: Letter) => setLetter(l), [])
   const showReport = useCallback((b: string) => setBatch(b), [])
   const showJourney = useCallback((id: number) => setJourneyId(id), [])
+  const [asking, setAsking] = useState<QuestionsRequest | null>(null)
+  const showQuestions = useCallback((documentIds?: number[]) => setAsking({ documentIds }), [])
   const invalidate = useInvalidateAll()
 
   return (
-    <PanelsContext.Provider value={{ showLetter, showReport, showJourney }}>
+    <PanelsContext.Provider value={{ showLetter, showReport, showJourney, showQuestions }}>
       {children}
+      <QuestionsDialog request={asking} onClose={() => setAsking(null)} />
       <JourneyDialog id={journeyId} onClose={() => setJourneyId(null)} />
       <Dialog open={letter !== null} onOpenChange={(open) => !open && setLetter(null)}>
         <DialogContent className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">

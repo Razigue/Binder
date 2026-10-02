@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -31,6 +31,7 @@ from binder.services import (
     letters,
     llm_models,
     organize,
+    questions,
     reports,
     setup,
     sources,
@@ -103,6 +104,21 @@ def get_feed(session: SessionDep) -> FeedOut:
     session.commit()  # the recovery code is created on first use
     total = session.exec(select(func.count()).select_from(Document).where(in_use())).one()
     return FeedOut(items=items, documents=total, setup=setup.status())
+
+
+@router.get("/questions")
+def list_questions(
+    session: SessionDep,
+    documents: Annotated[list[int] | None, Query(max_length=500)] = None,
+) -> list[feed.FeedItem]:
+    """Every question worth asking, as cards (grouped, most useful first): the sorting
+    session goes through them one by one, the document next to each. `documents`: one
+    question per document, about these only (a grouped question seen in detail)."""
+    if documents:
+        found = questions.pending(session, group=False, ids=documents)
+    else:
+        found = questions.pending(session)
+    return [feed.question_item(q) for q in found]
 
 
 class ActionIn(BaseModel):

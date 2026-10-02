@@ -427,6 +427,8 @@ export interface FeedItem {
   kind:
     | "report" | "briefing" | "question" | "deadline" | "expiry" | "anomaly"
     | "missing" | "letter" | "suggestion" | "household" | "journey" | "waiting"
+    // "N more questions, whenever you like": opens the sorting session.
+    | "questions"
   tone: Tone
   title: string
   detail: string
@@ -728,6 +730,9 @@ export const api = {
   deleteLetter: (id: number) => request<void>(`/letters/${id}`, { method: "DELETE" }),
   letters: () => request<Letter[]>("/letters"),
   feed: () => request<Feed>("/feed"),
+  /** Every question worth asking (grouped), or one per document of `documents`. */
+  questions: (documents?: number[]) =>
+    request<FeedItem[]>(`/questions${documents?.length ? `?${documents.map((id) => `documents=${id}`).join("&")}` : ""}`),
   act: (action: Pick<FeedAction, "type" | "params">) =>
     request<ActResult>("/actions", json("POST", { type: action.type, params: action.params })),
   undo: (token: string) => request<void>(`/undo/${encodeURIComponent(token)}`, { method: "POST" }),

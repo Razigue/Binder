@@ -188,6 +188,31 @@ T = i18n.catalog(
         "journey_detail": {"en": "{journey} · {when}", "fr": "{journey} · {when}"},
         "see_steps": {"en": "See the steps", "fr": "Voir les étapes"},
         "act_step": {"en": "Done: {title}", "fr": "C'est fait : {title}"},
+        "more_questions_one": {
+            "en": "{n} more question, whenever you like",
+            "fr": "{n} autre question, quand vous voulez",
+        },
+        "more_questions_other": {
+            "en": "{n} more questions, whenever you like",
+            "fr": "{n} autres questions, quand vous voulez",
+        },
+        "more_questions_detail_one": {
+            "en": "About {n} document. Nothing urgent: Binder has filed it meanwhile.",
+            "fr": "Sur {n} document. Rien d'urgent : Binder l'a rangé en attendant.",
+        },
+        "more_questions_detail_other": {
+            "en": "About {n} documents. Nothing urgent: Binder has filed them meanwhile.",
+            "fr": "Sur {n} documents. Rien d'urgent : Binder les a rangés en attendant.",
+        },
+        "sort_now": {"en": "Answer them", "fr": "Y répondre"},
+        "act_answered_many_one": {
+            "en": "Answer saved for {n} document",
+            "fr": "Réponse enregistrée pour {n} document",
+        },
+        "act_answered_many_other": {
+            "en": "Answer saved for {n} documents",
+            "fr": "Réponse enregistrée pour {n} documents",
+        },
         "waiting_title_one": {
             "en": "{n} document is waiting for the local AI",
             "fr": "{n} document attend l'IA locale",
@@ -296,34 +321,60 @@ def _briefing(session: Session) -> list[FeedItem]:
     ]
 
 
-def _questions(session: Session) -> list[FeedItem]:
-    items = []
-    for q in questions.pending(session):
-        actions = []
-        for choice in q.choices:
-            if choice.id == "open":
-                opened = _open(q.document_id, choice.label)
-                actions.append(opened.model_copy(update={"primary": choice.primary}))
-            else:
-                actions.append(
-                    Action(
-                        type="answer",
-                        label=choice.label,
-                        primary=choice.primary,
-                        params={"document_id": q.document_id, "choice": choice.id},
-                    )
+def question_item(q: questions.Question) -> FeedItem:
+    """A question as a card: its answers as buttons; "open" and "detail" show the documents
+    next to the question (the interface's question panel)."""
+    actions = []
+    for choice in q.choices:
+        if choice.id in ("open", "detail"):
+            actions.append(
+                Action(
+                    type="ask",
+                    label=choice.label,
+                    primary=choice.primary,
+                    params={"document_ids": q.document_ids, "key": q.key},
                 )
+            )
+        else:
+            actions.append(
+                Action(
+                    type="answer",
+                    label=choice.label,
+                    primary=choice.primary,
+                    params={"document_ids": q.document_ids, "choice": choice.id},
+                )
+            )
+    return FeedItem(
+        key=q.key,
+        kind="question",
+        tone="soon",
+        title=q.title,
+        detail=q.detail,
+        category=q.category,
+        area=areas.BY_CATEGORY.get(q.category),
+        when=q.when,
+        document_ids=q.document_ids,
+        actions=actions,
+        extra={"field": q.field, "question": q.kind},
+    )
+
+
+def _questions(session: Session) -> list[FeedItem]:
+    """A few questions, the most useful first; the others wait for a sorting session."""
+    shown, rest = questions.visible(session)
+    items = [question_item(q) for q in shown]
+    if rest:
+        count = sum(len(q.document_ids) for q in rest)
         items.append(
             FeedItem(
-                key=q.key,
-                kind="question",
-                tone="soon",
-                title=q.title,
-                detail=q.detail,
-                category=q.category,
-                area=areas.BY_CATEGORY.get(q.category),
-                document_ids=[q.document_id],
-                actions=actions,
+                key="questions:more",
+                kind="questions",
+                tone="info",
+                title=T.plural("more_questions", len(rest)),
+                detail=T.plural("more_questions_detail", count),
+                document_ids=[],
+                actions=[Action(type="triage", label=T("sort_now"), primary=True)],
+                extra={"count": len(rest)},
             )
         )
     return items
@@ -822,11 +873,17 @@ def dismiss(session: Session, key: str) -> None:
 def act(session: Session, kind: str, params: dict[str, Any], *, actor: str = "user") -> ActResult:
     """Runs a server action of a feed card. Does not commit."""
     if kind == "answer":
-        doc = _doc(session, _int(params, "document_id"))
+        raw = params.get("document_ids") or [params.get("document_id")]
         try:
-            questions.answer(session, doc, str(params.get("choice", "")))
+            docs = [_doc(session, int(i)) for i in raw]
+        except (TypeError, ValueError) as e:
+            raise BadAction("document_ids") from e
+        try:
+            questions.answer_all(session, docs, str(params.get("choice", "")))
         except questions.UnknownChoice as e:
             raise BadAction("choice") from e
+        if len(docs) > 1:
+            return ActResult(message=T.plural("act_answered_many", len(docs)))
         return ActResult(message=T("act_answered"))
     if kind == "mark_paid":
         deadline = session.get(Deadline, _int(params, "deadline_id"))

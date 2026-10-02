@@ -95,10 +95,15 @@ Once a document is in, Binder:
 - keeps the latest version of a certificate or identity document and marks the older one as
   replaced, without deleting it. Payslips are all kept.
 
-When Binder is unsure, it asks **one short question** on the Today page, with the likely answers
-as buttons ("Where does this go?", "What is the amount?" with the amounts it saw). One tap and the
-document is filed. When you correct something yourself, Binder remembers it for the next
-documents from the same sender.
+When Binder is unsure, and only if the answer changes something today (a payment coming up, an
+identity card or a contract still valid, a bill it follows), it asks **one short question**,
+with the likely answers as buttons ("Where does this go?", "What is the amount?" with the
+amounts it saw). Open a question to answer it with the document beside it, the place Binder
+read highlighted. Old documents are never asked about, and a detail that has no effect is
+simply left "not filled in". The same question about several documents of one sender comes
+as one card ("These 6 Free bills go in Housing?"). At most three questions are shown at a
+time; the others wait, already filed, until you choose to answer them. When you correct
+something yourself, Binder remembers it for the next documents from the same sender.
 
 Photos and scans are read by the built-in text recognition (OCR), on your computer. With the
 local AI, Binder also looks at the page itself, like you would.

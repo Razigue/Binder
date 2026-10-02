@@ -8,7 +8,7 @@ choice, and what is left. One commit per step.
 | # | Step | State |
 |---|------|-------|
 | 1 | Archives + Archives tab | done |
-| 2 | Questions (filter, grouping, cap, panel with the document) | to do |
+| 2 | Questions (filter, grouping, cap, panel with the document) | done |
 | 3 | Navigation and To do | to do |
 | 4 | My papers | to do |
 | 5 | Life events (Démarches) | to do |
@@ -44,6 +44,43 @@ choice, and what is left. One commit per step.
   (the archive box now means archiving).
 - **Archives tab**: on the Documents page for now; it moves to My papers in step 4.
 
+### Step 2: questions
+
+- **Thresholds** (`services/relevance.py`, named constants): old = issued more than 730 days
+  ago with no date in the future, or a payment date passed for more than 90 days, or replaced,
+  or past its retention period. A missing field is asked only when it has an effect: the
+  amount when a payment is due within 90 days (or unpaid for less than 90 days) or the bill is
+  a recent recurring one (energy, telecom, insurance, housing: "a bill still followed"); the
+  payment date on a document of the last 90 days; the end date of an identity document,
+  insurance, vehicle paper or contract. The issue date, reference, sender and person are never
+  asked. Journeys and letters under way are not looked up for this (the document fields
+  decide alone): simpler, and those flows ask their own questions.
+- **Filed as it is**: a document with nothing worth asking is `classified` straight away; its
+  missing fields stay in `missing_fields` and show as "not filled in". The decision is taken
+  in `ingest.refresh_status`, so a correction re-evaluates it; `question_for` also re-checks
+  the age on every read, so a question disappears once the document gets old.
+- **Second reading** (model only): when the model's reading has doubts on fields, it reads the
+  document again, from the page image if the first reading was the text (and the other way
+  round); a value read the same way twice is no longer a doubt. A document it could not place
+  goes where the other documents of the same sender are, when they all agree. Without a model
+  nothing is read again (the rules have nothing new to say).
+- **Grouping**: same question kind and same sender, from 2 documents. An "where does it go"
+  group proposes the area of the sender's other documents when they agree ("These 3 documents
+  from Free go in Housing?" Yes / See one by one), otherwise the area buttons. Field groups
+  offer "See one by one" and "No amount" (etc.) for all. A grouped duplicate question only
+  removes the copies, never an original.
+- **Cap**: 3 question cards in the feed, most useful first (payment soon, then documents in
+  force, then duplicates, then the rest), and a "N more questions, whenever you like" card
+  that opens the sorting session (`GET /api/questions`).
+- **Panel**: every question card opens the panel (its "See the document" button, "Open",
+  "See one by one"); `GET /api/questions?documents=…` gives one question per document.
+  `DocumentPage` is the document page with the read places outlined; the document page's own
+  preview was left as it is (that file holds uncommitted changes of yours: the two will be
+  merged when they are committed).
+- **Import report**: unchanged summary ("19 documents filed · 2 questions…"), with fewer
+  questions; on the demo, 2 questions (garage quote, an EDF bill without a payment date).
+
 ## Left to do
 
-- Steps 2 to 7.
+- Steps 3 to 7.
+- `DocumentDetail`'s preview to reuse `DocumentPage`.

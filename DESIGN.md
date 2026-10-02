@@ -182,6 +182,10 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
   (the urgency in words), amount right-aligned, then its actions as buttons: one primary,
   outline for the others, ghost for dismiss.
+- **Question panel** (`components/questions.tsx`): a large dialog, one question per screen:
+  the document page (`DocumentPage`, the place Binder read highlighted) on the left, the
+  progress, question and full-width answer buttons on the right; stacked on a phone (document
+  on top, answers below). Ends on "All in order ✓".
 - **Undo:** every change ends with a Sonner toast carrying "Undo".
 - **Toasts:** Sonner. Destructive confirmations: `ConfirmDialog`.
 

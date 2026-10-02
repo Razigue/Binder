@@ -31,6 +31,7 @@ const KIND_ICON: Record<FeedItem["kind"], Icon> = {
   household: UsersIcon,
   journey: ListChecksIcon,
   waiting: HourglassIcon,
+  questions: QuestionIcon,
 }
 
 const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
@@ -77,6 +78,12 @@ export function useRunAction() {
       case "journey":
         panels.showJourney(Number(p.journey_id))
         return
+      case "ask":
+        panels.showQuestions((p.document_ids as number[] | undefined) ?? [])
+        return
+      case "triage":
+        panels.showQuestions()
+        return
       case "pdf":
         window.location.assign(String(p.url))
         return
@@ -92,6 +99,7 @@ export function useRunAction() {
 export function FeedCard({ item }: { item: FeedItem }) {
   const t = useT(feed)
   const { run, pending, isRunning } = useRunAction()
+  const panels = usePanels()
   const [preview, setPreview] = useState(false)
   const Icon = KIND_ICON[item.kind]
   const tone = TONE_STYLE[item.tone]
@@ -132,7 +140,12 @@ export function FeedCard({ item }: { item: FeedItem }) {
         {(previewable || item.actions.length > 0) && (
           <div className="mt-3 flex flex-wrap gap-2">
             {previewable && (
-              <Button size="sm" variant="outline" onClick={() => setPreview(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                // A question is answered looking at the document: the question panel.
+                onClick={() => (item.kind === "question" ? panels.showQuestions(item.document_ids) : setPreview(true))}
+              >
                 <EyeIcon /> {t("seeDocuments", { count: item.document_ids.length })}
               </Button>
             )}

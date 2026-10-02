@@ -97,7 +97,7 @@ def test_question_answered_in_one_tap(client: TestClient, demo: dict[str, Any]) 
     housing = next(a for a in question["actions"] if a["params"].get("choice") == "area:vehicle")
     r = client.post("/api/actions", json={"type": "answer", "params": housing["params"]})
     assert r.status_code == 200 and r.headers["X-Undo"]
-    doc = client.get(f"/api/documents/{housing['params']['document_id']}").json()
+    doc = client.get(f"/api/documents/{housing['params']['document_ids'][0]}").json()
     assert doc["category"] == "vehicle" and doc["area"] == "vehicle"
     assert doc["status"] == "classified"
     assert question["key"] not in {i["key"] for i in feed_items(client)}
