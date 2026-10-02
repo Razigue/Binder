@@ -273,7 +273,7 @@ def stamp_letter(data: bytes, letter_id: int) -> bytes:
             if k in ("title", "author", "subject", "keywords", "creator", "producer")
         }
         pdf.set_metadata({**meta, "keywords": f"binder-letter:{letter_id}"})
-        return pdf.tobytes()
+        return bytes(pdf.tobytes())
 
 
 def letter_marker(data: bytes) -> int | None:
