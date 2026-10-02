@@ -39,9 +39,7 @@ def get_engine() -> Engine:
     global _engine
     with _engine_lock:
         if _engine is None:
-            _engine = create_engine(
-                "sqlite://", creator=_connect, poolclass=QueuePool, pool_size=5
-            )
+            _engine = create_engine("sqlite://", creator=_connect, poolclass=QueuePool, pool_size=5)
             init_db(_engine)
         return _engine
 
