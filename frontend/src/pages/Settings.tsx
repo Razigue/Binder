@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CopyIcon, EraserIcon, FlaskIcon, FoldersIcon, KeyIcon, EnvelopeIcon, MonitorIcon, MoonIcon, ArrowsClockwiseIcon, SunIcon, CircleHalfIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
+import { CopyIcon, CpuIcon, EraserIcon, FlaskIcon, FoldersIcon, KeyIcon, EnvelopeIcon, MonitorIcon, MoonIcon, ArrowsClockwiseIcon, SunIcon, CircleHalfIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,8 +12,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { usePanels } from "@/components/panels"
 import { PageHeader } from "@/components/layout/AppLayout"
-import { useInvalidateAll } from "@/hooks/queries"
+import { UpgradeOffer } from "@/components/upgrade"
+import { useInvalidateAll, useModels } from "@/hooks/queries"
 import { useLocale, useT } from "@/i18n"
+import { localAi } from "@/i18n/messages/localAi"
 import { settings as messages } from "@/i18n/messages/settings"
 import { api, type ImportSettings, type Preferences, type PreferencesUpdate, type Profile, type Theme } from "@/lib/api"
 import { countryName, countryOptions } from "@/lib/countries"
@@ -27,6 +29,7 @@ const AUTO = "auto"
 
 export function SettingsPage() {
   const t = useT(messages)
+  const ai = useT(localAi)
   const imports = useQuery({ queryKey: ["import-settings"], queryFn: api.importSettings })
   const invalidate = useInvalidateAll()
   const run = useMutation({
@@ -75,6 +78,9 @@ export function SettingsPage() {
           ) : (
             <Skeleton className="h-64 w-full" />
           )}
+        </Section>
+        <Section title={ai("card.title")} description={ai("card.description")}>
+          <LocalAiCard />
         </Section>
         <Section title={t("security.title")} description={t("security.description")}>
           <RecoveryCard />
@@ -558,6 +564,41 @@ function RecoveryCard() {
         destructive={false}
         onConfirm={() => renew.mutateAsync()}
       />
+    </Card>
+  )
+}
+
+// --- Local AI: the model in use and the one this machine suits --------------------------------
+
+function LocalAiCard() {
+  const t = useT(localAi)
+  const models = useModels()
+  if (!models.data) return <Skeleton className="h-32 w-full" />
+  const data = models.data
+  if (!data.enabled) {
+    return (
+      <Card className="gap-5 p-6">
+        <CardHeading icon={CpuIcon} title={t("card.title")} description={t("card.disabled")} />
+      </Card>
+    )
+  }
+  return (
+    <Card className="gap-5 p-6">
+      <CardHeading icon={CpuIcon} title={t("card.title")} description={data.automatic ? t("card.automatic") : t("card.manual")} />
+      <dl className="grid gap-4 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-muted-foreground">{t("card.active")}</dt>
+          <dd className="font-medium">
+            {data.active_label}
+            {!data.active_installed && <span className="ml-2 font-normal text-muted-foreground">{t("card.notInstalled")}</span>}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("card.recommended")}</dt>
+          <dd className="font-medium">{data.recommended_label}</dd>
+        </div>
+      </dl>
+      {data.upgrade && <UpgradeOffer upgrade={data.upgrade} />}
     </Card>
   )
 }

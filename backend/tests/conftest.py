@@ -39,6 +39,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     websearch._seen.clear()
     for name in list(llm_models._downloads):
         llm_models.cancel_download(name)
+    # What a launch measured stays with that test.
+    llm_models._advice = llm_models._Advice()
     # A scan's analysis would otherwise write into the next test's database.
     scan.wait_for_analysis()
     llm.transport = updater.transport = None

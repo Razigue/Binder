@@ -1,8 +1,8 @@
 # Agent
 
-The agent answers and acts on the user's paperwork with a local model (Ollama, Qwen 3.5) and
-tools; a fallback intent router keeps demos and tests running without a model. Code: `agent/loop.py`
-(harness and router), `agent/tools.py` (tools).
+The agent answers and acts on the user's paperwork with a local model (Ollama, Qwen 3.5 or 3.6:
+see `models.md`) and tools; a fallback intent router keeps demos and tests running without a
+model. Code: `agent/loop.py` (harness and router), `agent/tools.py` (tools).
 
 ## Harness
 

@@ -362,6 +362,18 @@ class ModelOut(BaseModel):
     download: ModelDownload | None = None
 
 
+class ModelUpgrade(BaseModel):
+    """A better model for this machine, offered because Binder chose the active one."""
+
+    name: str
+    label: str
+    # Download size, in bytes.
+    size: int
+    # The user said yes: Binder switches to it once downloaded.
+    accepted: bool = False
+    download: ModelDownload | None = None
+
+
 class ModelsOverview(BaseModel):
     # False if BINDER_LLM_ENABLED=false.
     enabled: bool
@@ -370,6 +382,13 @@ class ModelsOverview(BaseModel):
     ollama_url: str
     active: str
     active_installed: bool
+    active_label: str = ""
+    # Best model for this machine, measured at this launch.
+    recommended: str = ""
+    recommended_label: str = ""
+    # The active model was picked by Binder (upgrades offered), not by the user.
+    automatic: bool = True
+    upgrade: ModelUpgrade | None = None
     models: list[ModelOut]
 
 

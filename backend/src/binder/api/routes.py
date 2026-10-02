@@ -854,6 +854,27 @@ def choose_model(body: ModelChoice, session: SessionDep) -> ModelsOverview:
     return llm_models.overview()
 
 
+@router.post("/llm/upgrade", status_code=202)
+def accept_model_upgrade() -> ModelsOverview:
+    """Downloads the better model offered; Binder switches to it once it is ready."""
+    try:
+        llm_models.accept_upgrade()
+    except llm_models.UnknownModel as e:
+        raise HTTPException(409, str(e)) from e
+    return llm_models.overview()
+
+
+@router.post("/llm/upgrade/decline")
+def decline_model_upgrade(session: SessionDep) -> ModelsOverview:
+    """Not offered again until the recommendation changes."""
+    try:
+        llm_models.decline_upgrade(session)
+    except llm_models.UnknownModel as e:
+        raise HTTPException(409, str(e)) from e
+    session.commit()
+    return llm_models.overview()
+
+
 @router.post("/llm/models/{name}/download", status_code=202)
 def download_model(name: str) -> ModelsOverview:
     try:

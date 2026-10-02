@@ -174,8 +174,8 @@ def test_downloads_run_one_at_a_time(client: TestClient, ollama: FakeOllama) -> 
     # No deletion during a download (Ollama shares layers between models).
     r = client.delete("/api/llm/models/qwen3:14b")
     assert r.status_code == 404
-    ollama.models["qwen3.5:27b"] = 17 * GB
-    assert client.delete("/api/llm/models/qwen3.5:27b").status_code == 409
+    ollama.models["qwen3.6:27b"] = 17 * GB
+    assert client.delete("/api/llm/models/qwen3.6:27b").status_code == 409
 
     ollama.gate.set()
     llm_models.wait("qwen3.5:2b")
@@ -183,7 +183,7 @@ def test_downloads_run_one_at_a_time(client: TestClient, ollama: FakeOllama) -> 
     data = client.get("/api/llm").json()
     assert by_name(data, "qwen3.5:2b")["installed"] and by_name(data, "qwen3.5:4b")["installed"]
     assert not by_name(data, "qwen3.5:9b")["installed"]
-    assert client.delete("/api/llm/models/qwen3.5:27b").status_code == 204
+    assert client.delete("/api/llm/models/qwen3.6:27b").status_code == 204
 
 
 def test_ollama_refuses_deletion(client: TestClient, ollama: FakeOllama) -> None:
@@ -208,13 +208,13 @@ def test_layers_are_summed() -> None:
 
 def test_cancel_download(client: TestClient, ollama: FakeOllama) -> None:
     ollama.gate = threading.Event()
-    client.post("/api/llm/models/qwen3.5:27b/download")
-    thread = llm_models._downloads["qwen3.5:27b"].thread
-    assert client.delete("/api/llm/models/qwen3.5:27b/download").status_code == 204
+    client.post("/api/llm/models/qwen3.6:27b/download")
+    thread = llm_models._downloads["qwen3.6:27b"].thread
+    assert client.delete("/api/llm/models/qwen3.6:27b/download").status_code == 204
     ollama.gate.set()
     assert thread is not None
     thread.join(5)
-    model = by_name(client.get("/api/llm").json(), "qwen3.5:27b")
+    model = by_name(client.get("/api/llm").json(), "qwen3.6:27b")
     assert model["download"] is None and model["installed"] is False
 
 
@@ -264,6 +264,6 @@ def test_catalog_follows_the_language(client: TestClient, ollama: FakeOllama) ->
     assert client.put("/api/preferences", json=prefs).status_code == 200
     data = client.get("/api/llm").json()
     assert by_name(data, "qwen3:14b")["description"] == "Installé hors de Binder."
-    assert by_name(data, "qwen3.5:9b")["description"].startswith("Le plus fiable")
+    assert by_name(data, "qwen3.5:9b")["description"].startswith("Fiable pour lire")
     r = client.put("/api/llm/model", json={"name": "qwen3.5:9b"})
     assert r.json()["detail"] == "Modèle non installé : qwen3.5:9b"

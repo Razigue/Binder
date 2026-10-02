@@ -120,9 +120,19 @@ export function useFeed() {
     queryKey: feedKey,
     queryFn: api.feed,
     refetchInterval: (q) => {
-      const phase = q.state.data?.setup.phase
-      return phase && phase !== "ready" && phase !== "disabled" ? 2000 : 30_000
+      const setup = q.state.data?.setup
+      const installing = setup && setup.phase !== "ready" && setup.phase !== "disabled"
+      return installing || setup?.upgrade?.accepted ? 2000 : 30_000
     },
+  })
+}
+
+/** The local AI models; refreshed while an accepted upgrade downloads. */
+export function useModels() {
+  return useQuery({
+    queryKey: ["models"],
+    queryFn: api.models,
+    refetchInterval: (q) => (q.state.data?.upgrade?.accepted ? 2000 : false),
   })
 }
 

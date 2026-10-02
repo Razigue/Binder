@@ -25,7 +25,8 @@ _capabilities: dict[str, set[str]] = {}
 AVAILABILITY_TTL = 30.0
 MAX_CHARS = 8000
 # First Ollama release that runs the Qwen 3.5 small models (2B to 9B) Binder offers, with the
-# fixes for their tool calls and repetitions (0.17.5 release notes).
+# fixes for their tool calls and repetitions (0.17.5 release notes). Larger models may need a
+# newer one: llm_models.CatalogEntry.min_ollama.
 MIN_OLLAMA_VERSION = "0.17.5"
 
 # Token estimate before sending: conservative (measured with qwen3.5:9b: ~3.6 characters per
@@ -236,7 +237,7 @@ def capabilities() -> set[str]:
 
 
 def has_vision() -> bool:
-    """The active model reads images (Qwen 3.5 does) and vision is enabled."""
+    """The active model reads images (every Qwen of the catalogue does) and vision is enabled."""
     return get_settings().llm_vision and is_available() and "vision" in capabilities()
 
 
@@ -308,11 +309,11 @@ def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(n) for n in re.findall(r"\d+", version.split("-")[0])[:3])
 
 
-def outdated_ollama(version: str | None) -> bool:
-    """An Ollama older than MIN_OLLAMA_VERSION (unknown versions are not judged)."""
+def outdated_ollama(version: str | None, minimum: str = MIN_OLLAMA_VERSION) -> bool:
+    """An Ollama older than `minimum` (unknown versions are not judged)."""
     if not version or not _version_tuple(version):
         return False
-    return _version_tuple(version) < _version_tuple(MIN_OLLAMA_VERSION)
+    return _version_tuple(version) < _version_tuple(minimum)
 
 
 def estimate_tokens(

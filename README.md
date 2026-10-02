@@ -205,6 +205,25 @@ that sender.
 **Can I undo something?** Yes: right after any action, click **Undo**. A document in the
 **Trash** can be restored as long as you have not deleted it permanently.
 
+**Which AI model will my computer get?** The best one it runs comfortably:
+
+| Your computer | Model |
+| --- | --- |
+| Graphics card with 20 GB or more, or a Mac with 48 GB or more | Qwen 3.6 · 27B (18 GB download) |
+| 32 GB of memory or more, counting the graphics card's (a Mac: its memory) | Qwen 3.6 · 35B-A3B (23 GB) |
+| Graphics card with 8 GB, or 16 GB of memory | Qwen 3.5 · 9B (6.6 GB) |
+| 10 to 16 GB of memory | Qwen 3.5 · 4B (3.4 GB) |
+| Less | Qwen 3.5 · 2B (2.7 GB) |
+
+The 35B-A3B only puts about 3 billion of its 35 billion parameters to work on each word, so it
+stays fast even without a graphics card. Short on disk space, Binder takes the next model down.
+At each launch Binder checks your computer again: if you added memory or a graphics card, it
+offers a better model on the **Today** page, with its download size, and switches once it is
+downloaded (the previous one stays installed). Say **No thanks** and it will not ask again
+unless an even better model suits your computer. Binder never moves you to a smaller model on
+its own: it only warns you if the model in use has become too heavy. **Settings > Local AI**
+shows the model in use and the one best suited to your computer.
+
 **Would a less compressed model read better?** The models Binder downloads are quantized to
 4 bits (Q4), the best trade-off for most computers. To measure what an 8-bit version (Q8) would
 change on your machine, from the `backend` folder of the source code (a Q8 tag of the model,
@@ -222,4 +241,5 @@ to measure on your own annotated documents (see [docs/evaluation.md](docs/evalua
 ---
 
 Developers: see [docs/development.md](docs/development.md),
-[docs/configuration.md](docs/configuration.md) and [docs/release.md](docs/release.md).
+[docs/configuration.md](docs/configuration.md), [docs/models.md](docs/models.md) and
+[docs/release.md](docs/release.md).

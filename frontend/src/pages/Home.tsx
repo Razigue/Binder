@@ -15,6 +15,7 @@ import { FeedCard } from "@/components/feed"
 import { Ongoing } from "@/components/ongoing"
 import { Timeline } from "@/components/timeline"
 import { Upcoming } from "@/components/upcoming"
+import { UpgradeOffer } from "@/components/upgrade"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { usePanels } from "@/components/panels"
 import { useUpload } from "@/components/upload"
@@ -207,12 +208,21 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
   const t = useT(today)
   const invalidate = useInvalidateAll()
   const retry = useMutation({ mutationFn: api.retrySetup, onSuccess: invalidate })
-  if (setup.phase === "ready" && setup.warning) {
+  if (setup.phase === "ready" && (setup.warning || setup.upgrade)) {
     return (
-      <Card className="mb-6 flex-row items-start gap-3 p-5">
-        <VaultIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{setup.warning}</p>
-      </Card>
+      <>
+        {setup.upgrade && (
+          <Card className="mb-6 p-5">
+            <UpgradeOffer upgrade={setup.upgrade} />
+          </Card>
+        )}
+        {setup.warning && (
+          <Card className="mb-6 flex-row items-start gap-3 p-5">
+            <VaultIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{setup.warning}</p>
+          </Card>
+        )}
+      </>
     )
   }
   if (setup.phase === "ready" || setup.phase === "disabled") return null

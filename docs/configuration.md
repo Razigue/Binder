@@ -37,8 +37,8 @@ Default data folder: `~/.local/share/binder` (Linux, or `$XDG_DATA_HOME/binder`)
 PDFs with text are read directly. Photos and scans go through RapidOCR (PP-OCRv6 on ONNX
 Runtime), a regular dependency: its models ship inside the wheel and the desktop build, nothing
 is downloaded at runtime. docTR or Tesseract are used instead only if RapidOCR cannot be
-imported. With a vision model (Qwen 3.5), the pages of a scan are also shown to the model, which
-reads what OCR misses; a page OCR cannot read at all is transcribed by the model.
+imported. With a vision model (every Qwen Binder offers), the pages of a scan are also shown to
+the model, which reads what OCR misses; a page OCR cannot read at all is transcribed by it.
 
 ## Local AI setup
 
@@ -63,11 +63,16 @@ which the user never has to know about:
   over at the next launch. Upgrading Ollama: change `OLLAMA_VERSION` and the checksums (from the
   release's `sha256sum.txt`).
 
+- **Tuned for memory**: the Ollama Binder starts gets `OLLAMA_FLASH_ATTENTION=1` and
+  `OLLAMA_KV_CACHE_TYPE=q8_0` (an 8-bit context cache, half the memory), unless the environment
+  already sets them.
+
 With `BINDER_OLLAMA_URL` set, that server is used as it is (started if local and not answering,
 with the user's own models). Binder then downloads the chat model that fits the machine (memory,
-NVIDIA card through `nvidia-smi`, free disk) and the embedding model. `GET /api/setup` reports
-the progress shown on Today. These downloads and the update check are the only outbound traffic;
-nothing about the documents leaves the machine.
+NVIDIA card through `nvidia-smi`, free disk, Ollama version) and the embedding model. The machine
+is measured again at each launch: see [models.md](models.md) for the ladder and the upgrade
+offer. `GET /api/setup` reports the progress shown on Today. These downloads and the update check
+are the only outbound traffic; nothing about the documents leaves the machine.
 
 ## Backups
 

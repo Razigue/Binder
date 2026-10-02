@@ -160,12 +160,30 @@ export interface LocalModel {
   download: ModelDownload | null
 }
 
+/** A better model for this machine, offered because Binder chose the active one. */
+export interface ModelUpgrade {
+  name: string
+  label: string
+  /** Download size, in bytes. */
+  size: number
+  /** The user said yes: Binder switches to it once downloaded. */
+  accepted: boolean
+  download: ModelDownload | null
+}
+
 export interface ModelsOverview {
   enabled: boolean
   ollama: boolean
   ollama_url: string
   active: string
   active_installed: boolean
+  active_label: string
+  /** Best model for this machine, measured at this launch. */
+  recommended: string
+  recommended_label: string
+  /** The active model was picked by Binder (upgrades offered), not by the user. */
+  automatic: boolean
+  upgrade: ModelUpgrade | null
   models: LocalModel[]
 }
 
@@ -474,8 +492,10 @@ export interface SetupStatus {
   total: number
   model: string | null
   error: string | null
-  /** Works, but not as well as it should (an outdated Ollama). Localized. */
+  /** Works, but not as well as it should (an outdated Ollama, a model too heavy). Localized. */
   warning?: string | null
+  /** A better model for this machine, offered (never downloaded without a yes). */
+  upgrade?: ModelUpgrade | null
 }
 
 export interface Feed {
@@ -744,6 +764,8 @@ export const api = {
   runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),
   models: () => request<ModelsOverview>("/llm"),
   chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
+  acceptUpgrade: () => request<ModelsOverview>("/llm/upgrade", { method: "POST" }),
+  declineUpgrade: () => request<ModelsOverview>("/llm/upgrade/decline", { method: "POST" }),
   downloadModel: (name: string) =>
     request<ModelsOverview>(`/llm/models/${encodeURIComponent(name)}/download`, { method: "POST" }),
   cancelDownload: (name: string) =>

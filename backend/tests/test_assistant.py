@@ -493,15 +493,8 @@ def test_backup_runs_once_a_day_when_something_changed(
 # --- Local AI setup -------------------------------------------------------------------------
 
 
-def test_model_suits_the_machine() -> None:
-    gb = setup.GB
-    assert setup.pick_model(8 * gb, 0, 500 * gb) == "qwen3.5:2b"
-    assert setup.pick_model(12 * gb, 0, 500 * gb) == "qwen3.5:4b"
-    assert setup.pick_model(16 * gb, 0, 500 * gb) == "qwen3.5:9b"
-    assert setup.pick_model(32 * gb, 24 * gb, 500 * gb) == "qwen3.5:27b"
-    # Not enough room for the 9B: the next smaller one.
-    assert setup.pick_model(16 * gb, 0, 5 * gb) == "qwen3.5:4b"
-    assert setup.pick_model(16 * gb, 0, 1 * gb) is None
+def test_ollama_archive_suits_the_system() -> None:
+    # The model for each machine: test_model_choice.py.
     assert setup.asset_name("linux", "x86_64") == "ollama-linux-amd64.tar.zst"
     assert setup.asset_name("win32", "amd64") == "ollama-windows-amd64.zip"
     assert setup.asset_name("darwin", "arm64") == "ollama-darwin.tgz"

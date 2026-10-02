@@ -1,7 +1,9 @@
 """Local models: Qwen catalogue, choice of the active model and download through Ollama.
 
-No model ships with Binder: the user downloads the one that suits their machine from the
-settings. The download runs in the background; the interface follows its progress.
+No model ships with Binder: at launch, setup.py picks the best one the machine runs and downloads
+it. The download runs in the background; the interface follows its progress. Each launch measures
+the machine again: when Binder chose the model and a better one now suits the machine, the
+upgrade is offered (never downloaded silently, never a downgrade). docs/models.md: adding one.
 """
 
 import json
@@ -16,7 +18,7 @@ from sqlmodel import Session
 from binder import i18n
 from binder.config import get_settings
 from binder.db import get_engine
-from binder.schemas import ModelDownload, ModelOut, ModelsOverview
+from binder.schemas import ModelDownload, ModelOut, ModelsOverview, ModelUpgrade
 from binder.services import activity, embeddings, llm, settings_store
 
 log = logging.getLogger(__name__)
@@ -26,6 +28,12 @@ KEY = "llm"
 T = i18n.catalog(
     "llm_models",
     {
+        "label_2b": {"en": "Qwen 3.5 · 2B", "fr": "Qwen 3.5 · 2B"},
+        "label_4b": {"en": "Qwen 3.5 · 4B", "fr": "Qwen 3.5 · 4B"},
+        "label_9b": {"en": "Qwen 3.5 · 9B", "fr": "Qwen 3.5 · 9B"},
+        "label_35b_a3b": {"en": "Qwen 3.6 · 35B-A3B", "fr": "Qwen 3.6 · 35B-A3B"},
+        "label_27b": {"en": "Qwen 3.6 · 27B", "fr": "Qwen 3.6 · 27B"},
+        "label_embed": {"en": "Qwen 3 Embedding · 0.6B", "fr": "Qwen 3 Embedding · 0.6B"},
         "desc_2b": {
             "en": "Very light, for a modest computer (8 GB of memory). Less reliable extraction.",
             "fr": "Très léger, pour un ordinateur modeste (8 Go de mémoire). Extraction moins "
@@ -36,13 +44,23 @@ T = i18n.catalog(
             "fr": "Bon compromis pour un portable récent (8 à 16 Go de mémoire).",
         },
         "desc_9b": {
-            "en": "The most reliable for reading your documents day to day (16 GB of memory).",
-            "fr": "Le plus fiable pour lire vos documents au quotidien (16 Go de mémoire).",
+            "en": "Reliable for reading your documents day to day (16 GB of memory, or a "
+            "graphics card with 8 GB).",
+            "fr": "Fiable pour lire vos documents au quotidien (16 Go de mémoire, ou carte "
+            "graphique de 8 Go).",
+        },
+        "desc_35b_a3b": {
+            "en": "More accurate and still fast: only 3B of its 35B parameters work on each "
+            "word. 32 GB of memory, with or without a graphics card.",
+            "fr": "Plus précis et toujours rapide : seuls 3 milliards de ses 35 milliards de "
+            "paramètres travaillent à chaque mot. 32 Go de mémoire, avec ou sans carte "
+            "graphique.",
         },
         "desc_27b": {
-            "en": "The most accurate, for a powerful machine (32 GB of memory or a graphics card).",
-            "fr": "Le plus précis, pour une machine puissante (32 Go de mémoire ou carte "
-            "graphique).",
+            "en": "The most accurate, for a powerful machine (a graphics card with 20 GB, or a "
+            "Mac with 48 GB).",
+            "fr": "Le plus précis, pour une machine puissante (carte graphique de 20 Go, ou Mac "
+            "de 48 Go).",
         },
         "desc_embed": {
             "en": "Smart search: finds documents by meaning, not only by their words "
@@ -73,6 +91,15 @@ T = i18n.catalog(
         "chosen": {"en": "Local AI model: {label}", "fr": "Modèle d'IA locale : {label}"},
         "removed": {"en": "Model {label} deleted", "fr": "Modèle {label} supprimé"},
         "downloaded": {"en": "Model {label} downloaded", "fr": "Modèle {label} téléchargé"},
+        "upgraded": {
+            "en": "Local AI upgraded: {old} → {new} (the former model stays installed)",
+            "fr": "IA locale améliorée : {old} → {new} (l'ancien modèle reste installé)",
+        },
+        "upgrade_declined": {
+            "en": "Upgrade to {label} declined",
+            "fr": "Passage à {label} refusé",
+        },
+        "no_upgrade": {"en": "No upgrade to offer", "fr": "Aucune amélioration à proposer"},
     },
 )
 
@@ -80,57 +107,56 @@ T = i18n.catalog(
 class LlmConfig(BaseModel):
     # None: the configured model (BINDER_LLM_MODEL).
     model: str | None = None
+    # Picked by Binder for this machine, not by the user: only such a choice is upgraded. True
+    # for settings saved before the field existed, when Binder made the choice.
+    auto: bool = True
+    # Upgrade the user turned down: offered again only once the recommendation changes.
+    declined: str | None = None
 
 
 @dataclass(frozen=True)
 class CatalogEntry:
     name: str
-    label: str
+    label: str  # message key in T
     description: str  # message key in T, rendered in the current language
     size: int  # download size, in bytes
-    recommended: bool = False
+    # Quality, higher is better: decides upgrades. Chat models only (0 for the embedding).
+    rank: int = 0
     # "chat" (reads documents, answers) or "embedding" (semantic search, always used if
     # installed, never the active model).
     kind: str = "chat"
+    # Oldest Ollama that runs it ("requires" in the tag's config on registry.ollama.ai).
+    min_ollama: str = llm.MIN_OLLAMA_VERSION
 
 
 GB = 1_000_000_000
+# Sizes: the tag's layers on registry.ollama.ai (weights and vision projector). Every chat model
+# reads images and calls tools.
 CATALOG = [
+    CatalogEntry("qwen3.5:2b", "label_2b", "desc_2b", int(2.7 * GB), rank=1),
+    CatalogEntry("qwen3.5:4b", "label_4b", "desc_4b", int(3.4 * GB), rank=2),
+    CatalogEntry("qwen3.5:9b", "label_9b", "desc_9b", int(6.6 * GB), rank=3),
+    # Mixture of experts: ~3B parameters active per token, so it stays fast with most of its
+    # weights in RAM (Ollama keeps there what the graphics card cannot hold).
     CatalogEntry(
-        "qwen3.5:2b",
-        "Qwen 3.5 · 2B",
-        "desc_2b",
-        int(2.7 * GB),
+        "qwen3.6:35b-a3b",
+        "label_35b_a3b",
+        "desc_35b_a3b",
+        int(22.6 * GB),
+        rank=4,
+        min_ollama="0.30.0",
+    ),
+    # Dense: every parameter works on every token. The most accurate; fast on a large GPU only.
+    CatalogEntry(
+        "qwen3.6:27b", "label_27b", "desc_27b", int(17.8 * GB), rank=5, min_ollama="0.30.0"
     ),
     CatalogEntry(
-        "qwen3.5:4b",
-        "Qwen 3.5 · 4B",
-        "desc_4b",
-        int(3.4 * GB),
-    ),
-    CatalogEntry(
-        "qwen3.5:9b",
-        "Qwen 3.5 · 9B",
-        "desc_9b",
-        int(6.6 * GB),
-        recommended=True,
-    ),
-    CatalogEntry(
-        "qwen3.5:27b",
-        "Qwen 3.5 · 27B",
-        "desc_27b",
-        17 * GB,
-    ),
-    CatalogEntry(
-        "qwen3-embedding:0.6b",
-        "Qwen 3 Embedding · 0.6B",
-        "desc_embed",
-        int(0.64 * GB),
-        recommended=True,
-        kind="embedding",
+        "qwen3-embedding:0.6b", "label_embed", "desc_embed", int(0.64 * GB), kind="embedding"
     ),
 ]
 BY_NAME = {e.name: e for e in CATALOG}
+# Chat models, from the weakest to the best.
+CHAT = sorted((e for e in CATALOG if e.kind == "chat"), key=lambda e: e.rank)
 
 
 class UnknownModel(ValueError):
@@ -141,12 +167,111 @@ class Busy(RuntimeError):
     pass
 
 
+@dataclass
+class _Advice:
+    """What this launch found about the machine (measured again at each launch)."""
+
+    # Best model for the machine; None until measured, or when nothing fits the disk.
+    recommended: str | None = None
+    # Better model offered to the user, waiting for their answer.
+    upgrade: str | None = None
+    # Upgrade accepted: Binder switches to it as soon as its download ends.
+    accepted: str | None = None
+    # The active model was picked by Binder, not by the user.
+    automatic: bool = True
+
+
+_advice = _Advice()
+
+
+def rank(name: str) -> int:
+    """Quality rank of a catalogue chat model; 0 for any other (never compared)."""
+    entry = BY_NAME.get(name.removesuffix(":latest"))
+    return entry.rank if entry else 0
+
+
+def _automatic(config: LlmConfig) -> bool:
+    # BINDER_LLM_MODEL set by hand is the user's choice too.
+    return config.auto and (
+        config.model is not None or "llm_model" not in get_settings().model_fields_set
+    )
+
+
 # --- Model choice -----------------------------------------------------------------------
 
 
 def restore(session: Session) -> None:
     """Reapplies at startup the model chosen in the settings."""
-    llm.select(settings_store.load(session, KEY, LlmConfig).model)
+    config = settings_store.load(session, KEY, LlmConfig)
+    _advice.automatic = _automatic(config)
+    llm.select(config.model)
+
+
+def advise(session: Session, recommended: str | None, fits: str | None) -> bool:
+    """Called at each launch with the best model for the machine as measured now.
+
+    `fits`: the best model its memory runs, disk aside (None: memory unknown). Offers an upgrade
+    when Binder chose the active model and a better one is recommended, unless the user declined
+    that very one. Never downgrades: True when the active model is now too heavy (a warning).
+    """
+    config = settings_store.load(session, KEY, LlmConfig)
+    active = llm.model()
+    _advice.recommended, _advice.upgrade = recommended, None
+    _advice.automatic = _automatic(config)
+    if not _advice.automatic or not rank(active):
+        return False
+    if recommended and rank(recommended) > rank(active) and recommended != config.declined:
+        _advice.upgrade = recommended
+    return fits is not None and rank(active) > rank(fits)
+
+
+def accept_upgrade() -> None:
+    """Downloads the offered model; Binder switches to it once it is ready."""
+    name = _advice.upgrade
+    if name is None:
+        raise UnknownModel(T("no_upgrade"))
+    _advice.accepted = name
+    start_download(name)
+
+
+def decline_upgrade(session: Session) -> None:
+    name = _advice.upgrade
+    if name is None:
+        raise UnknownModel(T("no_upgrade"))
+    cancel_download(name)
+    config = settings_store.load(session, KEY, LlmConfig)
+    config.declined = name
+    settings_store.save(session, KEY, config)
+    _advice.upgrade = _advice.accepted = None
+    activity.log(session, "settings", T.msg("upgrade_declined", label=label(name)), actor="user")
+
+
+def upgrade_offer() -> ModelUpgrade | None:
+    name = _advice.upgrade
+    if name is None:
+        return None
+    with _lock:
+        download = _downloads.get(name)
+    return ModelUpgrade(
+        name=name,
+        label=label(name),
+        size=BY_NAME[name].size,
+        accepted=_advice.accepted == name,
+        download=download.out() if download else None,
+    )
+
+
+def _switch(session: Session, name: str) -> None:
+    """Moves to the upgrade just downloaded; the former model stays installed."""
+    previous = llm.model()
+    config = settings_store.load(session, KEY, LlmConfig)
+    config.model, config.auto = name, True
+    settings_store.save(session, KEY, config)
+    llm.select(name)
+    _advice.upgrade = _advice.accepted = None
+    _advice.automatic = _automatic(config)
+    msg = T.msg("upgraded", old=label(previous), new=label(name))
+    activity.log(session, "settings", msg, actor="binder")
 
 
 def choose(session: Session, name: str, *, actor: str = "user") -> None:
@@ -158,8 +283,12 @@ def choose(session: Session, name: str, *, actor: str = "user") -> None:
     if not llm.is_installed(name, installed):
         raise UnknownModel(T("not_installed", name=name))
     if name != llm.model():
-        activity.log(session, "settings", T.msg("chosen", label=_label(name)), actor=actor)
-    settings_store.save(session, KEY, LlmConfig(model=name))
+        activity.log(session, "settings", T.msg("chosen", label=label(name)), actor=actor)
+    config = settings_store.load(session, KEY, LlmConfig)
+    # A model the user picks is theirs: Binder stops offering upgrades over it.
+    config.model, config.auto = name, actor != "user"
+    settings_store.save(session, KEY, config)
+    _advice.automatic = _automatic(config)
     llm.select(name)
 
 
@@ -174,17 +303,21 @@ def remove(session: Session, name: str) -> None:
         r = c.request("DELETE", "/api/delete", json={"model": name})
         if r.status_code != 404:
             r.raise_for_status()
-    if settings_store.load(session, KEY, LlmConfig).model == name:
-        settings_store.save(session, KEY, LlmConfig())
+    config = settings_store.load(session, KEY, LlmConfig)
+    if config.model == name:
+        config.model, config.auto = None, True
+        settings_store.save(session, KEY, config)
+        _advice.automatic = _automatic(config)
         llm.select(None)
     llm.forget_availability()
     embeddings.forget_availability()
-    activity.log(session, "settings", T.msg("removed", label=_label(name)), actor="user")
+    activity.log(session, "settings", T.msg("removed", label=label(name)), actor="user")
 
 
-def _label(name: str) -> str:
-    entry = BY_NAME.get(name)
-    return entry.label if entry else name
+def label(name: str) -> str:
+    """The model's name as shown to the user."""
+    entry = BY_NAME.get(name.removesuffix(":latest"))
+    return T(entry.label) if entry else name
 
 
 # --- Downloads -----------------------------------------------------------------------
@@ -304,11 +437,13 @@ def _on_success(name: str) -> None:
     llm.forget_availability()
     embeddings.forget_availability()
     with Session(get_engine()) as session:
-        activity.log(session, "settings", T.msg("downloaded", label=_label(name)))
+        activity.log(session, "settings", T.msg("downloaded", label=label(name)))
         # First model installed, or active model missing: switch to the new one.
         installed = llm.installed_models() or {}
         is_chat = BY_NAME[name].kind == "chat" if name in BY_NAME else True
-        if is_chat and not llm.is_installed(llm.model(), installed):
+        if name == _advice.accepted:
+            _switch(session, name)
+        elif is_chat and not llm.is_installed(llm.model(), installed):
             choose(session, name, actor="binder")
         session.commit()
 
@@ -330,16 +465,18 @@ def overview() -> ModelsOverview:
     settings = get_settings()
     installed = llm.installed_models() if settings.llm_enabled else None
     active = llm.model()
+    # Before the machine is measured (or without automatic setup): the configured default.
+    recommended = _advice.recommended or settings.llm_model
     with _lock:
         downloads = {name: d.out() for name, d in _downloads.items()}
 
     models = [
         ModelOut(
             name=e.name,
-            label=e.label,
+            label=T(e.label),
             description=T(e.description),
             size=installed.get(e.name, e.size) if installed else e.size,
-            recommended=e.recommended,
+            recommended=e.kind == "embedding" or e.name == recommended,
             kind=e.kind,
             in_catalog=True,
             installed=bool(installed and llm.is_installed(e.name, installed)),
@@ -367,5 +504,10 @@ def overview() -> ModelsOverview:
         ollama_url=settings.ollama_url,
         active=active,
         active_installed=bool(installed and llm.is_installed(active, installed)),
+        active_label=label(active),
+        recommended=recommended,
+        recommended_label=label(recommended),
+        automatic=_advice.automatic,
+        upgrade=upgrade_offer(),
         models=models,
     )
