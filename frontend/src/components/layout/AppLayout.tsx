@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUp, BookLock, Bot, Files, History, ListChecks, Settings, Sun, Trash2, type LucideIcon } from "lucide-react"
+import { ArrowUpIcon, VaultIcon, RobotIcon, FilesIcon, ClockCounterClockwiseIcon, ListChecksIcon, GearSixIcon, SunIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
 import { useAgent } from "@/components/agent"
 import { TitleBar, useDesktopWindow } from "@/components/layout/TitleBar"
 import { useT } from "@/i18n"
@@ -40,9 +40,9 @@ export function AppLayout() {
   }, [pathname])
 
   const main = [
-    { to: "/", label: t("nav.today"), icon: Sun, end: true, count: 0 },
-    { to: "/prepare", label: t("nav.prepare"), icon: ListChecks, end: false, count: 0 },
-    { to: "/documents", label: t("nav.documents"), icon: Files, end: false, count: 0 },
+    { to: "/", label: t("nav.today"), icon: SunIcon, end: true, count: 0 },
+    { to: "/prepare", label: t("nav.prepare"), icon: ListChecksIcon, end: false, count: 0 },
+    { to: "/documents", label: t("nav.documents"), icon: FilesIcon, end: false, count: 0 },
   ]
   const lifeAreas = AREAS.map((a) => ({
     to: `/area/${a}`,
@@ -51,7 +51,7 @@ export function AppLayout() {
     end: false,
     count: attention.get(a) ?? 0,
   }))
-  const mobile = [main[0], ...lifeAreas, main[1], main[2], { to: "/settings", label: t("nav.settings"), icon: Settings, end: false, count: 0 }]
+  const mobile = [main[0], ...lifeAreas, main[1], main[2], { to: "/settings", label: t("nav.settings"), icon: GearSixIcon, end: false, count: 0 }]
   // The ask bar sits on every page but Today, which opens on its own composer.
   const askBar = pathname !== "/"
 
@@ -63,7 +63,7 @@ export function AppLayout() {
           {!titleBar && (
             <div className="mb-6 flex items-center gap-3 px-2">
               <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <BookLock className="size-4" />
+                <VaultIcon className="size-4" />
               </span>
               <p className="text-[15px] font-semibold">Binder</p>
             </div>
@@ -74,7 +74,7 @@ export function AppLayout() {
             title={t("askShortcut")}
             className="mb-5 flex h-10 w-full items-center gap-2.5 rounded-lg border bg-card px-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
           >
-            <Bot className="size-4 text-primary" />
+            <RobotIcon className="size-4 text-primary" />
             <span className="flex-1 truncate">{t("nav.ask")}</span>
           </button>
           {/* The negative margin and padding leave room for focus rings, which overflow clips. */}
@@ -89,13 +89,13 @@ export function AppLayout() {
           </nav>
           <div className="mt-4 flex flex-col gap-0.5">
             <NavLink to="/history" className={smallClass}>
-              <History className="size-4" /> {t("nav.history")}
+              <ClockCounterClockwiseIcon className="size-4" /> {t("nav.history")}
             </NavLink>
             <NavLink to="/trash" className={smallClass}>
-              <Trash2 className="size-4" /> {t("nav.trash")}
+              <TrashIcon className="size-4" /> {t("nav.trash")}
             </NavLink>
             <NavLink to="/settings" className={smallClass}>
-              <Settings className="size-4" /> {t("nav.settings")}
+              <GearSixIcon className="size-4" /> {t("nav.settings")}
             </NavLink>
           </div>
         </aside>
@@ -109,7 +109,7 @@ export function AppLayout() {
           className="flex gap-1 overflow-x-auto border-b bg-sidebar px-3 py-2 pr-8 [scrollbar-width:none] select-none mask-r-from-[calc(100%-2rem)] md:hidden"
         >
           <button onClick={() => agent.open()} aria-label={t("nav.ask")} className={cn(mobileItemClass, "flex items-center gap-1.5 bg-primary text-primary-foreground")}>
-            <Bot className="size-4" /> {t("nav.ask")}
+            <RobotIcon className="size-4" /> {t("nav.ask")}
           </button>
           {mobile.map((item) => (
             <NavLink
@@ -169,7 +169,7 @@ function useNoFocusOnLaunch() {
   }, [])
 }
 
-function NavItem({ to, label, icon: Icon, end, count }: { to: string; label: string; icon: LucideIcon; end: boolean; count: number }) {
+function NavItem({ to, label, icon: Icon, end, count }: { to: string; label: string; icon: Icon; end: boolean; count: number }) {
   return (
     <NavLink to={to} end={end} className={linkClass}>
       <Icon className="size-4" />
@@ -200,7 +200,7 @@ function AskBar() {
         }}
         className="pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-xl border bg-card p-2 pl-4"
       >
-        <Bot className="size-4 shrink-0 text-primary" />
+        <RobotIcon className="size-4 shrink-0 text-primary" />
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -214,7 +214,7 @@ function AskBar() {
           aria-label={t("nav.ask")}
           className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-80"
         >
-          <ArrowUp className="size-4" />
+          <ArrowUpIcon className="size-4" />
         </button>
       </form>
     </div>

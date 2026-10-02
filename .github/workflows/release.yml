@@ -2,10 +2,9 @@ name: Release
 
 # Pushing a v* tag (e.g. v1.2.0): full CI, build for Linux, Windows and macOS, then a GitHub
 # release with:
-# - the installers (Velopack): BinderApp-win-Setup.exe, .pkg (macOS), .AppImage (Linux), and the
-#   update packages and feeds (releases.<channel>.json) the installed application reads;
-# - the portable archives, whose names are shared with binder.updater.ASSETS (change both
-#   together): versions installed from them update themselves from these.
+# - the installers (Velopack): BinderApp-windows-Setup.exe, .pkg (macOS), .AppImage (Linux);
+# - the update packages and feeds (releases.<channel>.json) the installed application reads.
+# No portable archive: Binder is distributed only through its installers.
 # Manual run: builds everything (run artifacts) without publishing a release.
 #
 # Signing, optional (unsigned builds work, but SmartScreen and Gatekeeper warn):
@@ -111,23 +110,11 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: uv run --no-project packaging/build.py --version "$VERSION" --installer
-      - name: Archive
-        shell: bash
-        run: |
-          cd packaging/dist
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            ditto -c -k --keepParent Binder.app ../../${{ matrix.name }}.zip
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            7z a ../../${{ matrix.name }}.zip Binder
-          else
-            tar czf ../../${{ matrix.name }}.tar.gz Binder
-          fi
       - name: Release files
         shell: bash
         # Only this version's files: the previous release's packages were downloaded for deltas.
         run: |
           mkdir out
-          mv ${{ matrix.name }}.* out/
           cd packaging/releases
           for f in *; do
             case "$f" in

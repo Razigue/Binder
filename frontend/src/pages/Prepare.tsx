@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Bot, FilePen, FolderPlus, ListChecks, type LucideIcon } from "lucide-react"
+import { RobotIcon, NotePencilIcon, FolderPlusIcon, ListChecksIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { useAgent } from "@/components/agent"
 import { PageHeader } from "@/components/layout/AppLayout"
@@ -38,7 +38,7 @@ export function PreparePage() {
               return (
                 <Tile
                   key={info.kind}
-                  icon={ListChecks}
+                  icon={ListChecksIcon}
                   title={info.title}
                   hint={ongoing ? tj("progress", { done: ongoing.done, total: ongoing.total }) : tj(`kind.${info.kind}Hint`)}
                   onClick={() => (ongoing ? panels.showJourney(ongoing.id) : setTask({ type: "journey", info }))}
@@ -50,14 +50,14 @@ export function PreparePage() {
             {LETTER_KINDS.map((kind) => (
               <Tile
                 key={kind}
-                icon={FilePen}
+                icon={NotePencilIcon}
                 title={t(`letter.${kind}`)}
                 hint={t(`letter.${kind}Hint`)}
                 onClick={() => setTask({ type: "letter", kind })}
               />
             ))}
             <Tile
-              icon={FilePen}
+              icon={NotePencilIcon}
               title={t("letter.custom")}
               hint={t("letter.customHint")}
               onClick={() => setTask({ type: "letter", kind: null })}
@@ -67,14 +67,14 @@ export function PreparePage() {
             {FOLDER_KINDS.map((kind) => (
               <Tile
                 key={kind}
-                icon={FolderPlus}
+                icon={FolderPlusIcon}
                 title={t(`folder.${kind}`)}
                 hint={t(`folder.${kind}Hint`)}
                 onClick={() => setTask({ type: "folder", kind })}
               />
             ))}
             <Tile
-              icon={FolderPlus}
+              icon={FolderPlusIcon}
               title={t("folder.custom")}
               hint={t("folder.customHint")}
               onClick={() => setTask({ type: "folder", kind: null })}
@@ -83,7 +83,7 @@ export function PreparePage() {
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-5 py-4 ring-1 ring-foreground/10">
             <p className="text-sm text-muted-foreground">{t("otherwise")}</p>
             <Button variant="outline" onClick={() => agent.open()}>
-              <Bot /> {t("askAgent")}
+              <RobotIcon /> {t("askAgent")}
             </Button>
           </div>
         </div>
@@ -109,7 +109,7 @@ function Section({ title, hint, children }: { title: string; hint: string; child
   )
 }
 
-function Tile({ icon: Icon, title, hint, onClick }: { icon: LucideIcon; title: string; hint: string; onClick: () => void }) {
+function Tile({ icon: Icon, title, hint, onClick }: { icon: Icon; title: string; hint: string; onClick: () => void }) {
   return (
     <li>
       <button

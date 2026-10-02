@@ -214,7 +214,7 @@ def build_samples(today: date | None = None) -> list[Sample]:
         "releve-bancaire.pdf",
         f"""<h1>Crédit Agricole Centre-Est</h1><h2>Relevé de compte</h2>
         <p>Titulaire : Camille Martin</p>
-        <p>Date du relevé : {_fr(d(-14))}</p><p>IBAN FR76 1780 6000 1234 5678 9012 345</p>
+        <p>Date du relevé : {_fr(d(-14))}</p><p>IBAN FR89 1780 6000 1234 5678 9012 345</p>
         <table><tr><td>Solde créditeur au {_fr(d(-14))}</td><td>{_money(2310.18)}</td></tr>
         <tr><td>VIR SALAIRE STUDIO ATLAS</td><td>+ {_money(2134.56)}</td></tr>
         <tr><td>PRLV SEPA REGIE BROTTEAUX</td><td>- {_money(1210)}</td></tr>

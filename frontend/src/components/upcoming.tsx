@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { CalendarClock } from "lucide-react"
+import { ClockCountdownIcon } from "@phosphor-icons/react"
 import { Card } from "@/components/ui/card"
 import { useT } from "@/i18n"
 import { area as messages } from "@/i18n/messages/area"
@@ -21,7 +21,7 @@ export function Upcoming({ deadlines, empty }: { deadlines: UpcomingDeadline[]; 
           {deadlines.map((d) => {
             const row = (
               <>
-                <CalendarClock className="size-4 shrink-0 text-muted-foreground" />
+                <ClockCountdownIcon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{d.title}</span>
                   <span className={cn("block text-xs", urgencyStyles[urgency(d.days_left)].text)}>

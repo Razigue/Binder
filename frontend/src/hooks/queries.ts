@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api, type Category, type DocPatch, type DocumentStatus } from "@/lib/api"
+import { api, type BulkPatch, type Category, type DocPatch, type DocumentStatus } from "@/lib/api"
 
 export const keys = {
   stats: ["stats"] as const,
@@ -56,6 +56,22 @@ export function useUpdateDocument(id: number) {
 export function useDeleteDocument() {
   const invalidate = useInvalidateAll()
   return useMutation({ mutationFn: api.deleteDocument, onSuccess: invalidate })
+}
+
+/** Grouped actions on the documents selected in a list. */
+export function useBulkDocuments() {
+  const invalidate = useInvalidateAll()
+  const options = { onSuccess: invalidate }
+  return {
+    trash: useMutation({ mutationFn: api.bulkTrash, ...options }),
+    update: useMutation({
+      mutationFn: ({ ids, patch }: { ids: number[]; patch: BulkPatch }) => api.bulkUpdate(ids, patch),
+      ...options,
+    }),
+    reanalyze: useMutation({ mutationFn: api.bulkReanalyze, ...options }),
+    restore: useMutation({ mutationFn: api.bulkRestore, ...options }),
+    purge: useMutation({ mutationFn: api.bulkPurge, ...options }),
+  }
 }
 
 export function useToggleDeadline() {

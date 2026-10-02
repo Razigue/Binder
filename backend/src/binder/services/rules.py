@@ -31,6 +31,7 @@ T = i18n.catalog(
         },
         "contract": {"en": "{issuer} contract", "fr": "Contrat {issuer}"},
         "payment_notice": {"en": "{issuer} payment notice", "fr": "Avis d'échéance {issuer}"},
+        "payment_reminder": {"en": "{issuer} payment reminder", "fr": "Relance {issuer}"},
         "payment_schedule": {"en": "{issuer} payment schedule", "fr": "Échéancier {issuer}"},
         "quote": {"en": "{issuer} quote", "fr": "Devis {issuer}"},
     },
@@ -209,6 +210,13 @@ DOC_TYPES: list[tuple[str, DocType]] = [
     (r"livret de famille", DocType.FAMILY_RECORD_BOOK),
     (r"acte de (?:naissance|mariage|deces)|extrait d'acte", DocType.CIVIL_STATUS),
     (r"avis de contravention|amende forfaitaire", DocType.FINE),
+    # A reminder quotes the bill and its due date: recognised before the invoice and the notice.
+    (
+        r"(?<![a-z])relance(?![a-z])|rappel (?:de paiement|avant poursuites)|lettre de rappel"
+        r"|mise en demeure|(?:facture|somme|montant)s? (?:restee?s? )?impayee?s?"
+        r"|dernier avis avant",
+        DocType.PAYMENT_REMINDER,
+    ),
     (r"imprime fiscal unique|(?<![a-z])ifu(?![a-z])", DocType.ANNUAL_TAX_STATEMENT),
     (r"recu (?:fiscal|au titre des dons)|cerfa n?.? ?11580", DocType.DONATION_RECEIPT),
     (r"frais de garde", DocType.CHILDCARE_CERTIFICATE),
@@ -445,7 +453,9 @@ def extract_amount(lines: list[str]) -> float | None:
     best: tuple[int, float] | None = None
     for i, line in enumerate(lines):
         amounts = [parse_amount(m[1], m[2]) for m in _AMOUNT_RE.finditer(line)]
-        if not amounts and i + 1 < len(lines) and keyword.search(line):
+        # Amount on the next line (tables), unless this line already has its value: "À payer
+        # avant le 04/11/2026" is a date, the next line something else.
+        if not amounts and i + 1 < len(lines) and keyword.search(line) and not find_dates(line):
             amounts = [parse_amount(m[1], m[2]) for m in _AMOUNT_RE.finditer(lines[i + 1])]
         if not amounts:
             continue
@@ -480,6 +490,7 @@ def extract_reference(lines: list[str], original_lines: list[str]) -> str | None
 # Types whose title names the issuer (message keys of T).
 TITLED_WITH_ISSUER = {
     DocType.INVOICE,
+    DocType.PAYMENT_REMINDER,
     DocType.CERTIFICATE,
     DocType.INSURANCE_CERTIFICATE,
     DocType.CONTRACT,

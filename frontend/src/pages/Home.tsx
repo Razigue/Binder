@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { ArrowUp, BookLock, Bot, CircleCheck, FlaskConical, Loader2, Paperclip, RotateCcw, Upload } from "lucide-react"
+import { ArrowUpIcon, VaultIcon, RobotIcon, CheckCircleIcon, FlaskIcon, CircleNotchIcon, PaperclipIcon, ArrowCounterClockwiseIcon, UploadSimpleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useAgent } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
 import { Ongoing } from "@/components/ongoing"
+import { Timeline } from "@/components/timeline"
 import { Upcoming } from "@/components/upcoming"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { usePanels } from "@/components/panels"
@@ -23,12 +24,23 @@ import { today } from "@/i18n/messages/today"
 import { api, type FeedItem, type SetupStatus } from "@/lib/api"
 import { formatSize, formatDate, toIso } from "@/lib/format"
 
+const BACK = 14
+const AHEAD = 60
+
 export function HomePage() {
   const t = useT(today)
   const feed = useFeed()
   const data = feed.data
   const [day] = useState(() => new Date())
-  const horizon = useMemo(() => ({ start: toIso(day), end: toIso(new Date(day.getTime() + 60 * 86_400_000)) }), [day])
+  // The timeline looks two weeks back, paid ones included; "Coming up" only ahead.
+  const horizon = useMemo(
+    () => ({
+      start: toIso(new Date(day.getTime() - BACK * 86_400_000)),
+      end: toIso(new Date(day.getTime() + AHEAD * 86_400_000)),
+      include_done: true,
+    }),
+    [day],
+  )
   const deadlines = useDeadlines(horizon)
   const greeting = useGreeting(day)
   if (data && data.documents === 0 && !data.items.some((i) => i.kind === "report")) return <Welcome setup={data.setup} />
@@ -53,9 +65,10 @@ export function HomePage() {
       ) : (
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 space-y-8">
+            <Timeline deadlines={deadlines.data ?? []} back={BACK} ahead={AHEAD} loading={deadlines.isPending} />
             {attention === 0 && (
               <div className="flex items-start gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
-                <CircleCheck className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
+                <CheckCircleIcon className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
                 <div>
                   <p className="font-medium">{t("allGood")}</p>
                   <p className="text-sm text-muted-foreground">{t("allGoodHint")}</p>
@@ -81,7 +94,7 @@ export function HomePage() {
           </div>
           <aside className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
             <Ongoing limit={4} />
-            <Upcoming deadlines={(deadlines.data ?? []).filter((d) => !d.done).slice(0, 6)} empty={t("upcomingEmpty")} />
+            <Upcoming deadlines={(deadlines.data ?? []).filter((d) => !d.done && d.days_left >= 0).slice(0, 6)} empty={t("upcomingEmpty")} />
           </aside>
         </div>
       )}
@@ -127,7 +140,7 @@ function AskCard() {
   return (
     <Card className="mb-8 gap-3 p-4 sm:p-5">
       <p className="flex items-center gap-2 font-semibold">
-        <Bot className="size-4 text-primary" /> {t("askTitle")}
+        <RobotIcon className="size-4 text-primary" /> {t("askTitle")}
       </p>
       <form
         onSubmit={(e) => {
@@ -146,7 +159,7 @@ function AskCard() {
           title={t("attach")}
           className="text-muted-foreground"
         >
-          <Paperclip />
+          <PaperclipIcon />
         </Button>
         <input
           value={text}
@@ -156,7 +169,7 @@ function AskCard() {
           className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
         />
         <Button type="submit" size="icon" aria-label={t("send")} title={t("send")}>
-          <ArrowUp />
+          <ArrowUpIcon />
         </Button>
       </form>
       <div className="flex flex-wrap items-center gap-2">
@@ -194,6 +207,14 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
   const t = useT(today)
   const invalidate = useInvalidateAll()
   const retry = useMutation({ mutationFn: api.retrySetup, onSuccess: invalidate })
+  if (setup.phase === "ready" && setup.warning) {
+    return (
+      <Card className="mb-6 flex-row items-start gap-3 p-5">
+        <VaultIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{setup.warning}</p>
+      </Card>
+    )
+  }
   if (setup.phase === "ready" || setup.phase === "disabled") return null
   const error = setup.phase === "error"
   const ratio = setup.total ? Math.min(100, (setup.completed / setup.total) * 100) : null
@@ -201,7 +222,7 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
     <Card className="mb-6 gap-3 p-5">
       <div className="flex items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          {error ? <BookLock className="size-4" /> : <Loader2 className="size-4 animate-spin" />}
+          {error ? <VaultIcon className="size-4" /> : <CircleNotchIcon className="size-4 animate-spin" />}
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-medium">{t(`setup.${setup.phase}`)}</p>
@@ -209,7 +230,7 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
         </div>
         {error && (
           <Button variant="outline" size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>
-            <RotateCcw /> {t("setup.retry")}
+            <ArrowCounterClockwiseIcon /> {t("setup.retry")}
           </Button>
         )}
       </div>
@@ -240,7 +261,7 @@ function DropBar() {
     >
       <div className="flex-1 text-center">
         <p className="flex items-center justify-center gap-2 text-sm font-medium">
-          <Upload className="size-4" /> {t("dropHere")}
+          <UploadSimpleIcon className="size-4" /> {t("dropHere")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">{t("dropHint")}</p>
       </div>
@@ -270,10 +291,10 @@ function Welcome({ setup }: { setup: SetupStatus }) {
         <p>{t("noDocument")}</p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="outline" onClick={() => demo.mutate()} disabled={demo.isPending}>
-            <FlaskConical /> {demo.isPending ? t("demoLoading") : t("demo")}
+            <FlaskIcon /> {demo.isPending ? t("demoLoading") : t("demo")}
           </Button>
           <Button variant="ghost" onClick={() => setRestoring(true)}>
-            <RotateCcw /> {t("restore")}
+            <ArrowCounterClockwiseIcon /> {t("restore")}
           </Button>
         </div>
       </div>

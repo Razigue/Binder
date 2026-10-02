@@ -3,6 +3,7 @@
 import io
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 from typing import Any
 
@@ -192,7 +193,9 @@ def test_view_document_shows_the_page(library: dict[str, int], session: Session)
     names = {t["function"]["name"] for t in tools.schemas(vision=False)}
     # Web search is off in the tests (conftest): its tools are not offered either.
     assert "view_document" not in names
-    assert len(names) == len(tools.TOOLS) - 1 - len(tools.WEB_TOOLS)
+    # The listings are reached through `list`.
+    hidden = 1 + len(tools.WEB_TOOLS) + len(tools.LIST_KINDS)
+    assert len(names) == len(tools.TOOLS) - hidden
 
 
 # --- Harness -------------------------------------------------------------------------------
@@ -261,6 +264,70 @@ def test_router_answers_questions_about_the_app(library: dict[str, int], session
     assert "app_help" not in [c.name for c in edf.tool_calls]
 
 
+def test_tool_timings_and_model_stats_are_reported(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    timing = {"prompt_eval_count": 1000, "prompt_eval_duration": 500_000_000}
+    model.replies = [
+        {
+            **call("search_documents", query="EDF"),
+            "stats": {**timing, "eval_count": 20, "eval_duration": 1_000_000_000},
+        },
+        {**call("read_document", document_id=999)},
+        {
+            **answer("Found it."),
+            "stats": {**timing, "eval_count": 60, "eval_duration": 1_000_000_000},
+        },
+    ]
+    events: list[dict[str, Any]] = []
+    response = loop.run(session, "My EDF bill?", [], emit=events.append)
+    search, read = response.tool_calls
+    assert search.duration_ms is not None and not search.error
+    assert read.error  # unknown document
+    assert [e["type"] for e in events if e["type"].startswith("tool")] == [
+        "tool",
+        "tool_done",
+        "tool",
+        "tool_done",
+    ]
+    stats = response.stats
+    assert stats is not None and stats.turns == 3
+    assert (stats.prompt_tokens, stats.output_tokens) == (2000, 80)
+    assert stats.tokens_per_second == 40.0 and stats.prompt_tokens_per_second == 2000.0
+    assert sum(e["type"] == "stats" for e in events) == 3
+
+
+def test_ollama_stats_are_read_from_the_last_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    lines = [
+        {"message": {"content": "Hel"}},
+        {"message": {"content": "lo"}},
+        {"message": {}, "done": True, "eval_count": 2, "eval_duration": 10, "load_duration": 5},
+    ]
+
+    class Response:
+        is_error = False
+
+        def raise_for_status(self) -> None: ...
+
+        def iter_lines(self) -> Iterator[str]:
+            return iter(json.dumps(line) for line in lines)
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *args: object) -> None: ...
+
+        @contextmanager
+        def stream(self, method: str, path: str, json: dict[str, Any]) -> Iterator[Response]:
+            yield Response()
+
+    monkeypatch.setattr(llm, "client", lambda **_: Client())
+    reply = llm.chat([{"role": "user", "content": "hi"}], on_token=lambda _: None)
+    assert reply["content"] == "Hello"
+    assert reply["stats"] == {"eval_count": 2, "eval_duration": 10}
+
+
 def test_context_size_and_library_overview_are_sent(
     library: dict[str, int], session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -268,6 +335,7 @@ def test_context_size_and_library_overview_are_sent(
 
     class Response:
         status_code = 200
+        is_error = False
 
         def raise_for_status(self) -> None: ...
 
@@ -317,7 +385,8 @@ def test_loops_and_bad_arguments_are_handled(
     library: dict[str, int], session: Session, model: FakeModel
 ) -> None:
     bad = {"content": "", "tool_calls": [{"function": {"name": "read_document", "arguments": "{"}}]}
-    model.replies = [bad, *[call("list_deadlines")] * (loop.MAX_STEPS - 1), answer("Done.")]
+    # The final answer is the last of the MAX_STEPS turns.
+    model.replies = [bad, *[call("list_deadlines")] * (loop.MAX_STEPS - 2), answer("Done.")]
     response = loop.run(session, "What is due?", [])
     assert response.answer == "Done."
     tool_messages = [m for m in model.requests[-1] if m["role"] == "tool"]
@@ -357,12 +426,25 @@ def test_stream_endpoint(client: TestClient, library: dict[str, int], model: Fak
     doc_id = library["facture-orange.pdf"]
     model.replies = [
         call("write_letter", purpose="cancel", kind="termination", document_id=doc_id),
+        # Written by the model too, from the termination brief.
+        answer(
+            json.dumps(
+                {
+                    "subject": "Termination",
+                    "recipient": "Orange",
+                    "paragraphs": ["I am ending my subscription."],
+                    "registered": True,
+                }
+            )
+        ),
         answer(f"Here is your letter [#{doc_id}]."),
     ]
     with client.stream("POST", "/api/agent/chat/stream", json={"message": "Cancel Orange"}) as r:
         assert r.headers["content-type"].startswith("application/x-ndjson")
         events = [json.loads(line) for line in r.iter_lines() if line]
-    assert events[0] == {
+    # The model's first turn is counted before its tool starts.
+    assert events[0]["type"] == "stats" and events[0]["stats"]["turns"] == 1
+    assert events[1] == {
         "type": "tool",
         "name": "write_letter",
         "arguments": {"purpose": "cancel", "kind": "termination", "document_id": doc_id},
@@ -499,8 +581,9 @@ def test_announced_action_is_actually_done(
     ]
     response = loop.run(session, "Trash last year's MAIF certificate", [])
     assert model.requests[2][-1]["content"] == loop.DO_IT
-    assert response.changed and response.answer.startswith("Done")
     assert [c.name for c in response.tool_calls] == ["search_documents", "trash_document"]
+    # Found by reading documents: the trash waits for the user's confirmation.
+    assert not response.changed and response.confirmations[0]["tool"] == "trash_document"
 
 
 def test_offline_router_acts_only_when_asked(

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ChevronRight, Hourglass, Loader2 } from "lucide-react"
+import { CaretRightIcon, HourglassIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/i18n"
@@ -13,13 +13,13 @@ export function StatusBadge({ doc }: { doc: Doc }) {
   if (doc.status === "processing")
     return (
       <Badge variant="secondary">
-        <Loader2 className="animate-spin" /> {t("processing")}
+        <CircleNotchIcon className="animate-spin" /> {t("processing")}
       </Badge>
     )
   if (doc.status === "waiting")
     return (
       <Badge variant="secondary">
-        <Hourglass /> {t("waiting")}
+        <HourglassIcon /> {t("waiting")}
       </Badge>
     )
   if (doc.status === "to_review")
@@ -72,7 +72,7 @@ export function DocumentList({ docs, loading, empty }: { docs?: Doc[]; loading?:
             <span className="hidden md:block">
               <StatusBadge doc={d} />
             </span>
-            <ChevronRight className="size-4 text-muted-foreground" />
+            <CaretRightIcon className="size-4 text-muted-foreground" />
           </Link>
         </li>
       ))}

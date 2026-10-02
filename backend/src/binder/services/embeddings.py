@@ -122,6 +122,11 @@ def forget(session: Session, document_id: int) -> None:
     _changed()
 
 
+def forget_all(session: Session) -> None:
+    session.execute(delete(Embedding))
+    _changed()
+
+
 def backfill(session: Session, limit: int = 20) -> int:
     """Embeds documents that have no vector for the current model yet (existing library,
     model installed later). Returns how many were done."""

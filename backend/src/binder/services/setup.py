@@ -48,6 +48,12 @@ log = logging.getLogger(__name__)
 T = i18n.catalog(
     "setup",
     {
+        "ollama_outdated": {
+            "en": "Ollama {version} is older than {minimum}: the local AI may misread its own "
+            "actions. Update Ollama.",
+            "fr": "Ollama {version} est antérieur à {minimum} : l'IA locale peut mal lire ses "
+            "propres actions. Mettez Ollama à jour.",
+        },
         "no_space": {
             "en": "Not enough free disk space for the local AI ({size} GB needed).",
             "fr": "Pas assez d'espace disque pour l'IA locale ({size} Go nécessaires).",
@@ -124,6 +130,8 @@ class SetupStatus(BaseModel):
     # Model being installed or in use.
     model: str | None = None
     error: str | None = None
+    # Works, but not as well as it should (an outdated Ollama).
+    warning: str | None = None
 
 
 @dataclass
@@ -133,6 +141,7 @@ class _State:
     total: int = 0
     model: str | None = None
     error: str | None = None
+    warning: str | None = None
     process: subprocess.Popen[bytes] | None = None
     # Address of Binder's own Ollama, drawn once per launch (None: BINDER_OLLAMA_URL is used).
     own_url: str | None = None
@@ -160,6 +169,7 @@ def status() -> SetupStatus:
             total=state.total,
             model=state.model or llm.model(),
             error=state.error,
+            warning=state.warning,
         )
 
 
@@ -218,6 +228,7 @@ def _run() -> None:
             _set(phase="starting", completed=0, total=0)
             _serve(binary)
             served = True
+        check_version()
         _ensure_models()
         _set(phase="ready", completed=0, total=0)
     except Exception as e:
@@ -226,6 +237,16 @@ def _run() -> None:
         return
     if served:
         _upgrade()
+
+
+def check_version() -> None:
+    """Warns, without blocking, when Ollama predates the Qwen 3.5 support Binder relies on."""
+    version = llm.ollama_version()
+    warning = None
+    if llm.outdated_ollama(version):
+        warning = T("ollama_outdated", version=version, minimum=llm.MIN_OLLAMA_VERSION)
+        log.warning("Ollama %s is older than %s", version, llm.MIN_OLLAMA_VERSION)
+    _set(warning=warning)
 
 
 def _local() -> bool:

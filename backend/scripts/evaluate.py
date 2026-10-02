@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from binder.config import get_settings
-from binder.samples import build_samples
+from binder.samples import Sample, build_samples
 from binder.schemas import Extraction
 from binder.services import ingest, llm
 from binder.services.text import SUPPORTED_MIME
@@ -54,6 +54,8 @@ class Result:
     got: dict[str, Any]
     errors: dict[str, tuple[Any, Any]] = field(default_factory=dict)
     seconds: float = 0.0
+    # Doubts of the checks (services/verify.py): the document would go to review.
+    doubts: list[str] = field(default_factory=list)
 
 
 def _plain(value: Any) -> str:
@@ -79,8 +81,64 @@ def fields_of(ext: Extraction) -> dict[str, Any]:
     return {f: data.get(f) for f in FIELDS}
 
 
+# Types a small model mixes up: an invoice (with a deposit), a payment notice and a reminder.
+# Not demo documents (the library and the tests count those): evaluated here only.
+EXTRA_SAMPLES = [
+    Sample(
+        "facture-plombier-acompte.pdf",
+        "<h1>Plomberie Durand</h1><h2>Facture n° PD-2026-118 du 18/09/2026</h2>"
+        "<p>Client : Camille Martin, 12 rue des Tilleuls, 69003 Lyon</p>"
+        "<table><tr><td>Remplacement du chauffe-eau</td><td>500,00 €</td></tr>"
+        "<tr><td>Total HT</td><td>500,00 €</td></tr><tr><td>TVA 20 %</td><td>100,00 €</td></tr>"
+        "<tr><td>Total TTC</td><td>600,00 €</td></tr>"
+        "<tr><td>Acompte versé le 02/09/2026</td><td>200,00 €</td></tr>"
+        "<tr><td class='big'>Reste à payer</td><td class='big'>400,00 €</td></tr></table>"
+        "<p>Paiement à réception, au plus tard le 18/10/2026.</p>",
+        {
+            "doc_type": "invoice",
+            "amount": 400.0,
+            "issue_date": "2026-09-18",
+            "due_date": "2026-10-18",
+            "reference": "PD-2026-118",
+        },
+    ),
+    Sample(
+        "avis-echeance-loyer.pdf",
+        "<h1>Foncia Lyon</h1><h2>Avis d'échéance — loyer d'octobre 2026</h2>"
+        "<p>Locataire : Camille Martin · Lot n° 4471 · Établi le 20/09/2026</p>"
+        "<table><tr><td>Loyer</td><td>850,00 €</td></tr><tr><td>Provision sur charges</td>"
+        "<td>60,00 €</td></tr><tr><td class='big'>Total à payer</td>"
+        "<td class='big'>910,00 €</td></tr></table>"
+        "<p>À régler avant le 05/10/2026. Période : du 01/10/2026 au 31/10/2026.</p>",
+        {
+            "category": "housing",
+            "doc_type": "payment_notice",
+            "amount": 910.0,
+            "issue_date": "2026-09-20",
+            "due_date": "2026-10-05",
+        },
+    ),
+    Sample(
+        "relance-free.pdf",
+        "<h1>Free</h1><h2>Relance — facture restée impayée</h2>"
+        "<p>Courrier du 01/10/2026 · Abonné : Camille Martin · Identifiant : 88123456</p>"
+        "<p>Sauf erreur de notre part, votre facture n° FM-2026-5512 du 02/09/2026 reste "
+        "impayée.</p><table><tr><td class='big'>Montant dû</td>"
+        "<td class='big'>29,99 €</td></tr></table>"
+        "<p>Merci de la régler avant le 15/10/2026 pour éviter la suspension de la ligne.</p>",
+        {
+            "category": "telecom",
+            "doc_type": "payment_reminder",
+            "amount": 29.99,
+            "issue_date": "2026-10-01",
+            "due_date": "2026-10-15",
+        },
+    ),
+]
+
+
 def demo_cases() -> Iterator[Case]:
-    for sample in build_samples():
+    for sample in [*build_samples(), *EXTRA_SAMPLES]:
         expected = {k: v.value if hasattr(v, "value") else v for k, v in sample.expected.items()}
         expected = {k: v.isoformat() if isinstance(v, date) else v for k, v in expected.items()}
         yield Case(sample.filename, sample.pdf(), "application/pdf", expected)
@@ -117,7 +175,9 @@ def corpus_cases(folder: Path) -> Iterator[Case]:
 def run(case: Case, use_llm: bool) -> Result:
     started = time.perf_counter()
     _, ext = ingest.extract(case.data, case.mime, use_llm=use_llm)
-    result = Result(case.name, fields_of(ext), seconds=time.perf_counter() - started)
+    result = Result(
+        case.name, fields_of(ext), seconds=time.perf_counter() - started, doubts=ext.doubts
+    )
     for name, expected in case.expected.items():
         if not same(name, result.got.get(name), expected):
             result.errors[name] = (result.got.get(name), expected)
@@ -158,10 +218,16 @@ def report(results: list[Result], cases: list[Case], engine: str) -> dict[str, A
         "accuracy": {f: round(hits[f] / scored[f], 3) for f in FIELDS if scored[f]},
         "overall": round(sum(hits.values()) / total, 3) if total else None,
         "seconds_per_document": round(sum(r.seconds for r in results) / max(len(results), 1), 2),
+        "to_review": sum(bool(r.doubts) for r in results),
         "category_confusions": dict(confusions.most_common(10)),
         "doc_type_confusions": dict(types.most_common(10)),
         "results": [
-            {"file": r.name, "got": r.got, "errors": {k: list(v) for k, v in r.errors.items()}}
+            {
+                "file": r.name,
+                "got": r.got,
+                "errors": {k: list(v) for k, v in r.errors.items()},
+                "doubts": r.doubts,
+            }
             for r in results
         ],
     }
@@ -209,7 +275,8 @@ def main() -> None:
         result = run(case, use_llm)
         results.append(result)
         errors = "; ".join(f"{k}={g!r} (expected {e!r})" for k, (g, e) in result.errors.items())
-        print(f"{'✓' if not result.errors else '✗'} {case.name:32} {errors}")
+        doubts = f"  [doubts: {', '.join(result.doubts)}]" if result.doubts else ""
+        print(f"{'✓' if not result.errors else '✗'} {case.name:32} {errors}{doubts}")
 
     summary = report(results, cases, engine)
     print(f"\n{engine}: {summary['fully_right']}/{summary['documents']} documents fully right")
@@ -222,6 +289,7 @@ def main() -> None:
         if summary[key]:
             print(f"{title} mistakes (expected -> read): ", end="")
             print(", ".join(f"{k} ×{n}" for k, n in summary[key].items()))
+    print(f"{summary['to_review']} document(s) with doubts, sent to review")
     print(f"{summary['seconds_per_document']} s per document")
     if args.report:
         args.report.write_text(json.dumps(summary, ensure_ascii=False, indent=2), "utf-8")

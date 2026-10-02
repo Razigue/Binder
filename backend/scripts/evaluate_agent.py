@@ -24,7 +24,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from binder import i18n
-from binder.agent import loop
+from binder.agent import confirm, loop, tools
 from binder.config import get_settings
 from binder.db import get_engine, reset_engine
 from binder.models import Category, Deadline, Document
@@ -391,6 +391,21 @@ def flat(text: str) -> str:
     return re.sub(r"[  ]", " ", text)
 
 
+def confirm_all(session: Session, response: ChatResponse) -> None:
+    """The user confirms the changes the agent proposed after reading a document (the button
+    under the answer): the scenario judges the change itself. Counted in CONFIRMED."""
+    for action in response.confirmations:
+        proposal = confirm.take(action["token"])
+        if proposal is not None:
+            tools.call(session, *proposal)
+            response.changed = True
+            CONFIRMED.append(action["tool"])
+
+
+# Changes that waited for the user's confirmation during the run.
+CONFIRMED: list[str] = []
+
+
 def run(scenario: Scenario, library: Path, rules: bool) -> tuple[list[str], ChatResponse, float]:
     work = Path(tempfile.mkdtemp(prefix="binder-eval-"))
     shutil.copytree(library, work, dirs_exist_ok=True)
@@ -405,6 +420,7 @@ def run(scenario: Scenario, library: Path, rules: bool) -> tuple[list[str], Chat
                     response = loop._run_rules(session, message, [])
                 else:
                     response = loop.run(session, message, history, [])
+                    confirm_all(session, response)
                 session.commit()
                 history += [
                     ChatMessage(role="user", content=message),
@@ -489,6 +505,8 @@ def main() -> None:
         f"\n{passed}/{len(chosen)} scenarios passed ({passed / max(1, len(chosen)):.0%}) with "
         f"{engine}, {total_time / max(1, len(chosen)):.1f} s per request on average"
     )
+    if CONFIRMED:
+        print(f"{len(CONFIRMED)} change(s) confirmed as the user would: {', '.join(CONFIRMED)}")
 
 
 if __name__ == "__main__":

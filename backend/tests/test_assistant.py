@@ -654,7 +654,7 @@ def test_recovery_code_is_shown_in_settings_until_noted(client: TestClient) -> N
 
 def test_demo_data_can_be_cleared(client: TestClient, demo: dict[str, Any]) -> None:
     assert client.get("/api/demo").json()["documents"] == demo["imported"]
-    assert client.delete("/api/demo").json() == {"removed": demo["imported"]}
+    assert client.delete("/api/demo").json()["removed"] == demo["imported"]
     assert client.get("/api/demo").json()["documents"] == 0
     assert not client.get("/api/documents").json()
     assert not client.get("/api/deadlines").json()

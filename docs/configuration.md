@@ -25,7 +25,6 @@ Through environment variables, or in a `backend/.env` file:
 | `BINDER_BACKUP_DIR` | `Documents/Binder backups` | backup folder (`DATA_DIR/backups` without a Documents folder) |
 | `BINDER_AUTO_UPDATE` | `true` | `false` not to update the application at launch |
 | `BINDER_UPDATE_REPO` | `https://github.com/Razigue/Binder` | releases read by the installed application (Velopack) |
-| `BINDER_UPDATE_URL` | GitHub API, latest release | update source |
 | `BINDER_LOCALE` | detected from the system | system locale override, e.g. `fr_FR` or `en_GB` |
 
 Default data folder: `~/.local/share/binder` (Linux, or `$XDG_DATA_HOME/binder`),

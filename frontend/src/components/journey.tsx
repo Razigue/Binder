@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Circle, CircleCheck, FilePen, FileText, FolderPlus, ListChecks, Loader2 } from "lucide-react"
+import { CircleIcon, CheckCircleIcon, NotePencilIcon, FileTextIcon, FolderPlusIcon, ListChecksIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -194,7 +194,7 @@ function StepRow({
         title={step.done ? t("markUndone") : t("markDone")}
         className="mt-0.5 h-fit shrink-0 rounded-full text-muted-foreground transition-colors hover:text-primary disabled:cursor-default"
       >
-        {step.done ? <CircleCheck className="size-5 text-primary" /> : <Circle className="size-5" />}
+        {step.done ? <CheckCircleIcon className="size-5 text-primary" /> : <CircleIcon className="size-5" />}
       </button>
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-start justify-between gap-3">
@@ -217,18 +217,18 @@ function StepRow({
             {step.action && !step.done && (
               <Button size="xs" variant="outline" disabled={act.isPending} onClick={() => run(step.action!)}>
                 {act.isPending ? (
-                  <Loader2 className="animate-spin" />
+                  <CircleNotchIcon className="animate-spin" />
                 ) : step.action.type === "folder" ? (
-                  <FolderPlus />
+                  <FolderPlusIcon />
                 ) : (
-                  <FilePen />
+                  <NotePencilIcon />
                 )}
                 {step.action.label}
               </Button>
             )}
             {step.document_ids.slice(0, 2).map((docId) => (
               <Button key={docId} size="xs" variant="ghost" onClick={() => open(docId)}>
-                <FileText /> {t("seeDocument")}
+                <FileTextIcon /> {t("seeDocument")}
               </Button>
             ))}
           </div>
@@ -260,7 +260,7 @@ export function JourneyStart({ info, onStarted }: { info: JourneyKindInfo; onSta
   if (start.isPending)
     return (
       <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> {t("working")}
+        <CircleNotchIcon className="size-4 animate-spin" /> {t("working")}
       </p>
     )
   return (
@@ -314,14 +314,14 @@ export function JourneyCard({ journey }: { journey: Journey }) {
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-        <ListChecks className="size-4 text-muted-foreground" />
+        <ListChecksIcon className="size-4 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{journey.title}</span>
         <span className="text-xs text-muted-foreground">{t("progress", { done: journey.done, total: journey.total })}</span>
       </div>
       <div className="space-y-2 px-3 py-2.5">
         <p className="text-sm text-muted-foreground">{next ? t("nextStep", { step: next.title }) : t("allDone")}</p>
         <Button size="sm" variant="outline" onClick={() => panels.showJourney(journey.id)}>
-          <ListChecks /> {t("seeSteps")}
+          <ListChecksIcon /> {t("seeSteps")}
         </Button>
       </div>
     </div>

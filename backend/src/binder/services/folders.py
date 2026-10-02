@@ -561,7 +561,7 @@ def _pick_llm(purpose: str, docs: list[Document]) -> _Picked | None:
     try:
         message = llm.chat([{"role": "user", "content": prompt}], fmt=PICK_SCHEMA)
         return _Picked.model_validate(json.loads(message.get("content") or "{}"))
-    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
         log.exception("Pack by the model failed, falling back to keywords")
         return None
 

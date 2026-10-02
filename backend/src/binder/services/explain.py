@@ -358,7 +358,7 @@ def explain_llm(doc: Document) -> Explanation | None:
         )
         explanation.action_required = explanation.action_required or bool(explanation.actions)
         return explanation
-    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
         log.exception("Explanation by the model failed, falling back to rules")
         return None
 

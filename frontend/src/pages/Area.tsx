@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { Search, TrendingUp } from "lucide-react"
+import { MagnifyingGlassIcon, TrendUpIcon } from "@phosphor-icons/react"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { DocumentsByYear, matches } from "@/components/documents"
+import { Timeline } from "@/components/timeline"
 import { Upcoming } from "@/components/upcoming"
 import { FeedCard } from "@/components/feed"
 import { PrepareCard } from "@/components/prepare"
@@ -40,6 +41,8 @@ export function AreaPage() {
       ) : (
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 space-y-6">
+            {/* The area sends unpaid deadlines up to three months ahead, overdue ones included. */}
+            <Timeline deadlines={data.deadlines} back={14} ahead={90} />
             {data.items.length > 0 && (
               <section>
                 <h2 className="mb-3 font-semibold">{t("toDo")}</h2>
@@ -80,7 +83,7 @@ function Subscriptions({ subscriptions, yearlyCost }: { subscriptions: Subscript
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.label}</span>
             {s.increase && (
               <span className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
-                <TrendingUp className="size-3.5" />
+                <TrendUpIcon className="size-3.5" />
                 {t("increase", { pct: formatNumber(s.change_pct / 100, { style: "percent", maximumFractionDigits: 0 }) })}
               </span>
             )}
@@ -126,7 +129,7 @@ function Documents({
         </h2>
         {docs.length > 6 && (
           <div className="relative w-full sm:w-64">
-            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <MagnifyingGlassIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={filter} onChange={(e) => onFilter(e.target.value)} placeholder={t("filter")} className="pl-9" />
           </div>
         )}

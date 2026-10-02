@@ -103,3 +103,75 @@ def test_demo_seed_is_idempotent(client: TestClient) -> None:
     assert first > 0
     assert client.post("/api/demo").json()["imported"] == 0
     assert client.get("/api/stats").json()["total_documents"] == first
+
+
+def test_erase_all_data_requires_confirmation(client: TestClient) -> None:
+    from binder.config import get_settings
+
+    client.post("/api/demo")
+    client.put("/api/preferences", json={"language": "fr"})
+    files_dir = get_settings().files_dir
+    assert any(files_dir.iterdir())
+
+    assert client.delete("/api/data").status_code == 428
+    assert client.get("/api/stats").json()["total_documents"] > 0
+
+    removed = client.delete("/api/data", params={"confirm": "true"}).json()["removed"]
+    assert removed > 0
+    assert client.get("/api/stats").json()["total_documents"] == 0
+    assert client.get("/api/deadlines").json() == []
+    assert not any(files_dir.iterdir())
+    # One history entry remains; the machine's settings are kept.
+    assert len(client.get("/api/activity").json()) == 1
+    assert client.get("/api/preferences").json()["language"] == "fr"
+
+
+def _real_pdf(text: str) -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842).insert_text((72, 72), text)
+    doc.set_metadata({"producer": "Scanner", "creationDate": "D:20260101000000"})
+    data = bytes(doc.tobytes())
+    doc.close()
+    return data
+
+
+def test_clear_demo_finds_older_versions_and_leftover_files(client: TestClient) -> None:
+    from binder import security
+    from binder.config import get_settings
+    from binder.samples import build_samples
+
+    samples = build_samples()
+    # Imported by an older version: no demo batch, only the file tells it apart.
+    legacy = upload(client, samples[0])
+    # A real document that happens to share a demo file name stays.
+    real = client.post(
+        "/api/documents",
+        files={"file": (samples[1].filename, _real_pdf("Mon vrai avis"), "application/pdf")},
+    ).json()
+    # A demo file no document points to any more.
+    files_dir = get_settings().files_dir
+    leftover = files_dir / "leftover.bin"
+    leftover.write_bytes(security.encrypt(samples[2].pdf()))
+
+    assert client.get("/api/demo").json() == {"documents": 1, "leftovers": 1}
+    r = client.delete("/api/demo").json()
+    assert r == {"removed": 1, "files": 2}  # its file and the leftover
+    assert client.get(f"/api/documents/{legacy['id']}").status_code == 404
+    assert client.get(f"/api/documents/{real['id']}").status_code == 200
+    assert not leftover.exists()
+    assert client.get("/api/demo").json() == {"documents": 0, "leftovers": 0}
+
+    # With no demo left, it can be loaded again.
+    assert client.post("/api/demo").json()["imported"] > 0
+
+
+def test_erase_all_data_deletes_leftover_files(client: TestClient) -> None:
+    from binder.config import get_settings
+
+    files_dir = get_settings().files_dir
+    files_dir.mkdir(parents=True, exist_ok=True)
+    (files_dir / "orphan.bin").write_bytes(b"old")
+    client.delete("/api/data", params={"confirm": "true"})
+    assert not any(files_dir.iterdir())

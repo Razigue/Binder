@@ -14,7 +14,6 @@ import sys
 import threading
 import time
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -418,8 +417,7 @@ def _share_qt_profile() -> None:
 
 
 class Desktop:
-    def __init__(self, finish_update: Path | None) -> None:
-        self.finish_update = finish_update
+    def __init__(self) -> None:
         self.server: uvicorn.Server | None = None
         self.language: i18n.Language = i18n.DEFAULT_LANGUAGE
 
@@ -491,41 +489,12 @@ class Desktop:
         window.destroy()
 
     def _update(self, splash: Splash) -> bool:
-        """True if a new version was installed and started: this one must exit."""
-        root = updater.install_root()
-        if root is None:
-            return False
-        manager = updater.installed() if self.finish_update is None else None
-        if manager is not None:
-            return self._update_installed(splash, manager)
-        if self.finish_update is not None:
-            splash.status(splash.t("installing"))
-            updater.finish(self.finish_update, root)
-            updater.launch(self.finish_update)
-            return True
-        threading.Thread(target=updater.cleanup, args=(root,), daemon=True).start()
-        if not get_settings().auto_update:
-            return False
+        """Velopack: downloads the update, then applies it once this process has exited.
 
-        splash.status(splash.t("checking"))
-        try:
-            release = updater.check()
-        except (httpx.HTTPError, ValueError, KeyError) as e:
-            log.info("Could not check for updates: %s", e)
-            return False
-        if release is None:
-            return False
-        log.info("Updating %s → %s", __version__, release.version)
-        text = splash.t("downloading", version=release.version)
-        splash.status(text, 0.0)
-        new_root = updater.prepare(root, release, splash.progress(text))
-        splash.status(splash.t("installing"))
-        updater.install(root, new_root)
-        return True
-
-    def _update_installed(self, splash: Splash, manager: Any) -> bool:
-        """Velopack: downloads the update, then applies it once this process has exited."""
-        if not get_settings().auto_update:
+        True if an update is being applied: this process must exit.
+        """
+        manager = updater.installed()
+        if manager is None or not get_settings().auto_update:
             return False
         splash.status(splash.t("checking"))
         try:
@@ -566,5 +535,5 @@ class Desktop:
         return f"{url}/?{guard.TOKEN_PARAM}={token}"
 
 
-def run(finish_update: Path | None = None) -> None:
-    Desktop(finish_update).run()
+def run() -> None:
+    Desktop().run()

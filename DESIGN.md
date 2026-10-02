@@ -79,7 +79,7 @@ components:
 
 Source of truth: `frontend/src/index.css` (CSS variables, light `:root` and `.dark`). Tokens above
 mirror it; if they disagree, the CSS wins. Stack: Tailwind v4 + shadcn/ui (`base-nova`, Base UI
-primitives), Lucide icons, Geist Variable.
+primitives), Phosphor icons (`@phosphor-icons/react`, `*Icon` names), Geist Variable.
 
 ## Overview
 
@@ -112,7 +112,7 @@ carries the brand; colour elsewhere is a signal (urgency, category), never ornam
 ### Signals (Tailwind palette, not tokens)
 - Urgency (`urgencyStyles`, `lib/format.ts`): late/urgent red, soon amber, later emerald; as dot,
   pill (`-50` bg / `-700` text; dark `-500/15` bg / `-300` text) or text.
-- Categories (`CATEGORY_STYLE`, `lib/categories.tsx`): one hue + Lucide icon per category, pastel
+- Categories (`CATEGORY_STYLE`, `lib/categories.tsx`): one hue + Phosphor icon per category, pastel
   tile in light, `/15` tint in dark.
 - `destructive` red for delete actions, always as a soft tint (`/10` bg), never solid.
 
@@ -177,7 +177,7 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Stat card:** neutral link card: big number, label with a small muted icon, hint. The number
   turns red or amber only when it is non-zero and calls for action.
 - **Badges:** 20px pill, 12px/500.
-- **Navigation:** 14px/500 rows with 16px Lucide icon, `gap-3`, at least 40px high; active = `sidebar-accent` fill.
+- **Navigation:** 14px/500 rows with 16px Phosphor icon, `gap-3`, at least 40px high; active = `sidebar-accent` fill.
 - **Agent:** opened from the nav or the ask bar as a side sheet, not a route.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
   (the urgency in words), amount right-aligned, then its actions as buttons: one primary,

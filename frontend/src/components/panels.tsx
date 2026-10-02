@@ -2,9 +2,7 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
-import {
-  CircleAlert, CircleCheck, Copy, Download, FileText, FolderCheck, Info, Loader2, Mail, Pencil, Scale, Send,
-} from "lucide-react"
+import { WarningCircleIcon, CheckCircleIcon, CopyIcon, DownloadSimpleIcon, FileTextIcon, FolderOpenIcon, InfoIcon, CircleNotchIcon, EnvelopeIcon, PencilSimpleIcon, ScalesIcon, PaperPlaneTiltIcon, GlobeIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
@@ -109,7 +107,7 @@ function LegalCheckNote({
     <div className="space-y-2 text-xs">
       {confirmed.length > 0 && (
         <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
-          <Scale className="size-3.5 text-primary" />
+          <ScalesIcon className="size-3.5 text-primary" />
           {open.length ? t("letterLawSomeVerified", { count: confirmed.length, date }) : t("letterLawVerified", { date })}
           {sources.length > 0 && (
             <span>
@@ -121,7 +119,7 @@ function LegalCheckNote({
       {open.map((point) => (
         <div key={point.claim} className="space-y-1 rounded-md border border-amber-300/60 bg-amber-50 px-2.5 py-2 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <p className="flex items-start gap-1.5 font-medium">
-            <CircleAlert className="mt-px size-3.5 shrink-0" />
+            <WarningCircleIcon className="mt-px size-3.5 shrink-0" />
             {point.status === "outdated" ? t("letterLawContradicted") : t("letterLawUnchecked")}
           </p>
           <p className="pl-5 italic">{t("letterLawQuote", { text: point.claim })}</p>
@@ -190,11 +188,11 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-        <Mail className="size-4 shrink-0 text-muted-foreground" />
+        <EnvelopeIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{letter.subject}</span>
         {letter.id !== null && !editing && (
           <Button variant="ghost" size="icon-sm" onClick={() => setEditing(true)} aria-label={t("letterEdit")} title={t("letterEdit")}>
-            <Pencil />
+            <PencilSimpleIcon />
           </Button>
         )}
         <Button
@@ -204,7 +202,7 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
           aria-label={t("letterCopy")}
           title={t("letterCopy")}
         >
-          <Copy />
+          <CopyIcon />
         </Button>
       </div>
       {editing ? (
@@ -226,9 +224,15 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
       )}
       <div className="space-y-2 border-t px-3 py-2.5">
         <p className={cn("flex items-center gap-1.5 text-xs", blanks ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
-          {blanks ? <CircleAlert className="size-3.5" /> : <CircleCheck className="size-3.5 text-primary" />}
+          {blanks ? <WarningCircleIcon className="size-3.5" /> : <CheckCircleIcon className="size-3.5 text-primary" />}
           {blanks ? t("letterBlanks", { count: blanks }) : t("letterComplete")}
         </p>
+        {letter.sources.length > 0 && (
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            <GlobeIcon className="size-3.5 text-primary" />
+            {t("letterAdapted")} <SourceLinks sources={letter.sources} />
+          </p>
+        )}
         <LegalCheckNote
           check={letter.verification}
           body={body}
@@ -243,11 +247,11 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
         {letter.id !== null && (
           <div className="flex flex-wrap gap-2 pt-1">
             <Button size="sm" render={<a href={letterPdfUrl(letter.id)} download />} nativeButton={false}>
-              <Download /> {t("letterPdf")}
+              <DownloadSimpleIcon /> {t("letterPdf")}
             </Button>
             {!letter.sent_on && (
               <Button size="sm" variant="outline" onClick={() => sent.mutate()} disabled={sent.isPending}>
-                <Send /> {t("letterSent")}
+                <PaperPlaneTiltIcon /> {t("letterSent")}
               </Button>
             )}
           </div>
@@ -262,7 +266,7 @@ export function FolderView({ folder }: { folder: Folder }) {
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-        <FolderCheck className="size-4 text-muted-foreground" />
+        <FolderOpenIcon className="size-4 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{folder.title}</span>
         <span className="text-xs text-muted-foreground">{t("folderReady", { ready: folder.ready, total: folder.total })}</span>
       </div>
@@ -285,7 +289,7 @@ export function FolderView({ folder }: { folder: Folder }) {
       </ul>
       <div className="border-t px-3 py-2">
         <Button size="sm" variant="outline" render={<a href={folderExportUrl(folder.key)} download />} nativeButton={false}>
-          <Download /> {t("folderDownload")}
+          <DownloadSimpleIcon /> {t("folderDownload")}
         </Button>
       </div>
     </div>
@@ -315,7 +319,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
   if (!data)
     return (
       <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> {t("reportAnalysing", { count: 1 })}
+        <CircleNotchIcon className="size-4 animate-spin" /> {t("reportAnalysing", { count: 1 })}
       </p>
     )
   const open = (id: number) => {
@@ -327,7 +331,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
       <p className="text-sm text-muted-foreground">
         {data.processing ? (
           <span className="flex items-center gap-2">
-            <Loader2 className="size-4 animate-spin" /> {t("reportAnalysing", { count: data.processing })}
+            <CircleNotchIcon className="size-4 animate-spin" /> {t("reportAnalysing", { count: data.processing })}
           </span>
         ) : (
           data.summary
@@ -344,7 +348,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
                 </button>
                 {d.status === "processing" ? (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Loader2 className="size-3 animate-spin" /> {t("reportAnalysing", { count: 1 })}
+                    <CircleNotchIcon className="size-3 animate-spin" /> {t("reportAnalysing", { count: 1 })}
                   </p>
                 ) : (
                   <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
@@ -353,13 +357,13 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
                     ))}
                     {events.map((e) => (
                       <li key={e} className="flex items-start gap-1 text-foreground">
-                        <Info className="mt-0.5 size-3 shrink-0 text-primary" /> {e}
+                        <InfoIcon className="mt-0.5 size-3 shrink-0 text-primary" /> {e}
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
-              <FileText className="hidden size-4 text-muted-foreground sm:block" />
+              <FileTextIcon className="hidden size-4 text-muted-foreground sm:block" />
             </div>
             {question && (
               <div className="ml-10 rounded-lg bg-amber-50/70 p-3 dark:bg-amber-500/10">

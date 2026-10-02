@@ -1,10 +1,7 @@
 import { useNavigate } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import {
-  AlertTriangle, CalendarClock, CircleHelp, FileSearch, FileText, Hourglass, Inbox, Lightbulb, ListChecks, Mail,
-  Newspaper, Users, type LucideIcon,
-} from "lucide-react"
+import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon, FileTextIcon, HourglassIcon, TrayIcon, LightbulbIcon, ListChecksIcon, EnvelopeIcon, NewspaperIcon, UsersIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { useAgent } from "@/components/agent"
@@ -19,19 +16,19 @@ import { formatAmount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 // Icon of a card without area or category.
-const KIND_ICON: Record<FeedItem["kind"], LucideIcon> = {
-  report: Inbox,
-  briefing: Newspaper,
-  question: CircleHelp,
-  deadline: CalendarClock,
-  expiry: CalendarClock,
-  anomaly: AlertTriangle,
-  missing: FileSearch,
-  letter: Mail,
-  suggestion: Lightbulb,
-  household: Users,
-  journey: ListChecks,
-  waiting: Hourglass,
+const KIND_ICON: Record<FeedItem["kind"], Icon> = {
+  report: TrayIcon,
+  briefing: NewspaperIcon,
+  question: QuestionIcon,
+  deadline: ClockCountdownIcon,
+  expiry: ClockCountdownIcon,
+  anomaly: WarningIcon,
+  missing: FileMagnifyingGlassIcon,
+  letter: EnvelopeIcon,
+  suggestion: LightbulbIcon,
+  household: UsersIcon,
+  journey: ListChecksIcon,
+  waiting: HourglassIcon,
 }
 
 const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
@@ -130,7 +127,7 @@ export function FeedCard({ item }: { item: FeedItem }) {
                 disabled={pending}
                 onClick={() => run(action)}
               >
-                {action.type === "open" && <FileText />}
+                {action.type === "open" && <FileTextIcon />}
                 {action.label}
               </Button>
             ))}

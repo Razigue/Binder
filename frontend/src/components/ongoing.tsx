@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { ChevronRight, CircleCheck, FilePen, ListChecks, Mail } from "lucide-react"
+import { CaretRightIcon, CheckCircleIcon, NotePencilIcon, ListChecksIcon, EnvelopeIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -66,7 +66,7 @@ function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void 
     <li>
       <button onClick={onOpen} className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-muted/40">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-          <ListChecks className="size-4" />
+          <ListChecksIcon className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
@@ -80,7 +80,7 @@ function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void 
             {next ? tj("nextStep", { step: next.title }) : tj("allDone")}
           </span>
         </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
       </button>
     </li>
   )
@@ -114,7 +114,7 @@ function LetterRow({ letter }: { letter: Letter }) {
   return (
     <li className="flex gap-3 px-5 py-3">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-        <Mail className="size-4" />
+        <EnvelopeIcon className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
         <button
@@ -135,7 +135,7 @@ function LetterRow({ letter }: { letter: Letter }) {
         <div className="mt-2 flex flex-wrap gap-2">
           {state === "noAnswer" && (
             <Button size="xs" disabled={pending} onClick={() => followUp.mutate()}>
-              <FilePen /> {t("followUp")}
+              <NotePencilIcon /> {t("followUp")}
             </Button>
           )}
           {state === "draft" ? (
@@ -144,7 +144,7 @@ function LetterRow({ letter }: { letter: Letter }) {
             </Button>
           ) : (
             <Button size="xs" variant="outline" disabled={pending} onClick={() => answered.mutate()}>
-              <CircleCheck /> {t("markAnswered")}
+              <CheckCircleIcon /> {t("markAnswered")}
             </Button>
           )}
         </div>
@@ -170,14 +170,14 @@ export function FinishedLetters() {
                 onClick={() => panels.showLetter(l)}
                 className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-muted/40"
               >
-                <Mail className="size-4 shrink-0 text-muted-foreground" />
+                <EnvelopeIcon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{l.subject}</span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {l.recipient} · {t("status.answered")}
                   </span>
                 </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
               </button>
             </li>
           ))}
