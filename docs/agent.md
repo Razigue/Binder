@@ -52,9 +52,10 @@ Each request is a loop of at most `MAX_STEPS` model turns (`_run_llm`):
 | `list_subscriptions` | recurring bills, yearly cost, price increases |
 | `prepare_folder` | file for any purpose: the rental / mortgage / CAF packs, or pieces picked by the model |
 | `list_alerts` | anomalies (billed twice, catch-up bill, overpayment, price rise, lower pay) and missing documents |
-| `documents_to_review`, `documents_to_sort_out` | documents Binder has a question about, documents that can go |
+| `documents_to_review`, `documents_to_archive` | documents Binder has a question about, old documents that can go to the archives |
 | `create_reminder`, `mark_deadline_paid` | deadlines |
 | `update_document`, `validate_document`, `trash_document` | changes asked by the user |
+| `archive_documents`, `unarchive_documents` | move old documents to the archives (nothing deleted) or bring them back |
 | `write_letter` | complete letter for any purpose, saved with its PDF and follow-up; `kind` (payment plan, appeal, formal notice, change of address…) adds the legal points of that letter |
 | `start_journey` | checklist of a life event (moving, birth, death, tax return) built from the documents |
 | `list_journeys`, `mark_journey_step` | journeys under way and their steps; tick a step the user did |

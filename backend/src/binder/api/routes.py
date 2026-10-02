@@ -26,7 +26,7 @@ from binder import __version__, i18n
 from binder.agent import confirm, loop, tools
 from binder.api.assistant import folder_status, folder_zip, undoable
 from binder.config import get_settings
-from binder.db import WITHOUT_TEXT, get_engine, get_session
+from binder.db import WITHOUT_TEXT, get_engine, get_session, in_use
 from binder.models import Activity, Category, Deadline, Document, DocumentStatus
 from binder.schemas import (
     ActivityOut,
@@ -53,10 +53,10 @@ from binder.schemas import (
     PreferencesOut,
     Stats,
     SystemStatus,
-    TrashRequest,
 )
 from binder.services import (
     activity,
+    archive,
     deadlines,
     editing,
     erase,
@@ -70,7 +70,6 @@ from binder.services import (
     organize,
     preferences,
     profile,
-    retention,
     settings_store,
     subscriptions,
     undo,
@@ -141,6 +140,16 @@ T = i18n.catalog(
         },
         "bulk_updated_one": {"en": "{n} document updated", "fr": "{n} document modifié"},
         "bulk_updated_other": {"en": "{n} documents updated", "fr": "{n} documents modifiés"},
+        "bulk_archived_one": {"en": "{n} document archived", "fr": "{n} document archivé"},
+        "bulk_archived_other": {"en": "{n} documents archived", "fr": "{n} documents archivés"},
+        "bulk_unarchived_one": {
+            "en": "{n} document back from the archives",
+            "fr": "{n} document sorti des archives",
+        },
+        "bulk_unarchived_other": {
+            "en": "{n} documents back from the archives",
+            "fr": "{n} documents sortis des archives",
+        },
         "bulk_restored_one": {"en": "{n} document restored", "fr": "{n} document restauré"},
         "bulk_restored_other": {
             "en": "{n} documents restored",
@@ -269,17 +278,22 @@ def stats(session: SessionDep) -> Stats:
         .where(Deadline.due_date <= today + timedelta(days=30))
     ).one()
     to_review = session.exec(
-        select(func.count()).where(Document.status == DocumentStatus.TO_REVIEW, ACTIVE)
+        select(func.count()).where(Document.status == DocumentStatus.TO_REVIEW, in_use())
     ).one()
     classified = session.exec(
         select(func.count())
-        .where(Document.status == DocumentStatus.CLASSIFIED, ACTIVE)
+        .where(Document.status == DocumentStatus.CLASSIFIED, in_use())
         .where(Document.created_at >= week_ago)
     ).one()
-    total = session.exec(select(func.count()).select_from(Document).where(ACTIVE)).one()
+    total = session.exec(select(func.count()).select_from(Document).where(in_use())).one()
     trashed = session.exec(select(func.count()).select_from(Document).where(~ACTIVE)).one()
+    archived = session.exec(
+        select(func.count())
+        .select_from(Document)
+        .where(ACTIVE, col(Document.archived_at).is_not(None))
+    ).one()
     rows = session.exec(
-        select(Document.category, func.count()).where(ACTIVE).group_by(Document.category)
+        select(Document.category, func.count()).where(in_use()).group_by(Document.category)
     ).all()
     return Stats(
         upcoming_deadlines=upcoming,
@@ -287,6 +301,7 @@ def stats(session: SessionDep) -> Stats:
         classified_this_week=classified,
         total_documents=total,
         trashed=trashed,
+        archived=archived,
         by_category={Category(cat).value: n for cat, n in rows},
     )
 
@@ -334,17 +349,23 @@ def list_documents(
     q: str | None = None,
     category: Category | None = None,
     status: DocumentStatus | None = None,
+    archived: bool = False,
     limit: Annotated[int, Query(le=500)] = 100,
 ) -> list[DocumentOut]:
+    """Documents of the active views, or with `archived` those of the archives."""
     if q:
         result = tools.search_documents(
-            session, q, category.value if category else None, limit=limit
+            session, q, category.value if category else None, limit=limit, archived=archived
         )
         docs = result.documents
         if status:
             docs = [d for d in docs if d.status == status]
     else:
-        stmt = select(Document).options(*WITHOUT_TEXT).where(ACTIVE)
+        stmt = select(Document).options(*WITHOUT_TEXT)
+        if archived:
+            stmt = stmt.where(ACTIVE, col(Document.archived_at).is_not(None))
+        else:
+            stmt = stmt.where(in_use())
         if category:
             stmt = stmt.where(Document.category == category)
         if status:
@@ -405,6 +426,24 @@ def bulk_reanalyze(
 def _analyze_all(ids: list[int]) -> None:
     for doc_id in ids:
         ingest.analyze_in_background(doc_id)
+
+
+@router.post("/documents/bulk/archive")
+def bulk_archive(body: DocumentIds, session: SessionDep, response: Response) -> BulkResult:
+    docs = _selected(session, body.ids)
+    with undoable(session, response):
+        count = sum(archive.archive(session, doc) for doc in docs)
+    session.commit()
+    return BulkResult(count=count, message=T.plural("bulk_archived", count))
+
+
+@router.post("/archives/restore")
+def bulk_unarchive(body: DocumentIds, session: SessionDep, response: Response) -> BulkResult:
+    docs = _selected(session, body.ids)
+    with undoable(session, response):
+        count = sum(archive.unarchive(session, doc) for doc in docs)
+    session.commit()
+    return BulkResult(count=count, message=T.plural("bulk_unarchived", count))
 
 
 @router.post("/trash/restore")
@@ -479,6 +518,27 @@ def delete_document(doc_id: int, session: SessionDep, response: Response) -> Non
     with undoable(session, response):
         ingest.trash(session, _get_doc(session, doc_id))
     session.commit()
+
+
+@router.post("/documents/{doc_id}/archive")
+def archive_document(doc_id: int, session: SessionDep, response: Response) -> DocumentDetail:
+    """Moves the document to the archives: out of the active views, still readable."""
+    doc = _get_doc(session, doc_id)
+    with undoable(session, response):
+        archive.archive(session, doc)
+    session.commit()
+    session.refresh(doc)
+    return DocumentDetail.from_model(doc)
+
+
+@router.post("/documents/{doc_id}/unarchive")
+def unarchive_document(doc_id: int, session: SessionDep, response: Response) -> DocumentDetail:
+    doc = _get_doc(session, doc_id)
+    with undoable(session, response):
+        archive.unarchive(session, doc)
+    session.commit()
+    session.refresh(doc)
+    return DocumentDetail.from_model(doc)
 
 
 @router.get("/trash")
@@ -605,7 +665,7 @@ def list_expirations(session: SessionDep) -> list[ExpirationOut]:
     docs = session.exec(
         select(Document)
         .options(*WITHOUT_TEXT)
-        .where(ACTIVE, col(Document.expiry_date).is_not(None))
+        .where(in_use(), col(Document.expiry_date).is_not(None))
         .where(col(Document.superseded_by).is_(None), col(Document.duplicate_of).is_(None))
         .order_by(col(Document.expiry_date))
     )
@@ -627,28 +687,22 @@ def list_expirations(session: SessionDep) -> list[ExpirationOut]:
 
 
 @router.get("/retention")
-def list_deletable(session: SessionDep) -> list[DocumentOut]:
-    """Documents that can be sorted out: retention period over or version replaced."""
-    docs = session.exec(
-        select(Document).options(*WITHOUT_TEXT).where(ACTIVE).order_by(col(Document.issue_date))
-    )
-    return [DocumentOut.from_model(d) for d in docs if retention.deletion_reason(d)]
+def list_archivable(session: SessionDep) -> list[DocumentOut]:
+    """Documents that can go to the archives: retention period over or version replaced."""
+    return [DocumentOut.from_model(d) for d, _ in archive.suggestions(session)]
 
 
-@router.post("/retention/trash")
-def trash_deletable(body: TrashRequest, session: SessionDep, response: Response) -> dict[str, int]:
-    """Moves the documents chosen by the user to the trash, if they can indeed be sorted out."""
-    trashed = 0
+@router.post("/retention/archive")
+def archive_old(body: DocumentIds, session: SessionDep, response: Response) -> BulkResult:
+    """Archives the documents the user chose, if they can indeed be archived."""
+    count = 0
     with undoable(session, response):
-        for doc_id in body.ids:
-            doc = session.get(Document, doc_id)
-            reason = retention.deletion_msg(doc, inline=True) if doc else None
-            if doc is None or reason is None:
-                continue
-            ingest.trash(session, doc, reason=reason)
-            trashed += 1
+        for doc in _selected(session, body.ids):
+            reason = archive.archivable(doc)
+            if reason is not None:
+                count += archive.archive(session, doc, reason)
     session.commit()
-    return {"trashed": trashed}
+    return BulkResult(count=count, message=T.plural("bulk_archived", count))
 
 
 # --- Folders (checklists) ------------------------------------------------------------------

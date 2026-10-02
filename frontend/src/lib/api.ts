@@ -80,7 +80,11 @@ export interface Doc {
   keep_forever: boolean
   retention_rule: string | null
   keep_until: string | null
-  deletable_reason: string | null
+  /** Why it can go to the archives (retention period over, replaced), null when it stays. */
+  archivable_reason: string | null
+  /** In the archives: out of the active views, still readable and restorable. */
+  archived_at: string | null
+  archive_reason: "retention" | "replaced" | "user" | null
   renew_from: string | null
   person: string | null
   area: Area | null
@@ -128,6 +132,7 @@ export interface Stats {
   classified_this_week: number
   total_documents: number
   trashed: number
+  archived: number
   by_category: Record<string, number>
 }
 
@@ -688,7 +693,7 @@ export const api = {
     return request<Preferences>("/preferences", json("PUT", body))
   },
   stats: () => request<Stats>("/stats"),
-  documents: (p: { q?: string; category?: Category; status?: DocumentStatus; limit?: number } = {}) =>
+  documents: (p: { q?: string; category?: Category; status?: DocumentStatus; archived?: boolean; limit?: number } = {}) =>
     request<Doc[]>(`/documents${query(p)}`),
   document: (id: number) => request<DocDetail>(`/documents/${id}`),
   upload: (file: File, batch?: string) => {
@@ -703,6 +708,10 @@ export const api = {
   bulkUpdate: (ids: number[], patch: BulkPatch) =>
     request<BulkResult>("/documents/bulk/update", json("POST", { ids, ...patch })),
   bulkReanalyze: (ids: number[]) => request<BulkResult>("/documents/bulk/reanalyze", json("POST", { ids })),
+  bulkArchive: (ids: number[]) => request<BulkResult>("/documents/bulk/archive", json("POST", { ids })),
+  bulkUnarchive: (ids: number[]) => request<BulkResult>("/archives/restore", json("POST", { ids })),
+  archiveDocument: (id: number) => request<DocDetail>(`/documents/${id}/archive`, { method: "POST" }),
+  unarchiveDocument: (id: number) => request<DocDetail>(`/documents/${id}/unarchive`, { method: "POST" }),
   bulkRestore: (ids: number[]) => request<BulkResult>("/trash/restore", json("POST", { ids })),
   bulkPurge: (ids: number[]) => request<BulkResult>("/trash/purge", json("POST", { ids, confirm: true })),
   explanation: (id: number, refresh = false) =>
@@ -757,8 +766,6 @@ export const api = {
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
   expirations: () => request<Expiration[]>("/expirations"),
-  retention: () => request<Doc[]>("/retention"),
-  trashDeletable: (ids: number[]) => request<{ trashed: number }>("/retention/trash", json("POST", { ids })),
   importSettings: () => request<ImportSettings>("/import/settings"),
   saveImportSettings: (body: ImportSettingsIn) => request<ImportSettings>("/import/settings", json("PUT", body)),
   runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),

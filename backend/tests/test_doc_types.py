@@ -153,9 +153,9 @@ def test_warranty_retention_and_deadline() -> None:
         rule = retention.rule_for(doc)
         assert rule is not None and rule.label == "As long as the warranty runs"
         assert retention.keep_until(doc) == doc.expiry_date
-        assert retention.deletion_reason(doc) is None
+        assert retention.archivable_reason(doc) is None
         doc.expiry_date = today - timedelta(days=1)
-        assert retention.deletion_reason(doc) == (
+        assert retention.archivable_reason(doc) == (
             "Retention period exceeded (as long as the warranty runs)"
         )
 

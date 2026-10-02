@@ -57,9 +57,7 @@ def test_superseded_document_loses_its_expiry_deadline(
     assert [e["document"]["id"] for e in client.get("/api/expirations").json()] == [new["id"]]
 
 
-def test_retention_suggests_old_documents_and_never_deletes(
-    client: TestClient, samples: list[Sample]
-) -> None:
+def test_retention_rules(client: TestClient, samples: list[Sample]) -> None:
     phone = upload(client, by_name(samples, "facture-orange.pdf"))
     slip = upload(client, by_name(samples, "bulletin-paie.pdf"))
     assert phone["retention_rule"] == "1 year"
@@ -67,26 +65,7 @@ def test_retention_suggests_old_documents_and_never_deletes(
     with i18n.using("fr"):
         french = client.get(f"/api/documents/{slip['id']}").json()
     assert french["retention_rule"] == "Jusqu'à la liquidation de la retraite"
-    assert client.get("/api/retention").json() == []
-
-    long_ago = (date.today() - timedelta(days=800)).isoformat()
-    for doc in (phone, slip):
-        client.patch(f"/api/documents/{doc['id']}", json={"issue_date": long_ago})
-    [suggested] = client.get("/api/retention").json()
-    assert suggested["id"] == phone["id"]
-    assert suggested["deletable_reason"] == "Retention period exceeded (1 year)"
-    # The suggestion deletes nothing.
-    assert client.get(f"/api/documents/{phone['id']}").status_code == 200
-
-    # Only what really can be sorted out goes to the trash.
-    r = client.post("/api/retention/trash", json={"ids": [phone["id"], slip["id"]]}).json()
-    assert r == {"trashed": 1}
-    assert [d["id"] for d in client.get("/api/trash").json()] == [phone["id"]]
-    log = client.get("/api/activity", params={"document_id": phone["id"]}).json()
-    assert log[0]["summary"].endswith("moved to the trash (retention period exceeded (1 year))")
-    with i18n.using("fr"):
-        log = client.get("/api/activity", params={"document_id": phone["id"]}).json()
-    assert log[0]["summary"].endswith("mis à la corbeille (durée de conservation dépassée (1 an))")
+    # Archiving the old ones: see test_archive.py.
 
 
 def test_keep_forever_removes_suggestion(client: TestClient, samples: list[Sample]) -> None:
@@ -94,7 +73,7 @@ def test_keep_forever_removes_suggestion(client: TestClient, samples: list[Sampl
     long_ago = (date.today() - timedelta(days=800)).isoformat()
     client.patch(f"/api/documents/{phone['id']}", json={"issue_date": long_ago})
     kept = client.patch(f"/api/documents/{phone['id']}", json={"keep_forever": True}).json()
-    assert kept["deletable_reason"] is None
+    assert kept["archivable_reason"] is None
     assert client.get("/api/retention").json() == []
     log = client.get("/api/activity", params={"document_id": phone["id"]}).json()
     assert log[0]["summary"].endswith("kept beyond the recommended period")
@@ -112,5 +91,5 @@ def test_replaced_identity_card_can_be_sorted(client: TestClient) -> None:
     new = upload(client, identity_card(today - timedelta(days=5), today + timedelta(days=3645)))
     [suggested] = client.get("/api/retention").json()
     assert suggested["id"] == old["id"]
-    assert suggested["deletable_reason"] == "Replaced by a newer version"
+    assert suggested["archivable_reason"] == "Replaced by a newer version"
     assert [e["document"]["id"] for e in client.get("/api/expirations").json()] == [new["id"]]

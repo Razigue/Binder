@@ -18,7 +18,7 @@ from binder import i18n
 from binder.models import Document
 
 # Changes held back for the user's confirmation once content was read.
-GUARDED = {"trash_document", "update_document", "update_profile"}
+GUARDED = {"trash_document", "archive_documents", "update_document", "update_profile"}
 # Tools whose result carries content written by others (documents, mails, web pages).
 READS_CONTENT = {
     "search_documents", "read_document", "view_document", "explain_document", "web_search",
@@ -38,6 +38,10 @@ T = i18n.catalog(
         "trash_document": {
             "en": "Move “{title}” to the trash",
             "fr": "Mettre « {title} » à la corbeille",
+        },
+        "archive_documents": {
+            "en": "Archive: {titles}",
+            "fr": "Archiver : {titles}",
         },
         "update_document": {
             "en": "Change {fields} of “{title}”",
@@ -73,6 +77,10 @@ def _describe(session: Session, name: str, arguments: dict[str, Any]) -> str:
     if name == "update_profile":
         fields = [f"{v}" for k, v in arguments.items() if v not in (None, "")]
         return T(name, fields=sep.join(fields))
+    if name == "archive_documents":
+        ids = [int(i) for i in arguments.get("document_ids") or [] if str(i).isdigit()]
+        titles = [d.title if (d := session.get(Document, i)) else f"#{i}" for i in ids[:10]]
+        return T(name, titles=sep.join(titles))
     doc_id = arguments.get("document_id")
     doc = session.get(Document, int(str(doc_id))) if str(doc_id or "").isdigit() else None
     title = doc.title if doc is not None else f"#{doc_id}"

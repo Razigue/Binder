@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
+from binder.db import in_use
 from binder.models import Category, Document, DocumentStatus
 from binder.services import areas, editing, ingest, learning, rules
 
@@ -147,6 +148,8 @@ def _summary(doc: Document) -> str:
 def question_for(session: Session, doc: Document) -> Question | None:
     if doc.id is None or doc.status != DocumentStatus.TO_REVIEW or doc.deleted_at:
         return None
+    if doc.archived_at is not None:
+        return None
     title = doc.title or doc.filename
     missing = [m for m in json.loads(doc.missing_fields) if m != "duplicate"]
 
@@ -217,7 +220,7 @@ def question_for(session: Session, doc: Document) -> Question | None:
 def pending(session: Session) -> list[Question]:
     docs = session.exec(
         select(Document)
-        .where(Document.status == DocumentStatus.TO_REVIEW, col(Document.deleted_at).is_(None))
+        .where(Document.status == DocumentStatus.TO_REVIEW, in_use())
         .order_by(col(Document.created_at).desc())
     )
     return [q for d in docs if (q := question_for(session, d)) is not None]

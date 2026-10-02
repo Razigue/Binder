@@ -37,6 +37,18 @@ T = i18n.catalog(
         "question": {"en": "One question for you", "fr": "Une question pour vous"},
         "summary_filed_one": {"en": "{n} document filed", "fr": "{n} document rangé"},
         "summary_filed_other": {"en": "{n} documents filed", "fr": "{n} documents rangés"},
+        "summary_archived_one": {
+            "en": "{n} old document archived",
+            "fr": "{n} ancien document archivé",
+        },
+        "summary_archived_other": {
+            "en": "{n} old documents archived",
+            "fr": "{n} anciens documents archivés",
+        },
+        "archived": {
+            "en": "Archived: {reason}",
+            "fr": "Archivé : {reason}",
+        },
         "summary_waiting_one": {
             "en": "{n} waiting for the local AI",
             "fr": "{n} en attente de l'IA locale",
@@ -87,6 +99,10 @@ def source_of(batch: str) -> str:
 
 
 def _facts(doc: Document) -> list[str]:
+    if doc.archived_at is not None:
+        from binder.services import archive
+
+        return [T("archived", reason=archive.reason_msg(doc.archive_reason))]
     facts = []
     area = doc.area or areas.area_of(doc)
     if area and doc.status not in (DocumentStatus.PROCESSING, DocumentStatus.WAITING):
@@ -149,13 +165,19 @@ def build(session: Session, batch: str) -> ImportReport | None:
         sum(
             d.amount or 0
             for d in docs
-            if d.due_date and d.due_date >= date.today() and d.amount is not None
+            if d.due_date
+            and d.due_date >= date.today()
+            and d.amount is not None
+            and d.archived_at is None
         ),
         2,
     )
     asked = sum(i.question is not None for i in items)
     noted = sum(len(i.events) for i in items)
-    parts = [T.plural("summary_filed", len(docs) - processing - waiting - asked)]
+    old = sum(d.archived_at is not None for d in docs)
+    parts = [T.plural("summary_filed", len(docs) - processing - waiting - asked - old)]
+    if old:
+        parts.append(T.plural("summary_archived", old))
     if waiting:
         parts.append(T.plural("summary_waiting", waiting))
     if asked:

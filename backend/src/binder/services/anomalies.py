@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
+from binder.db import in_use
 from binder.models import Category, DocType, Document
 from binder.services import activity, subscriptions
 from binder.services.rules import normalize, parse_amount
@@ -164,11 +165,7 @@ def _amount_near(norm: str, match: re.Match[str], fallback: float | None) -> flo
 
 def _active(session: Session, today: date) -> list[Document]:
     """Documents in force dated within the look-back period."""
-    docs = session.exec(
-        select(Document).where(
-            col(Document.deleted_at).is_(None), col(Document.duplicate_of).is_(None)
-        )
-    )
+    docs = session.exec(select(Document).where(in_use(), col(Document.duplicate_of).is_(None)))
     return [d for d in docs if _when(d) >= today - LOOKBACK]
 
 

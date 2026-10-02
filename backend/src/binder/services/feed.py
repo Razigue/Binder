@@ -2,7 +2,7 @@
 
 Sources: import reports, the weekly briefing, questions about uncertain documents, deadlines,
 renewals, anomalies, missing documents, letters to send or follow up, the next steps of the
-journeys under way, documents waiting for the local AI, and proactive suggestions (sort out old
+journeys under way, documents waiting for the local AI, and proactive suggestions (archive old
 papers, compare an insurance before it renews). Every action runs through `act`, which the
 routes wrap in an undo capture.
 """
@@ -14,24 +14,23 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, Correspondence, Deadline, DocType, Document, DocumentStatus
 from binder.services import (
     activity,
     anomalies,
+    archive,
     areas,
     backup,
     briefing,
     deadlines,
     editing,
     household,
-    ingest,
     journeys,
     letters,
     missing,
     questions,
     reports,
-    retention,
     settings_store,
     undo,
 )
@@ -101,19 +100,20 @@ T = i18n.catalog(
         "ask_for_it": {"en": "Ask for it", "fr": "Le demander"},
         "not_needed": {"en": "Not needed", "fr": "Pas besoin"},
         "sort_title_one": {
-            "en": "{n} document can go",
-            "fr": "{n} document peut partir",
+            "en": "{n} old document can go to the archives",
+            "fr": "{n} ancien document peut aller aux archives",
         },
         "sort_title_other": {
-            "en": "{n} documents can go",
-            "fr": "{n} documents peuvent partir",
+            "en": "{n} old documents can go to the archives",
+            "fr": "{n} anciens documents peuvent aller aux archives",
         },
         "sort_detail": {
-            "en": "Past their retention period, or replaced by a newer version: {titles}.",
+            "en": "Past their retention period, or replaced by a newer version: {titles}. "
+            "Nothing is deleted: they stay readable in the archives.",
             "fr": "Durée de conservation dépassée, ou remplacés par une version plus récente : "
-            "{titles}.",
+            "{titles}. Rien n'est supprimé : ils restent consultables dans les archives.",
         },
-        "sort_action": {"en": "Move to the trash", "fr": "Mettre à la corbeille"},
+        "sort_action": {"en": "Archive them", "fr": "Les archiver"},
         "renewal_title": {
             "en": "{issuer} contract renews on {date:date}",
             "fr": "Le contrat {issuer} se renouvelle le {date:date}",
@@ -166,14 +166,8 @@ T = i18n.catalog(
         },
         "act_paid": {"en": "“{title}” marked as paid", "fr": "« {title} » marqué comme payé"},
         "act_answered": {"en": "Answer saved", "fr": "Réponse enregistrée"},
-        "act_trashed_one": {
-            "en": "{n} document moved to the trash",
-            "fr": "{n} document mis à la corbeille",
-        },
-        "act_trashed_other": {
-            "en": "{n} documents moved to the trash",
-            "fr": "{n} documents mis à la corbeille",
-        },
+        "act_archived_one": {"en": "{n} document archived", "fr": "{n} document archivé"},
+        "act_archived_other": {"en": "{n} documents archived", "fr": "{n} documents archivés"},
         "act_dismissed": {"en": "Hidden", "fr": "Masqué"},
         "act_letter": {"en": "Letter ready", "fr": "Courrier prêt"},
         "act_sent": {
@@ -217,7 +211,7 @@ DRAFT_WINDOW = 14
 TONE_RANK = {"urgent": 0, "soon": 1, "info": 2}
 # Actions run by the server; the others are handled by the interface (open, agent, upload…).
 SERVER_ACTIONS = {
-    "answer", "mark_paid", "trash_many", "letter", "letter_sent", "letter_answered",
+    "answer", "mark_paid", "archive_many", "letter", "letter_sent", "letter_answered",
     "follow_up", "dismiss", "confirm_recovery", "remind", "mark_seen", "journey_step",
 }  # fmt: skip
 
@@ -387,7 +381,7 @@ def _expirations(session: Session, today: date) -> list[FeedItem]:
     docs = session.exec(
         select(Document)
         .options(*WITHOUT_TEXT)
-        .where(col(Document.deleted_at).is_(None), col(Document.expiry_date).is_not(None))
+        .where(in_use(), col(Document.expiry_date).is_not(None))
         .where(col(Document.superseded_by).is_(None), col(Document.duplicate_of).is_(None))
     ).all()
     items = []
@@ -502,13 +496,8 @@ def _missing(session: Session) -> list[FeedItem]:
 
 
 def _sort_out(session: Session) -> list[FeedItem]:
-    docs = [
-        d
-        for d in session.exec(
-            select(Document).options(*WITHOUT_TEXT).where(col(Document.deleted_at).is_(None))
-        )
-        if retention.deletion_reason(d)
-    ]
+    """Old documents to archive: suggested, the user confirms."""
+    docs = [d for d, _ in archive.suggestions(session)]
     if not docs:
         return []
     ids = sorted(d.id for d in docs if d.id is not None)
@@ -526,7 +515,7 @@ def _sort_out(session: Session) -> list[FeedItem]:
             document_ids=ids,
             actions=[
                 Action(
-                    type="trash_many", label=T("sort_action"), primary=True, params={"ids": ids}
+                    type="archive_many", label=T("sort_action"), primary=True, params={"ids": ids}
                 ),
                 _dismiss_action(key, T("not_needed")),
             ],
@@ -538,7 +527,7 @@ def _renewals(session: Session, today: date) -> list[FeedItem]:
     docs = session.exec(
         select(Document)
         .options(*WITHOUT_TEXT)
-        .where(col(Document.deleted_at).is_(None), Document.category == Category.INSURANCE)
+        .where(in_use(), Document.category == Category.INSURANCE)
         .where(Document.doc_type == DocType.PAYMENT_NOTICE, col(Document.due_date).is_not(None))
     ).all()
     items = []
@@ -673,7 +662,7 @@ def _reply(session: Session, row: Correspondence) -> Document | None:
     docs = session.exec(
         select(Document)
         .options(*WITHOUT_TEXT)
-        .where(col(Document.deleted_at).is_(None), col(Document.issuer).is_not(None))
+        .where(in_use(), col(Document.issuer).is_not(None))
         .where(col(Document.created_at) >= datetime.combine(row.sent_on, time.min, UTC))
         .order_by(col(Document.created_at))
     ).all()
@@ -810,7 +799,7 @@ def _int(params: dict[str, Any], name: str) -> int:
 
 def _doc(session: Session, doc_id: int) -> Document:
     doc = session.get(Document, doc_id)
-    if doc is None or doc.deleted_at is not None:
+    if doc is None or doc.deleted_at is not None or doc.archived_at is not None:
         raise BadAction("document")
     return doc
 
@@ -845,16 +834,14 @@ def act(session: Session, kind: str, params: dict[str, Any], *, actor: str = "us
             raise BadAction("deadline")
         editing.update_deadline(session, deadline, {"done": True}, actor=actor)
         return ActResult(message=T("act_paid", title=deadline.title))
-    if kind == "trash_many":
+    if kind == "archive_many":
         count = 0
         for raw in params.get("ids") or []:
             old = session.get(Document, int(raw))
-            reason = retention.deletion_msg(old, inline=True) if old else None
-            if old is None or old.deleted_at is not None or reason is None:
-                continue
-            ingest.trash(session, old, actor=actor, reason=reason)
-            count += 1
-        return ActResult(message=T.plural("act_trashed", count))
+            reason = archive.archivable(old) if old else None
+            if old is not None and reason is not None:
+                count += archive.archive(session, old, reason, actor=actor)
+        return ActResult(message=T.plural("act_archived", count))
     if kind == "letter":
         doc_id = params.get("document_id")
         related = _doc(session, int(doc_id)) if doc_id else None

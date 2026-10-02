@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import { CalendarDotsIcon, CheckIcon, EnvelopeIcon, CaretLeftIcon, CaretRightIcon, CopyIcon, DownloadSimpleIcon, FolderIcon, ClockCounterClockwiseIcon, HourglassIcon, CircleNotchIcon, DotsThreeIcon, PencilSimpleIcon, ArrowsClockwiseIcon, TrashIcon, XIcon } from "@phosphor-icons/react"
+import { ArchiveIcon, ArrowUUpLeftIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -14,7 +15,7 @@ import { CategoryIcon } from "@/components/CategoryIcon"
 import { StatusBadge } from "@/components/DocumentList"
 import { ActivityList } from "@/components/ActivityList"
 import {
-  useActivity, useDeleteDocument, useDocument, useFeed, useInvalidateAll, useUpdateDocument,
+  useActivity, useArchiveDocument, useDeleteDocument, useDocument, useFeed, useInvalidateAll, useUpdateDocument,
 } from "@/hooks/queries"
 import { useAgent, useAgentViewing } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
@@ -187,6 +188,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
   const [draft, setDraft] = useState<Draft>(() => toDraft(doc))
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
+  const archiving = useArchiveDocument()
   const invalidate = useInvalidateAll()
   const reanalyze = useMutation({ mutationFn: () => api.reanalyze(doc.id), onSuccess: invalidate })
   const navigate = useNavigate()
@@ -293,6 +295,11 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
             <DropdownMenuItem render={<a href={fileUrl(doc.id)} target="_blank" rel="noreferrer" />}>
               <DownloadSimpleIcon /> {t("openOriginal")}
             </DropdownMenuItem>
+            {doc.archived_at === null && (
+              <DropdownMenuItem onClick={() => archiving.archive.mutate(doc.id)}>
+                <ArchiveIcon /> {t("archive")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -505,7 +512,19 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
   const latest = useDocument(doc.superseded_by)
   const update = useUpdateDocument(doc.id)
   const remove = useDeleteDocument()
+  const { unarchive } = useArchiveDocument()
   const navigate = useNavigate()
+
+  if (doc.archived_at !== null)
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-3 text-sm">
+        <ArchiveIcon className="size-4 shrink-0 text-muted-foreground" />
+        <p className="min-w-0 flex-1">{t(`archivedBecause.${doc.archive_reason ?? "user"}`)}</p>
+        <Button size="sm" variant="outline" disabled={unarchive.isPending} onClick={() => unarchive.mutate(doc.id)}>
+          <ArrowUUpLeftIcon /> {t("unarchive")}
+        </Button>
+      </div>
+    )
 
   if (doc.duplicate_of !== null)
     return (
@@ -559,6 +578,7 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
 function RetentionInfo({ doc }: { doc: DocDetail }) {
   const t = useT(documentDetail)
   const update = useUpdateDocument(doc.id)
+  const { archive } = useArchiveDocument()
   if (!doc.retention_rule) return null
   const setKeep = (keep_forever: boolean) =>
     update.mutate(
@@ -583,14 +603,19 @@ function RetentionInfo({ doc }: { doc: DocDetail }) {
             {t("restore")}
           </Button>
         ) : (
-          doc.deletable_reason && (
-            <Button variant="outline" size="sm" onClick={() => setKeep(true)} disabled={update.isPending}>
-              {t("keep")}
-            </Button>
+          doc.archivable_reason && (
+            <div className="flex shrink-0 gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setKeep(true)} disabled={update.isPending}>
+                {t("keep")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => archive.mutate(doc.id)} disabled={archive.isPending}>
+                <ArchiveIcon /> {t("archiveIt")}
+              </Button>
+            </div>
           )
         )}
       </div>
-      {doc.deletable_reason && <p className="mt-2 text-amber-700 dark:text-amber-400">{doc.deletable_reason}.</p>}
+      {doc.archivable_reason && <p className="mt-2 text-muted-foreground">{doc.archivable_reason}.</p>}
     </div>
   )
 }

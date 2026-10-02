@@ -255,7 +255,7 @@ SCENARIOS = [
     Scenario(
         "tri",
         ["Quels documents je peux jeter ?"],
-        tools=["documents_to_sort_out"],
+        tools=["documents_to_archive"],
     ),
     Scenario(
         "dossier_location",

@@ -9,7 +9,6 @@ export const keys = {
   deadlines: (p: object) => ["deadlines", p] as const,
   trash: ["trash"] as const,
   expirations: ["expirations"] as const,
-  retention: ["retention"] as const,
   activity: (p: object) => ["activity", p] as const,
 }
 
@@ -70,6 +69,8 @@ export function useBulkDocuments() {
     }),
     reanalyze: useMutation({ mutationFn: api.bulkReanalyze, ...options }),
     restore: useMutation({ mutationFn: api.bulkRestore, ...options }),
+    archive: useMutation({ mutationFn: api.bulkArchive, ...options }),
+    unarchive: useMutation({ mutationFn: api.bulkUnarchive, ...options }),
     purge: useMutation({ mutationFn: api.bulkPurge, ...options }),
   }
 }
@@ -108,8 +109,13 @@ export function useExpirations() {
   return useQuery({ queryKey: keys.expirations, queryFn: api.expirations })
 }
 
-export function useRetention() {
-  return useQuery({ queryKey: keys.retention, queryFn: api.retention })
+/** Archive or bring back one document (both offer "Undo"). */
+export function useArchiveDocument() {
+  const invalidate = useInvalidateAll()
+  return {
+    archive: useMutation({ mutationFn: api.archiveDocument, onSuccess: invalidate }),
+    unarchive: useMutation({ mutationFn: api.unarchiveDocument, onSuccess: invalidate }),
+  }
 }
 
 export const feedKey = ["feed"] as const

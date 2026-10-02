@@ -119,8 +119,8 @@ examples to start from. Below, what needs you, most urgent first, each with its 
   the CAF or owed to you, a price rise, a lower payslip; Binder offers to write the letter;
 - missing documents: a monthly bill that did not arrive, a missing payslip, this year's tax
   notice, a new insurance certificate;
-- suggestions: compare an insurance before it renews, send old papers to the trash, follow up a
-  letter that got no answer;
+- suggestions: compare an insurance before it renews, archive old papers (past their retention
+  period or replaced by a newer version), follow up a letter that got no answer;
 - every Monday, **your week** in a few sentences.
 
 On the side, **In progress** follows your life events and your letters (to send, awaiting an
@@ -204,6 +204,12 @@ that sender.
 
 **Can I undo something?** Yes: right after any action, click **Undo**. A document in the
 **Trash** can be restored as long as you have not deleted it permanently.
+
+**What happens to old papers?** Binder never deletes them. Once a paper is past its retention
+period, or replaced by a newer version, Binder offers to **archive** it (a paper imported
+already that old is archived straight away). Archived papers leave your to-do list, alerts and
+files, but stay encrypted on your computer: find them in the **Archives** tab, search them,
+download them or bring them back in one click.
 
 **Which AI model will my computer get?** The best one it runs comfortably:
 

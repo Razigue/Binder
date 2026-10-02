@@ -18,7 +18,7 @@ from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT, get_engine, get_session, reset_engine
+from binder.db import WITHOUT_TEXT, get_engine, get_session, in_use, reset_engine
 from binder.models import Correspondence, Deadline, Document
 from binder.schemas import DeadlineOut, DocumentOut, Letter, LetterEdit, LetterRequest
 from binder.services import (
@@ -101,9 +101,7 @@ class FeedOut(BaseModel):
 def get_feed(session: SessionDep) -> FeedOut:
     items = feed.build(session)
     session.commit()  # the recovery code is created on first use
-    total = session.exec(
-        select(func.count()).select_from(Document).where(col(Document.deleted_at).is_(None))
-    ).one()
+    total = session.exec(select(func.count()).select_from(Document).where(in_use())).one()
     return FeedOut(items=items, documents=total, setup=setup.status())
 
 
@@ -176,7 +174,7 @@ def _active_docs(session: Session) -> list[Document]:
         session.exec(
             select(Document)
             .options(*WITHOUT_TEXT)
-            .where(col(Document.deleted_at).is_(None))
+            .where(in_use())
             .order_by(col(Document.issue_date).desc(), col(Document.created_at).desc())
         )
     )

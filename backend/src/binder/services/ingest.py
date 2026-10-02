@@ -14,7 +14,14 @@ from sqlmodel import Session, col, or_, select
 from binder import i18n, security
 from binder.config import get_settings
 from binder.db import get_engine, index_document, unindex_document
-from binder.models import Category, Correspondence, Deadline, Document, DocumentStatus
+from binder.models import (
+    Activity,
+    Category,
+    Correspondence,
+    Deadline,
+    Document,
+    DocumentStatus,
+)
 from binder.schemas import Extraction
 from binder.services import (
     activity,
@@ -478,6 +485,7 @@ def analyze(session: Session, doc: Document) -> Document:
     index_document(session, doc)
     embeddings.index(session, doc)
     organize.reorganize(session, doc, previous_key)
+    _archive_if_old(session, doc)
     profile.learn(session)
     session.flush()
     subscriptions.check_increase(session, doc)
@@ -485,6 +493,22 @@ def analyze(session: Session, doc: Document) -> Document:
     session.commit()
     session.refresh(doc)
     return doc
+
+
+def _archive_if_old(session: Session, doc: Document) -> None:
+    """A document imported already past its retention period (or older than a version Binder
+    holds) goes straight to the archives: nothing to ask, nothing to do. Not one the user took
+    back out of the archives."""
+    from binder.services import archive
+
+    reason = archive.archivable(doc)
+    if reason is None:
+        return
+    restored = session.exec(
+        select(Activity.id).where(Activity.document_id == doc.id, Activity.action == "unarchive")
+    ).first()
+    if restored is None:
+        archive.archive(session, doc, reason, actor="binder")
 
 
 def _scan_pages(data: bytes, mime_type: str, read: ReadResult) -> list[bytes]:

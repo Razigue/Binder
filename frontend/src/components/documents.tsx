@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { ArchiveIcon, SealCheckIcon, CaretRightIcon, DownloadSimpleIcon, ArrowSquareOutIcon, TrayArrowDownIcon, HourglassIcon, CircleNotchIcon, ArrowsClockwiseIcon, TrashIcon } from "@phosphor-icons/react"
+import { ArchiveIcon, ArrowUUpLeftIcon, PushPinIcon, SealCheckIcon, CaretRightIcon, DownloadSimpleIcon, ArrowSquareOutIcon, TrayArrowDownIcon, HourglassIcon, CircleNotchIcon, ArrowsClockwiseIcon, TrashIcon } from "@phosphor-icons/react"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import {
   RowCheckbox, SelectionBar, SelectionMenu, selectableRow, selectedRowClass, useSelection, useSelectionKeys,
@@ -82,6 +82,7 @@ export function DocumentsByYear({ docs }: { docs: Doc[] }) {
                           d.issuer,
                           d.person,
                           d.superseded_by !== null ? t("oldVersion") : null,
+                          d.archived_at !== null ? t("archived") : null,
                           d.source_letter_id !== null ? t("sentByYou") : null,
                           d.status === "to_review" ? t("question") : null,
                         ]
@@ -117,6 +118,7 @@ function useDocumentActions(docs: Doc[], ids: number[], clear: () => void): Sele
   // The backend's answer shows its own toast with "Undo"; only what it cannot undo needs one here.
   const update = (patch: BulkPatch) => bulk.update.mutate({ ids, patch }, { onError: fail })
   const kept = chosen.every((d) => d.keep_forever)
+  const archived = chosen.every((d) => d.archived_at !== null)
   const actions: (SelectionAction | false)[] = [
     chosen.length === 1 && {
       key: "open",
@@ -146,8 +148,15 @@ function useDocumentActions(docs: Doc[], ids: number[], clear: () => void): Sele
     {
       key: "keep",
       label: kept ? t("keepNoLonger") : t("keepForever"),
-      icon: ArchiveIcon,
+      icon: PushPinIcon,
       onSelect: () => update({ keep_forever: !kept }),
+    },
+    {
+      key: "archive",
+      label: archived ? t("unarchive") : t("archive"),
+      icon: archived ? ArrowUUpLeftIcon : ArchiveIcon,
+      onSelect: () =>
+        (archived ? bulk.unarchive : bulk.archive).mutate(ids, { onSuccess: clear, onError: fail }),
     },
     {
       key: "reanalyze",

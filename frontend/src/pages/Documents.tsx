@@ -15,17 +15,22 @@ import { documents as messages } from "@/i18n/messages/documents"
 import { AREAS, api, type Area } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-/** Every document in one place: the search reads their content, not just their titles. */
+type Tab = "documents" | "archives"
+
+/** Every document in one place: the search reads their content, not just their titles. The
+ * archives hold the old ones, out of every active view but still readable. */
 export function DocumentsPage() {
   const t = useT(messages)
   const ta = useT(areaMessages)
   const agent = useAgent()
+  const [tab, setTab] = useState<Tab>("documents")
   const [text, setText] = useState("")
   const [area, setArea] = useState<Area | null>(null)
   const q = useDeferredValue(text.trim())
+  const archived = tab === "archives"
   const docs = useQuery({
-    queryKey: ["documents", { q, limit: 500 }],
-    queryFn: () => api.documents({ q: q || undefined, limit: 500 }),
+    queryKey: ["documents", { q, archived, limit: 500 }],
+    queryFn: () => api.documents({ q: q || undefined, archived: archived || undefined, limit: 500 }),
     placeholderData: (previous) => previous,
     refetchInterval: (query) => (query.state.data?.some((d) => d.status === "processing") ? 1500 : false),
   })
@@ -36,17 +41,37 @@ export function DocumentsPage() {
   return (
     <>
       <PageHeader title={t("title")} subtitle={t("subtitle")} actions={<ImportButton />} />
+      <div role="tablist" aria-label={t("title")} className="mb-4 flex gap-1 border-b">
+        {(["documents", "archives"] as const).map((key) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => {
+              setTab(key)
+              setArea(null)
+            }}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(`tab.${key}`)}
+          </button>
+        ))}
+      </div>
       <div className="relative mb-3">
         <MagnifyingGlassIcon className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={t("search")}
-          aria-label={t("search")}
+          placeholder={archived ? t("searchArchives") : t("search")}
+          aria-label={archived ? t("searchArchives") : t("search")}
           className="h-11 pl-10"
           autoFocus
         />
       </div>
+      {archived && <p className="mb-3 text-sm text-muted-foreground">{t("archivesHint")}</p>}
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
         {[null, ...AREAS.filter((a) => present.has(a) || a === area)].map((a) => (
           <button
@@ -71,8 +96,8 @@ export function DocumentsPage() {
           </div>
         ) : shown.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
-            <p className="text-sm font-medium">{q || area ? t("noMatch") : t("empty")}</p>
-            {!q && !area && <p className="text-sm text-muted-foreground">{t("emptyHint")}</p>}
+            <p className="text-sm font-medium">{q || area ? t("noMatch") : archived ? t("archivesEmpty") : t("empty")}</p>
+            {!q && !area && <p className="text-sm text-muted-foreground">{archived ? t("archivesEmptyHint") : t("emptyHint")}</p>}
           </div>
         ) : (
           <DocumentsByYear docs={shown} />
