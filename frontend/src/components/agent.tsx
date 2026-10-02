@@ -7,10 +7,12 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type Dispatch,
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
+  type SetStateAction,
 } from "react"
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
@@ -43,6 +45,8 @@ import { ACCEPT } from "./upload"
 
 // Suggested prompts by what the agent does, in the UI language (the agent understands both).
 const SUGGESTIONS = {
+  // Only while a document is open on screen: the questions are about it.
+  viewing: ["explainDoc", "todoDoc", "deadlineDoc"],
   ask: ["taxIncome", "electricity", "upcoming"],
   watch: ["alerts", "renew", "october"],
   act: ["letter", "folder", "reminder", "moving"],
@@ -76,12 +80,33 @@ interface Draft {
   error?: string
 }
 
-const AgentContext = createContext<{ open: (question?: string) => void } | null>(null)
+/** Document open on screen: questions that name no other document are about it. */
+interface Viewing {
+  id: number
+  title: string
+}
+
+const AgentContext = createContext<{
+  open: (question?: string) => void
+  setViewing: Dispatch<SetStateAction<Viewing | null>>
+} | null>(null)
 
 export function useAgent() {
   const ctx = useContext(AgentContext)
   if (!ctx) throw new Error("useAgent must be used inside AgentProvider")
   return ctx
+}
+
+/** Tells the agent which document the page shows, while it is shown. */
+export function useAgentViewing(doc: Viewing | undefined) {
+  const { setViewing } = useAgent()
+  const id = doc?.id
+  const title = doc?.title
+  useEffect(() => {
+    if (id === undefined || title === undefined) return
+    setViewing({ id, title })
+    return () => setViewing((current) => (current?.id === id ? null : current))
+  }, [id, title, setViewing])
 }
 
 /** Text of an answer as copied: without citation markers, links reduced to their label. */
@@ -97,6 +122,10 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [pending, setPending] = useState(false)
+  const [viewing, setViewing] = useState<Viewing | null>(null)
+  // Document on screen the user unlinked from their questions, until another one is shown.
+  const [ignored, setIgnored] = useState<number | null>(null)
+  const about = viewing && viewing.id !== ignored ? viewing : null
   const controller = useRef<AbortController | null>(null)
   const nextId = useRef(0)
   const invalidate = useInvalidateAll()
@@ -147,6 +176,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
           else if (event.type === "step") progress(() => ({ draft: "" }))
         },
         abort.signal,
+        about?.id,
       )
       .then((response) => {
         update(id, { response })
@@ -189,7 +219,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AgentContext.Provider value={{ open }}>
+    <AgentContext.Provider value={{ open, setViewing }}>
       {children}
       <Sheet open={isOpen} onOpenChange={setOpen}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-lg">
@@ -211,6 +241,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
             onAsk={ask}
             onStop={stop}
             onNavigate={() => setOpen(false)}
+            viewing={about}
+            onIgnoreViewing={() => setIgnored(about?.id ?? null)}
           />
         </SheetContent>
       </Sheet>
@@ -224,12 +256,16 @@ function AgentConversation({
   onAsk,
   onStop,
   onNavigate,
+  viewing,
+  onIgnoreViewing,
 }: {
   turns: Turn[]
   pending: boolean
   onAsk: (question: string, attachments?: Doc[], at?: number) => void
   onStop: () => void
   onNavigate: () => void
+  viewing: Viewing | null
+  onIgnoreViewing: () => void
 }) {
   const t = useT(messages)
   const [editing, setEditing] = useState<number | null>(null)
@@ -244,6 +280,9 @@ function AgentConversation({
     if (el && pinned.current) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [turns, pending])
 
+  const groups = (Object.keys(SUGGESTIONS) as (keyof typeof SUGGESTIONS)[]).filter(
+    (group) => group !== "viewing" || viewing,
+  )
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files")
 
   return (
@@ -281,9 +320,11 @@ function AgentConversation({
         {turns.length === 0 && (
           <>
             <p className="text-sm font-medium">{t("prompt")}</p>
-            {(Object.keys(SUGGESTIONS) as (keyof typeof SUGGESTIONS)[]).map((group) => (
+            {groups.map((group) => (
               <div key={group}>
-                <p className="mb-2 text-xs font-medium text-muted-foreground">{t(`group.${group}`)}</p>
+                <p className="mb-2 truncate text-xs font-medium text-muted-foreground">
+                  {t(`group.${group}`, { title: viewing?.title ?? "" })}
+                </p>
                 <div className="flex flex-col items-start gap-1.5">
                   {SUGGESTIONS[group].map((s) => (
                     <button
@@ -374,6 +415,8 @@ function AgentConversation({
         ref={composer}
         pending={pending}
         onStop={onStop}
+        viewing={viewing}
+        onIgnoreViewing={onIgnoreViewing}
         onSend={(question, attachments) => {
           pinned.current = true
           onAsk(question, attachments)
@@ -574,11 +617,15 @@ function Composer({
   pending,
   onSend,
   onStop,
+  viewing,
+  onIgnoreViewing,
 }: {
   ref: Ref<ComposerHandle>
   pending: boolean
   onSend: (question: string, attachments: Doc[]) => void
   onStop: () => void
+  viewing: Viewing | null
+  onIgnoreViewing: () => void
 }) {
   const t = useT(messages)
   const [text, setText] = useState("")
@@ -647,6 +694,25 @@ function Composer({
   return (
     <div className="border-t p-3">
       <div className="rounded-xl border bg-card shadow-xs transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
+        {viewing && (
+          <div className="flex px-2.5 pt-2.5">
+            <span
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md border bg-background py-0.5 pr-0.5 pl-2 text-xs text-muted-foreground"
+              title={t("viewingHint")}
+            >
+              <FileTextIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{t("viewing", { title: viewing.title })}</span>
+              <button
+                onClick={onIgnoreViewing}
+                aria-label={t("ignoreViewing")}
+                title={t("ignoreViewing")}
+                className="flex size-5 shrink-0 items-center justify-center rounded-full hover:bg-muted hover:text-foreground"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          </div>
+        )}
         {drafts.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {drafts.map((d) => (

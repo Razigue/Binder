@@ -905,6 +905,15 @@ def list_activity(
 # --- Agent ---------------------------------------------------------------------------------
 
 
+def _viewed(session: Session, body: ChatRequest) -> Document | None:
+    """The document open on screen, unless it is attached or gone (a stale page): ignored rather
+    than refused, the question still gets an answer."""
+    if body.viewing is None or body.viewing in body.attachments:
+        return None
+    doc = session.get(Document, body.viewing)
+    return doc if doc is not None and doc.deleted_at is None else None
+
+
 @router.post("/agent/chat")
 def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
     attached = [
@@ -913,7 +922,9 @@ def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
     ]
     with undo.capture() as cap:
         try:
-            response = loop.run(session, body.message, body.history, attached)
+            response = loop.run(
+                session, body.message, body.history, attached, viewing=_viewed(session, body)
+            )
         except loop.AgentError as exc:
             raise HTTPException(503, str(exc)) from exc
     response.undo = undo.save(session, cap, actor="agent")
@@ -968,7 +979,10 @@ def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
                     ingest.wait_for_analysis(worker, _get_doc(worker, doc_id)) for doc_id in ids
                 ]
                 with undo.capture() as cap:
-                    response = loop.run(worker, body.message, body.history, attached, emit)
+                    viewing = _viewed(worker, body)
+                    response = loop.run(
+                        worker, body.message, body.history, attached, emit, viewing=viewing
+                    )
                 response.undo = undo.save(worker, cap, actor="agent")
                 worker.commit()
                 events.put({"type": "done", "response": response.model_dump(mode="json")})
