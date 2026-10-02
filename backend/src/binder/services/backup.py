@@ -3,7 +3,7 @@
 Once a day, when something changed, Binder writes one archive of the library to the backup
 folder: the database as SQLCipher keeps it (encrypted), the encrypted files, and the master
 secret wrapped with the recovery code (scrypt + Fernet). Nothing in it is readable without that
-code. The code is shown once, in the Today feed, until the user says they wrote it down; it is
+code. The code is shown once, in the To do feed, until the user says they wrote it down; it is
 then forgotten by Binder.
 
 On a new computer (or after losing the `key` file), the welcome screen restores an archive with

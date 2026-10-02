@@ -1,4 +1,4 @@
-"""Routes of the agent's proactive side: Today feed and its actions, undo, import reports, life
+"""Routes of the agent's proactive side: To do feed and its actions, undo, import reports, life
 areas, household, letters, packs, local AI setup and backups."""
 
 import contextlib
@@ -89,7 +89,7 @@ def _doc(session: Session, doc_id: int) -> Document:
     return doc
 
 
-# --- Today feed ------------------------------------------------------------------------------
+# --- To do feed ------------------------------------------------------------------------------
 
 
 class FeedOut(BaseModel):

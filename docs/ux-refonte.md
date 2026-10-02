@@ -9,7 +9,7 @@ choice, and what is left. One commit per step.
 |---|------|-------|
 | 1 | Archives + Archives tab | done |
 | 2 | Questions (filter, grouping, cap, panel with the document) | done |
-| 3 | Navigation and To do | to do |
+| 3 | Navigation and To do | done |
 | 4 | My papers | to do |
 | 5 | Life events (Démarches) | to do |
 | 6 | First launch | to do |
@@ -80,7 +80,28 @@ choice, and what is left. One commit per step.
 - **Import report**: unchanged summary ("19 documents filed · 2 questions…"), with fewer
   questions; on the demo, 2 questions (garage quote, an EDF bill without a payment date).
 
+### Step 3: navigation and To do
+
+- **Routes**: `/` To do, `/papers` My papers, `/procedures` Life events ("Démarches"; English
+  label "Life events": every entry is a situation). `/area/:area` redirects to
+  `/papers?area=…`, `/prepare` to `/procedures`, `/documents` to `/papers`; `/documents/:id`
+  (the document page, used by the activity log, the agent's citations and the feed) is
+  unchanged.
+- **Ask bar removed**: the agent opens from ＋ (on every page) or Ctrl K. Fewer things on screen;
+  the brief makes Ctrl K a shortcut, not the only path, and ＋ is that path.
+- **＋ menu**: phone scan first and highlighted (the quickest way for a paper letter), then
+  "Choose a file", then "Ask a question". Drag and drop anywhere still works.
+- **To do**: the feed's cards, one card each, import report first, then urgent, soon, for
+  information (stable order within a tone). The weekly briefing card is not shown (it repeats
+  the cards); the timeline and "Coming up" moved out (Calendar tab of My papers, step 4); "In
+  progress" lives in Life events. The count in the menu is the number of cards that are not
+  merely for information.
+- **Temporary**: until steps 4 and 5, `/papers` shows the former Documents page (with the
+  `?area=` filter) and `/procedures` the former Prepare page.
+- **Your local changes**: `AppLayout.tsx` keeps your `useLiveChanges` import on its own line,
+  so that your uncommitted change stays separate from these commits.
+
 ## Left to do
 
-- Steps 3 to 7.
+- Steps 4 to 7.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.

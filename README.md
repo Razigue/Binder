@@ -56,7 +56,7 @@ way (Windows: Settings > Apps); your documents stay in place (see [Your data](#y
    hand? Click **Load demo documents** to explore with fictitious examples. Moving to a new
    computer? Click **Restore a backup** (see [Your data](#your-data)).
 2. **That's it.** Binder gets its AI ready on its own the first time: it sets up its local AI
-   engine, picks the model that suits your computer and downloads it. The **Today** page shows
+   engine, picks the model that suits your computer and downloads it. The **To do** page shows
    the progress; Binder keeps working meanwhile. The engine is part of Binder: nothing else to
    start, and it stops when you close Binder.
 
@@ -71,7 +71,7 @@ Accepted formats: PDF, JPG, PNG.
   the same Wi-Fi as your computer and scan the QR code. Each page is captured automatically when
   you hold still. The phone warns that the connection is not private: that is expected, the page
   comes from Binder on your own network. Tap **Advanced**, then **Proceed** (once per phone).
-- **Mailbox**: in **Settings** (bottom of the menu), enter your email address and an app password.
+- **Mailbox**: in **Settings** (in the profile menu), enter your email address and an app password.
   Binder imports the attachments of new messages every 5 minutes. It only reads: it never deletes
   your emails nor marks them as read.
 - **About you**: Binder fills in your name, address, email and mobile from your documents
@@ -113,12 +113,13 @@ the AI": Binder reads and files them on its own as soon as it is ready.
 
 ## Using Binder day to day
 
-The menu puts **Ask Binder** first (or press Ctrl K anywhere), then **Today**, **Prepare**,
-**Documents** and your seven life areas.
+Binder has three places: **To do**, **My papers** and **Life events**. The **＋ Add** button,
+on every page, adds a paper (scan it with your phone, or choose a file) or asks Binder a
+question (Ctrl K does too). **Settings**, **History** and **Trash** are in the profile menu.
+On a phone, the three places and ＋ sit in a bar at the bottom of the screen.
 
-**Today** greets you with one sentence on your day and a box to ask Binder anything, with a few
-examples to start from. Below, what needs you, most urgent first, each with its one-tap actions
-(Binder's own questions, "Where does this go?", are grouped apart):
+**To do** greets you with one sentence on your day, then a pile of cards, the most urgent on
+top. Each card says what it is, what to do and by when, with its button:
 - payments due soon or late ("It's paid"), documents to renew;
 - anomalies: billed or debited twice, an unusually high catch-up bill, an overpayment claimed by
   the CAF or owed to you, a price rise, a lower payslip; Binder offers to write the letter;
@@ -126,10 +127,9 @@ examples to start from. Below, what needs you, most urgent first, each with its 
   notice, a new insurance certificate;
 - suggestions: compare an insurance before it renews, archive old papers (past their retention
   period or replaced by a newer version), follow up a letter that got no answer;
-- every Monday, **your week** in a few sentences.
+- at most three short questions from Binder (see above).
 
-On the side, **In progress** follows your life events and your letters (to send, awaiting an
-answer, to follow up), and **Coming up** lists the next two months' deadlines.
+When nothing needs you, To do says **All in order ✓**.
 
 Binder also sends **system notifications** for urgent deadlines, anomalies, documents arriving
 by email and the weekly briefing, while it is open.
@@ -144,7 +144,7 @@ tax return". Binder builds the checklist from your own documents, each step with
 the suppliers, bank and insurers to tell about a move (one tap writes each letter, and the step
 ticks itself once you mark the letter as sent), the time limits after a birth or a death, the
 donation and childcare receipts of the year with their total and the boxes to fill in. The next
-steps also appear on Today. You can ask for it in words too: "We're moving on 15 December".
+steps also appear in To do. You can ask for it in words too: "We're moving on 15 December".
 
 **Documents**: everything Binder has filed, in one list by year. The search reads the documents'
 content (a sender, a reference, a word on the page) and narrows by area; a search can also go
@@ -156,8 +156,8 @@ household member or by word). Open a document to see its preview: hover a field 
 date…) and Binder **highlights where it read it** on the page. **In short** explains the letter in
 plain language.
 
-**Ask Binder**: at the top of the menu, on Today, in the bar at the bottom of the other pages, or
-with Ctrl K. Ask in your own words, it looks
+**Ask Binder**: ＋ Add, then **Ask a question**, on every page, or Ctrl K. Ask in your own words,
+it looks
 through your documents and acts for you:
 - questions: "What is my reference tax income?", "How much did I pay for electricity over my
   last two bills?";
@@ -176,7 +176,7 @@ through your documents and acts for you:
 Each answer cites the documents it comes from; click a citation to open it.
 
 **Undo**: every action (yours or Binder's) can be undone right after, from the message that
-confirms it, or by asking "undo that". **History** and **Trash** are at the bottom of the menu.
+confirms it, or by asking "undo that". **History** and **Trash** are in the profile menu.
 
 ## Your data
 
@@ -229,7 +229,7 @@ download them or bring them back in one click.
 The 35B-A3B only puts about 3 billion of its 35 billion parameters to work on each word, so it
 stays fast even without a graphics card. Short on disk space, Binder takes the next model down.
 At each launch Binder checks your computer again: if you added memory or a graphics card, it
-offers a better model on the **Today** page, with its download size, and switches once it is
+offers a better model on the **To do** page, with its download size, and switches once it is
 downloaded (the previous one stays installed). Say **No thanks** and it will not ask again
 unless an even better model suits your computer. Binder never moves you to a smaller model on
 its own: it only warns you if the model in use has become too heavy. **Settings > Local AI**

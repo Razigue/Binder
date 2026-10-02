@@ -1,4 +1,4 @@
-"""The Today feed: everything that needs the user, as cards with one-tap actions.
+"""The To do feed: everything that needs the user, as cards with one-tap actions.
 
 Sources: import reports, the weekly briefing, questions about uncertain documents, deadlines,
 renewals, anomalies, missing documents, letters to send or follow up, the next steps of the

@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { ArrowUpIcon, VaultIcon, RobotIcon, CheckCircleIcon, FlaskIcon, CircleNotchIcon, PaperclipIcon, ArrowCounterClockwiseIcon, UploadSimpleIcon } from "@phosphor-icons/react"
+import { VaultIcon, CheckCircleIcon, FlaskIcon, CircleNotchIcon, ArrowCounterClockwiseIcon, UploadSimpleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,96 +9,77 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useAgent } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
-import { Ongoing } from "@/components/ongoing"
-import { Timeline } from "@/components/timeline"
-import { Upcoming } from "@/components/upcoming"
 import { UpgradeOffer } from "@/components/upgrade"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { usePanels } from "@/components/panels"
 import { useUpload } from "@/components/upload"
-import { useDeadlines, useFeed, useInvalidateAll, useProfile } from "@/hooks/queries"
+import { useFeed, useInvalidateAll, useProfile } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { today } from "@/i18n/messages/today"
 import { api, type FeedItem, type SetupStatus } from "@/lib/api"
 import { formatSize, formatDate, toIso } from "@/lib/format"
 
-const BACK = 14
-const AHEAD = 60
+const TONE_RANK: Record<FeedItem["tone"], number> = { urgent: 0, soon: 1, info: 2 }
+// The weekly briefing repeats the cards below it: To do shows the cards themselves.
+const HIDDEN: FeedItem["kind"][] = ["briefing"]
 
+/** To do: one pile of cards, the most urgent on top. Each says what it is, what to do and by
+ * when, with its action. Nothing else: the calendar lives in My papers. */
 export function HomePage() {
   const t = useT(today)
   const feed = useFeed()
   const data = feed.data
   const [day] = useState(() => new Date())
-  // The timeline looks two weeks back, paid ones included; "Coming up" only ahead.
-  const horizon = useMemo(
-    () => ({
-      start: toIso(new Date(day.getTime() - BACK * 86_400_000)),
-      end: toIso(new Date(day.getTime() + AHEAD * 86_400_000)),
-      include_done: true,
-    }),
-    [day],
-  )
-  const deadlines = useDeadlines(horizon)
   const greeting = useGreeting(day)
   if (data && data.documents === 0 && !data.items.some((i) => i.kind === "report")) return <Welcome setup={data.setup} />
-  const items = data?.items ?? []
-  // What to do, what Binder asks, what is merely worth knowing: three different gestures.
-  const questions = items.filter((i) => i.kind === "question")
-  const toDo = items.filter((i) => i.kind !== "question" && i.tone !== "info")
-  const later = items.filter((i) => i.kind !== "question" && i.tone === "info")
-  const attention = toDo.length + questions.length
+  const items = (data?.items ?? [])
+    .filter((i) => !HIDDEN.includes(i.kind))
+    // The import report first (what just happened), then by urgency; stable within a tone.
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index)
+    .map(({ item }) => item)
+  const attention = items.filter((i) => i.tone !== "info").length
   const summary = attention ? t("summary", { count: attention }) : t("summaryNone")
   return (
-    <>
+    <div className="mx-auto max-w-3xl">
       <PageHeader title={greeting} subtitle={data ? `${formatDate(toIso(day), "long")} · ${summary}` : formatDate(toIso(day), "long")} />
       {data && <SetupCard setup={data.setup} />}
-      <AskCard />
       {!data ? (
-        <Card className="gap-3 p-5">
+        <div className="space-y-3">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-14 w-full" />
+            <Skeleton key={i} className="h-28 w-full rounded-xl" />
           ))}
-        </Card>
+        </div>
       ) : (
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
-          <div className="min-w-0 space-y-8">
-            <Timeline deadlines={deadlines.data ?? []} back={BACK} ahead={AHEAD} loading={deadlines.isPending} />
-            {attention === 0 && (
-              <div className="flex items-start gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
-                <CheckCircleIcon className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
-                <div>
-                  <p className="font-medium">{t("allGood")}</p>
-                  <p className="text-sm text-muted-foreground">{t("allGoodHint")}</p>
-                </div>
-              </div>
-            )}
-            {toDo.length > 0 && (
-              <Section title={t("toDo")} count={toDo.length}>
-                <FeedList items={toDo} />
-              </Section>
-            )}
-            {questions.length > 0 && (
-              <Section title={t("questions")} hint={t("questionsHint")} count={questions.length}>
-                <FeedList items={questions} />
-              </Section>
-            )}
-            {later.length > 0 && (
-              <Section title={t("later")}>
-                <FeedList items={later} />
-              </Section>
-            )}
-            <DropBar />
-          </div>
-          <aside className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
-            <Ongoing limit={4} />
-            <Upcoming deadlines={(deadlines.data ?? []).filter((d) => !d.done && d.days_left >= 0).slice(0, 6)} empty={t("upcomingEmpty")} />
-          </aside>
+        <div className="space-y-3">
+          {attention === 0 && <AllInOrder />}
+          {items.map((item) => (
+            <Card key={item.key} className="gap-0 p-0">
+              <ul>
+                <FeedCard item={item} />
+              </ul>
+            </Card>
+          ))}
         </div>
       )}
-    </>
+    </div>
+  )
+}
+
+function rank(item: FeedItem): number {
+  return item.kind === "report" ? -1 : TONE_RANK[item.tone]
+}
+
+/** The reward when nothing needs the user. */
+function AllInOrder() {
+  const t = useT(today)
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-xl bg-card px-6 py-10 text-center ring-1 ring-foreground/10">
+      <CheckCircleIcon className="size-12 text-emerald-600 dark:text-emerald-400" weight="fill" />
+      <p className="text-lg font-semibold">{t("allGood")}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{t("allGoodHint")}</p>
+    </div>
   )
 }
 
@@ -113,94 +93,6 @@ function useGreeting(now: Date) {
   const evening = now.getHours() >= 18
   if (!usable) return evening ? t("evening") : t("hello")
   return evening ? t("eveningName", { name: first }) : t("helloName", { name: first })
-}
-
-function Section({ title, hint, count, children }: { title: string; hint?: string; count?: number; children: React.ReactNode }) {
-  return (
-    <section>
-      <div className="mb-3">
-        <h2 className="font-semibold">
-          {title}
-          {count !== undefined && <span className="ml-2 font-normal text-muted-foreground tabular-nums">{count}</span>}
-        </h2>
-        {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-const EXAMPLES = ["upcoming", "alerts", "letter"] as const
-
-/** The agent at the top of Today: ask or delegate in a sentence, or start from an example. */
-function AskCard() {
-  const t = useT(today)
-  const agent = useAgent()
-  const upload = useUpload()
-  const [text, setText] = useState("")
-  return (
-    <Card className="mb-8 gap-3 p-4 sm:p-5">
-      <p className="flex items-center gap-2 font-semibold">
-        <RobotIcon className="size-4 text-primary" /> {t("askTitle")}
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          agent.open(text.trim() || undefined)
-          setText("")
-        }}
-        className="flex items-center gap-2 rounded-xl border bg-background p-1.5 pl-2 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30"
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={upload.open}
-          aria-label={t("attach")}
-          title={t("attach")}
-          className="text-muted-foreground"
-        >
-          <PaperclipIcon />
-        </Button>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={t("askPlaceholder")}
-          aria-label={t("askTitle")}
-          className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
-        />
-        <Button type="submit" size="icon" aria-label={t("send")} title={t("send")}>
-          <ArrowUpIcon />
-        </Button>
-      </form>
-      <div className="flex flex-wrap items-center gap-2">
-        {EXAMPLES.map((key) => (
-          <button
-            key={key}
-            onClick={() => agent.open(t(`example.${key}`))}
-            className="rounded-lg border bg-card px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-          >
-            {t(`example.${key}`)}
-          </button>
-        ))}
-        <Link to="/prepare" className="px-1 text-sm font-medium text-primary hover:underline">
-          {t("everything")}
-        </Link>
-      </div>
-    </Card>
-  )
-}
-
-function FeedList({ items }: { items: FeedItem[] }) {
-  return (
-    <Card className="gap-0 p-0">
-      <ul className="divide-y">
-        {items.map((item) => (
-          <FeedCard key={item.key} item={item} />
-        ))}
-      </ul>
-    </Card>
-  )
 }
 
 /** The local AI installing itself: shown until it is ready, never asks anything. */

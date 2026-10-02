@@ -51,7 +51,7 @@ export function Ongoing({ limit }: { limit?: number }) {
       <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-3">
         <h2 className="font-semibold">{t("ongoing")}</h2>
         {limit !== undefined && count > limit && (
-          <Link to="/prepare" className="text-sm font-medium text-primary hover:underline">
+          <Link to="/procedures" className="text-sm font-medium text-primary hover:underline">
             {t("seeAll")}
           </Link>
         )}

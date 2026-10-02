@@ -135,19 +135,17 @@ i18n catalogs; never all-caps outside the sidebar overline.
 
 ## Layout
 
-Fixed 240px sidebar (`md`+): "Ask Binder" first (opens the agent, Ctrl K anywhere), then Today,
-Prepare (every letter, file and life event Binder handles, and what it is following) and Documents
-(search across everything), then "Your life" with the seven life areas (with a count of cards that
-need attention), and History / Trash / Settings links pinned bottom; below `md` it becomes a
-horizontal scrolling tab strip led by "Ask Binder". Today opens on the agent's composer (a sentence,
-examples, attach); every other page has the ask bar fixed at the bottom. Content in a centred
-full width (no centred column), `px-4 py-6` mobile, `px-8 py-8` desktop. Page header then content,
-`mb-7`. Today: greeting and one-sentence summary, the agent composer, then "To do", "Binder has a
-question" and "Also worth a look"; side column "In progress" (journeys, letters to send or awaiting
-an answer) and "Coming up". Area pages: main column + 24-28rem side column from `xl` (coming up,
-recurring bills, the area's "Prepare" shortcuts). Prepare: tiles in a 2-3 column grid by section,
-"In progress" on the side when there is any. Settings: one section per row, title and description on the
-left (16-20rem), cards on the right.
+Fixed 240px sidebar (`md`+): the navy **＋ Add** button first (a menu: "Scan with your phone",
+highlighted, "Choose a file", then "Ask a question"), then three 44px rows: To do (with the count
+of cards that need the user), My papers, Life events; the profile row pinned bottom opens a menu
+with Settings, History and Trash. Below `md`: a slim top bar (logo, profile button) and a fixed
+bottom bar of four 64px cells: the three places (icon over label) and a round navy ＋. No ask bar:
+the agent opens from ＋ or Ctrl K. Content `px-4 pt-6 pb-28` mobile (room for the bottom bar),
+`px-8 py-8` desktop. Page header then content, `mb-7`. To do: a centred column (`max-w-3xl`),
+greeting and one-sentence summary, then one card per item, urgent first, the import report on
+top; empty state: a large green check and "All in order ✓". Prepare: tiles in a 2-3 column grid
+by section, "In progress" on the side when there is any. Settings: one section per row, title and
+description on the left (16-20rem), cards on the right.
 Grids: `sm:grid-cols-3` stats, `lg:grid-cols-2` sections, gaps 16-24px. Lists are full-width rows
 (`px-5 py-3`) divided by hairlines inside a card.
 

@@ -304,7 +304,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
             <DropdownMenuItem
               variant="destructive"
               onClick={() =>
-                remove.mutate(doc.id, { onSuccess: () => navigate(doc.area ? `/area/${doc.area}` : "/") })
+                remove.mutate(doc.id, { onSuccess: () => navigate(doc.area ? `/papers?area=${doc.area}` : "/papers") })
               }
             >
               <TrashIcon /> {t("trash")}
@@ -438,7 +438,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
 
         <p className="mt-5 flex items-center gap-2 text-sm text-primary">
           <FolderIcon className="size-4" />
-          <Link to={doc.area ? `/area/${doc.area}` : "/"} className="hover:underline">
+          <Link to={doc.area ? `/papers?area=${doc.area}` : "/papers"} className="hover:underline">
             {categoryLabel(doc.category)}
           </Link>
           <CaretRightIcon className="size-3" /> {year}

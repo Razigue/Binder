@@ -70,7 +70,7 @@ export function PrepareCard({ area }: { area: Area }) {
           <h2 className="font-semibold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("hint")}</p>
         </div>
-        <Link to="/prepare" className="shrink-0 text-sm font-medium text-primary hover:underline">
+        <Link to="/procedures" className="shrink-0 text-sm font-medium text-primary hover:underline">
           {t("seeAll")}
         </Link>
       </div>

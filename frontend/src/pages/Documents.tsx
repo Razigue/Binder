@@ -1,5 +1,6 @@
 import { useDeferredValue, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { useSearchParams } from "react-router-dom"
 import { RobotIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -25,7 +26,10 @@ export function DocumentsPage() {
   const agent = useAgent()
   const [tab, setTab] = useState<Tab>("documents")
   const [text, setText] = useState("")
-  const [area, setArea] = useState<Area | null>(null)
+  // A former area page lands here filtered on that area (/papers?area=housing).
+  const [params] = useSearchParams()
+  const initial = params.get("area")
+  const [area, setArea] = useState<Area | null>(AREAS.includes(initial as Area) ? (initial as Area) : null)
   const q = useDeferredValue(text.trim())
   const archived = tab === "archives"
   const docs = useQuery({
