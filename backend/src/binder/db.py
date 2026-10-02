@@ -1,5 +1,6 @@
 """Encrypted SQLite engine (SQLCipher) and FTS5 full-text index."""
 
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -15,6 +16,7 @@ from binder.config import get_settings
 from binder.models import HEAVY_COLUMNS, LEGACY_CATEGORY_NAMES, LEGACY_DOC_TYPES, Document
 
 _engine: Engine | None = None
+_engine_lock = threading.Lock()
 
 # Large columns that lists never read: loaded only when accessed.
 WITHOUT_TEXT = (defer(Document.text), defer(Document.explanation))  # type: ignore[arg-type]
@@ -35,17 +37,21 @@ def _connect() -> Any:
 
 def get_engine() -> Engine:
     global _engine
-    if _engine is None:
-        _engine = create_engine("sqlite://", creator=_connect, poolclass=QueuePool, pool_size=5)
-        init_db(_engine)
-    return _engine
+    with _engine_lock:
+        if _engine is None:
+            _engine = create_engine(
+                "sqlite://", creator=_connect, poolclass=QueuePool, pool_size=5
+            )
+            init_db(_engine)
+        return _engine
 
 
 def reset_engine() -> None:
     global _engine
-    if _engine is not None:
-        _engine.dispose()
-    _engine = None
+    with _engine_lock:
+        if _engine is not None:
+            _engine.dispose()
+        _engine = None
     security.reset_caches()
 
 
