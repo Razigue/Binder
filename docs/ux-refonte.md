@@ -12,7 +12,7 @@ choice, and what is left. One commit per step.
 | 3 | Navigation and To do | done |
 | 4 | My papers | done |
 | 5 | Life events (Démarches) | done |
-| 6 | First launch | done (not checked on screen) |
+| 6 | First launch | done |
 | 7 | Glossary and accessibility | to do |
 
 ## Decisions
@@ -143,14 +143,13 @@ choice, and what is left. One commit per step.
   `GET /api/essentials`: why, how long to keep, present or missing (missing first).
 - **Welcome screen**: three screens of one question, then the list with "Scan my first paper"
   and "Choose a file"; demo and restore stay at the bottom. "Skip for now" goes to the list.
-- **Not done**: the visual check of these screens (usage limit), and a link to the list from My
-  papers once documents exist.
+- **Afterwards**: a row at the top of My papers ("The papers you should have · 6 of 9 already
+  here") opens the list, with "Change my answers". The answers are not in Settings (the
+  Settings page holds uncommitted changes of yours): the list is the place to change them.
 
 ## Left to do
 
-- Step 6: check the welcome screens on desktop and at 390 px; link to the list from My papers.
 - Step 7: glossary (tap a term for one sentence), "Print" / "Send by post" as main letter
   actions, text size setting.
-- README / DESIGN for step 6.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.

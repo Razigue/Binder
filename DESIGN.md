@@ -188,6 +188,11 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
   selected = 2px primary ring and a check. Grid: 2 columns on a phone, 3 from `sm`, 4 from `lg`.
 - **Tabs** (My papers): text tabs on a hairline, the active one with a 2px primary underline,
   at least 44px high; the tab is kept in the address (`?tab=calendar`).
+- **First launch** (`components/essentials.tsx`): one question per card (progress dots,
+  20px question, full-width 48px answer buttons in 1-2 columns, "Skip for now" link), then
+  the papers to have as rows (area tile, title, why, how long to keep, "Here" in emerald with
+  a filled check or "To add" in muted text with a dashed circle). The same list opens from a
+  row at the top of My papers.
 - **Question panel** (`components/questions.tsx`): a large dialog, one question per screen:
   the document page (`DocumentPage`, the place Binder read highlighted) on the left, the
   progress, question and full-width answer buttons on the right; stacked on a phone (document

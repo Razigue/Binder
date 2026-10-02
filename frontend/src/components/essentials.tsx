@@ -2,9 +2,10 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CheckCircleIcon, CircleDashedIcon, ArrowLeftIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, CircleDashedIcon, ArrowLeftIcon, CaretRightIcon, ListChecksIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/i18n"
 import { essentials as messages } from "@/i18n/messages/essentials"
@@ -97,6 +98,49 @@ export function AboutYou({ onDone }: { onDone: () => void }) {
   )
 }
 
+/** "The papers you should have": a link with the count, opening the list (and the three
+ * questions to change the answers). */
+export function EssentialsLink() {
+  const t = useT(messages)
+  const papers = useQuery({ queryKey: ["essentials"], queryFn: api.essentials })
+  const [open, setOpen] = useState(false)
+  const [asking, setAsking] = useState(false)
+  if (!papers.data?.length) return null
+  const present = papers.data.filter((p) => p.present).length
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="mb-5 flex w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-accent/40"
+      >
+        <ListChecksIcon className="size-5 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">{t("papersLink")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {t("papersLinkHint", { present, total: papers.data.length })}
+          </span>
+        </span>
+        <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o)
+          if (!o) setAsking(false)
+        }}
+      >
+        <DialogContent className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg">{asking ? t("title") : t("papersTitle")}</DialogTitle>
+            <DialogDescription>{asking ? t("subtitle") : t("papersSubtitle")}</DialogDescription>
+          </DialogHeader>
+          {asking ? <AboutYou onDone={() => setAsking(false)} /> : <EssentialsList onChange={() => setAsking(true)} />}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 /** The papers you should have for your situation: why, how long to keep them, and which ones
  * Binder already holds. */
 export function EssentialsList({ onChange }: { onChange?: () => void }) {
@@ -137,7 +181,7 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
                   )}
                 </p>
                 <p className="text-sm text-muted-foreground">{p.why}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{t("keep", { keep: p.keep })}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t("keep", { keep: p.keep.charAt(0).toLowerCase() + p.keep.slice(1) })}</p>
               </div>
               {p.present ? (
                 <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">

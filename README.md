@@ -52,9 +52,14 @@ way (Windows: Settings > Apps); your documents stay in place (see [Your data](#y
 
 ## First steps
 
-1. **Open Binder.** The welcome screen invites you to drop your first documents. No document at
-   hand? Click **Load demo documents** to explore with fictitious examples. Moving to a new
-   computer? Click **Restore a backup** (see [Your data](#your-data)).
+1. **Open Binder.** The welcome screen asks three things, one tap each: your situation
+   (student, employee, self-employed, looking for work, retired), where you live (renting,
+   owning, housed by someone) and whether you have a vehicle. Binder then lists **the papers
+   you should have**: why each one matters, how long to keep it, and which ones are missing.
+   Scan your first paper with your phone, or choose a file. No document at hand? Click **Load
+   demo documents** to explore with fictitious examples. Moving to a new computer? Click
+   **Restore a backup** (see [Your data](#your-data)). The list stays in **My papers**, where
+   you can change your answers.
 2. **That's it.** Binder gets its AI ready on its own the first time: it sets up its local AI
    engine, picks the model that suits your computer and downloads it. The **To do** page shows
    the progress; Binder keeps working meanwhile. The engine is part of Binder: nothing else to

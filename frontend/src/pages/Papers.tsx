@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgent } from "@/components/agent"
 import { DocumentsByYear } from "@/components/documents"
+import { EssentialsLink } from "@/components/essentials"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { Timeline } from "@/components/timeline"
 import { useDeadlines } from "@/hooks/queries"
@@ -140,6 +141,7 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
   return (
     <>
       {!archived && <AreaTiles selected={area} onSelect={onArea} />}
+      {!archived && <EssentialsLink />}
       <div className="relative mb-3">
         <MagnifyingGlassIcon className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
