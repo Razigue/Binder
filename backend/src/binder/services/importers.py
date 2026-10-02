@@ -1,8 +1,10 @@
 """Automatic import: watched folder and mailbox attachments (IMAP).
 
-Both sources are read-only: Binder neither moves nor deletes any file in the folder, and opens
-the mailbox without marking messages as read. A document already present (same content),
-including in the trash, is never imported again.
+The folder is watched live (`FolderWatcher`, change notifications from the system) and also
+checked every 30 s, for drives that do not notify. Both sources are read-only: Binder neither
+moves nor deletes any file in the folder, and opens the mailbox without marking messages as
+read. A document already present (same content), including in the trash, is never imported
+again.
 """
 
 import email
@@ -10,7 +12,10 @@ import email.policy
 import hashlib
 import imaplib
 import logging
+import os
 import ssl
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -18,6 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import watchfiles
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -59,6 +65,10 @@ T = i18n.catalog(
             "fr": "depuis l'e-mail « {subject} » de {sender}",
         },
         "no_subject": {"en": "no subject", "fr": "sans objet"},
+        "choose_folder": {
+            "en": "Folder Binder should watch",
+            "fr": "Dossier que Binder doit surveiller",
+        },
         "import_error": {
             "en": "Automatic import failed: {error}",
             "fr": "Import automatique impossible : {error}",
@@ -153,6 +163,115 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
         if doc:
             imported.append(doc)
     return imported
+
+
+class NoFolderPicker(RuntimeError):
+    """No native folder dialog here: the path is typed instead."""
+
+
+# A separate process: Tk must own the main thread (macOS) and the server must not wait on it.
+_PICKER = """
+import sys, tkinter
+from tkinter import filedialog
+root = tkinter.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+print(filedialog.askdirectory(initialdir=sys.argv[1], title=sys.argv[2], mustexist=True))
+"""
+
+
+def choose_folder(initial: str = "") -> str | None:
+    """Opens the system's folder dialog (browser mode; the desktop app uses its window's own).
+
+    None if the user cancelled.
+    """
+    if getattr(sys, "frozen", False):
+        raise NoFolderPicker
+    start = Path(initial).expanduser() if initial else Path.home()
+    if not start.is_dir():
+        start = Path.home()
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", _PICKER, str(start), T("choose_folder")],
+            capture_output=True,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            timeout=3600,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NoFolderPicker from exc
+    if done.returncode != 0:  # no tkinter, no display
+        log.info("Folder dialog unavailable: %s", done.stderr.decode("utf-8", "replace")[-500:])
+        raise NoFolderPicker
+    chosen = done.stdout.decode("utf-8").strip()
+    return str(Path(chosen)) if chosen else None
+
+
+_wake = threading.Event()
+
+
+def folder_changed() -> None:
+    """The folder settings changed: the watcher moves to the new folder and imports it."""
+    _wake.set()
+
+
+class FolderWatcher:
+    """Imports a file as soon as it lands in the watched folder."""
+
+    def __init__(self, sessions: Callable[[], Session]) -> None:
+        self._sessions = sessions
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="binder-folder", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        _wake.set()
+        self._thread.join(timeout=5)
+
+    def _folder(self) -> Path | None:
+        with self._sessions() as session:
+            cfg = settings_store.load(session, FOLDER_KEY, FolderConfig)
+        folder = Path(cfg.path).expanduser()
+        return folder if cfg.enabled and cfg.path and folder.is_dir() else None
+
+    def _import(self) -> None:
+        try:
+            with self._sessions() as session:
+                run(session, mail=False)
+        except Exception:
+            log.exception("Watched folder import")
+
+    def _loop(self) -> None:
+        # At launch the scheduler's first pass imports what arrived meanwhile; afterwards, a
+        # newly chosen (or reappearing) folder is imported right away.
+        first = True
+        while not self._stop.is_set():
+            _wake.clear()
+            try:
+                folder = self._folder()
+            except Exception:
+                log.exception("Watched folder settings")
+                folder = None
+            if folder is None:
+                # The folder may appear later (removable or network drive).
+                _wake.wait(FOLDER_INTERVAL)
+                first = False
+                continue
+            if not first:
+                self._import()
+            first = False
+            try:
+                for _ in watchfiles.watch(folder, stop_event=_wake, ignore_permission_denied=True):
+                    # A file still being copied is skipped (SETTLE_SECONDS): let it settle.
+                    if self._stop.wait(SETTLE_SECONDS + 0.5):
+                        return
+                    self._import()
+            except Exception as exc:  # folder removed, too many watches
+                log.warning("Cannot watch %s: %s", folder, exc)
+                _wake.wait(FOLDER_INTERVAL)
 
 
 # --- Mailbox -------------------------------------------------------------------------------

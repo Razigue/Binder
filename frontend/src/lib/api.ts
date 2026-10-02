@@ -25,11 +25,13 @@ export const DOC_TYPES = [
 export type DocType = (typeof DOC_TYPES)[number]
 
 export type Theme = "system" | "light" | "dark"
+export type TextSize = "normal" | "large" | "larger"
 
 export interface Preferences {
   language: "auto" | "en" | "fr"
   country: string | null
   theme: Theme
+  text_size: TextSize
   effective_language: "en" | "fr"
   effective_country: string | null
   currency: string
@@ -37,7 +39,7 @@ export interface Preferences {
   system_country: string | null
 }
 
-export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme">>
+export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme" | "text_size">>
 
 /** "waiting": a real document imported before the local AI was ready; read as soon as it is. */
 export type DocumentStatus = "processing" | "waiting" | "to_review" | "classified"
@@ -713,7 +715,7 @@ export const api = {
   preferences: () => request<Preferences>("/preferences"),
   updatePreferences: async (patch: PreferencesUpdate) => {
     const current = await request<Preferences>("/preferences")
-    const body = { language: current.language, country: current.country, theme: current.theme, ...patch }
+    const body = { language: current.language, country: current.country, theme: current.theme, text_size: current.text_size, ...patch }
     return request<Preferences>("/preferences", json("PUT", body))
   },
   stats: () => request<Stats>("/stats"),
@@ -797,6 +799,8 @@ export const api = {
   importSettings: () => request<ImportSettings>("/import/settings"),
   saveImportSettings: (body: ImportSettingsIn) => request<ImportSettings>("/import/settings", json("PUT", body)),
   runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),
+  chooseImportFolder: () => request<{ path: string | null }>("/import/folder/choose", { method: "POST" }),
+  changes: () => request<{ revision: number }>("/changes"),
   models: () => request<ModelsOverview>("/llm"),
   chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
   acceptUpgrade: () => request<ModelsOverview>("/llm/upgrade", { method: "POST" }),

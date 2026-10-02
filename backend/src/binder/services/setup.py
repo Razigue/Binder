@@ -266,9 +266,12 @@ def _run() -> None:
         check_version()
         # Measured at each launch: memory, a graphics card or free space may have changed.
         machine = measure()
+        # A graphics card (or Apple silicon) runs a large model fast enough to reason.
+        llm.set_accelerated(machine.vram >= MID_VRAM or machine.apple)
         _ensure_models(machine)
         _advise(machine)
         _set(phase="ready", completed=0, total=0)
+        llm.warm()
     except Exception as e:
         log.warning("Local AI setup failed: %s", e)
         _set(phase="error", error=str(e) or T("download_failed"))

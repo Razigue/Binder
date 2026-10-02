@@ -54,7 +54,9 @@ Features: see README.md (user guide); configuration: docs/configuration.md. Prod
 
 ## Brand Commitments
 
-- Name **Binder**; mark: `BookLock` icon in a navy square.
+- Name **Binder**; mark: a binder seen from the front (spine and four card sleeves) in a navy
+  square, drawn once in `components/layout/BinderMark.tsx` and mirrored in `favicon.svg`, the
+  desktop loader, the installer splash and `packaging/binder.png`.
 - Voice: plain, calm, second person ("Here's what needs your attention today.", "Nothing urgent.
   Everything is in order."). Privacy restated where it matters ("They stay on your computer.").
 - Privacy restated in words where it matters, not as a status badge.

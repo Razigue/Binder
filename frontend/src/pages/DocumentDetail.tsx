@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
-import { CalendarDotsIcon, CheckIcon, EnvelopeIcon, CaretLeftIcon, CaretRightIcon, CopyIcon, DownloadSimpleIcon, FolderIcon, ClockCounterClockwiseIcon, HourglassIcon, CircleNotchIcon, DotsThreeIcon, PencilSimpleIcon, ArrowsClockwiseIcon, TrashIcon, XIcon } from "@phosphor-icons/react"
+import { ArrowLeftIcon, CalendarDotsIcon, CheckIcon, EnvelopeIcon, CaretRightIcon, CopyIcon, DownloadSimpleIcon, FolderIcon, ClockCounterClockwiseIcon, HourglassIcon, CircleNotchIcon, DotsThreeIcon, PencilSimpleIcon, ArrowsClockwiseIcon, TrashIcon, XIcon } from "@phosphor-icons/react"
 import { ArchiveIcon, ArrowUUpLeftIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
+import { useDocumentTitle } from "@/components/layout/AppLayout"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,6 +13,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { CategoryIcon } from "@/components/CategoryIcon"
+import { DocumentPage } from "@/components/DocumentPage"
+import { Glossed } from "@/components/glossary"
 import { StatusBadge } from "@/components/DocumentList"
 import { ActivityList } from "@/components/ActivityList"
 import {
@@ -19,13 +22,12 @@ import {
 } from "@/hooks/queries"
 import { useAgent, useAgentViewing } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
-import { GlossaryText } from "@/components/glossary"
 import { useT } from "@/i18n"
 import { area as areaMessages } from "@/i18n/messages/area"
 import { common } from "@/i18n/messages/common"
 import { documentDetail } from "@/i18n/messages/documentDetail"
 import {
-  api, CATEGORIES, DOC_TYPES, fileUrl, previewUrl, type Category, type DocDetail, type DocPatch,
+  api, CATEGORIES, DOC_TYPES, fileUrl, type Category, type DocDetail, type DocPatch,
 } from "@/lib/api"
 import {
   categoryLabel,
@@ -49,6 +51,12 @@ export function DocumentDetailPage() {
   useAgentViewing(doc)
   // Field hovered in the panel: its source is highlighted on the page.
   const [active, setActive] = useState<string | null>(null)
+  const navigate = useNavigate()
+  // The desktop window has no browser back button: return to wherever the document was opened
+  // from (Today, a card, a list...). Opened with no history, fall back to its area.
+  const hasHistory = useLocation().key !== "default"
+  const back = () => (hasHistory ? navigate(-1) : navigate(doc?.area ? `/area/${doc.area}` : "/"))
+  useDocumentTitle(doc?.title)
 
   if (isError)
     return (
@@ -62,13 +70,18 @@ export function DocumentDetailPage() {
 
   return (
     <>
-      <div className="mb-5 flex items-center justify-between gap-4 text-sm">
-        <nav className="flex min-w-0 items-center gap-2 text-muted-foreground">
+      <div className="mb-5 flex items-center gap-3 text-sm">
+        <Button variant="outline" size="sm" onClick={back} className="shrink-0">
+          <ArrowLeftIcon /> {t("back")}
+        </Button>
+        <nav aria-label={t("breadcrumbNav")} className="flex min-w-0 items-center gap-2 text-muted-foreground">
           <Link to={doc?.area ? `/area/${doc.area}` : "/"} className="hover:text-foreground">
             {doc?.area ? ta(`area.${doc.area}`) : t("breadcrumb")}
           </Link>
-          <CaretRightIcon className="size-3.5" />
-          <span className="truncate font-medium text-foreground">{doc?.title ?? "…"}</span>
+          <CaretRightIcon className="size-3.5" aria-hidden />
+          <span aria-current="page" className="truncate font-medium text-foreground">
+            {doc?.title ?? "…"}
+          </span>
         </nav>
       </div>
       {isPending || !doc ? (
@@ -78,87 +91,14 @@ export function DocumentDetailPage() {
         </div>
       ) : (
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <Preview doc={doc} active={active} />
+          {/* A fixed height, so the zoomed page scrolls inside its frame and not the whole page. */}
+          <Card className="h-[min(82vh,64rem)] gap-0 overflow-hidden p-0">
+            <DocumentPage doc={doc} active={active} className="flex-1" />
+          </Card>
           <InfoPanel doc={doc} onActive={setActive} />
         </div>
       )}
     </>
-  )
-}
-
-function Preview({ doc, active }: { doc: DocDetail; active: string | null }) {
-  const t = useT(documentDetail)
-  const [page, setPage] = useState(0)
-  const [zoom, setZoom] = useState(false)
-  const pages = Math.max(doc.page_count, 1)
-  const sources = useQuery({
-    queryKey: ["sources", doc.id, doc.amount, doc.due_date, doc.issue_date, doc.expiry_date, doc.reference, doc.issuer],
-    queryFn: () => api.sources(doc.id),
-    enabled: doc.status !== "processing",
-    staleTime: Infinity,
-  })
-  const boxes = (sources.data ?? []).flatMap((s) =>
-    s.boxes.filter((b) => b.page === page).map((b) => ({ ...b, field: s.field })),
-  )
-  // The active field's page comes into view.
-  useEffect(() => {
-    const target = sources.data?.find((s) => s.field === active)?.boxes[0]
-    if (target && target.page !== page) setPage(target.page)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active])
-  return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <div className={cn("bg-muted/50 p-4", zoom ? "overflow-auto" : "")}>
-        {/* White backing on purpose: it is a picture of a paper page, in both themes. */}
-        <div className={cn("relative mx-auto", zoom ? "w-max" : "w-full")}>
-          <img
-            src={previewUrl(doc.id, page)}
-            alt={t("previewAlt", { title: doc.title, page: page + 1 })}
-            onClick={() => setZoom((z) => !z)}
-            className={cn("block rounded bg-white shadow-sm dark:brightness-[0.88]", zoom ? "max-w-none cursor-zoom-out" : "w-full cursor-zoom-in")}
-          />
-          {boxes.map((b, i) => (
-            <span
-              key={i}
-              title={`${fieldLabel(b.field)} · ${t("sourceHint")}`}
-              className={cn(
-                "pointer-events-none absolute rounded-sm transition-colors",
-                b.field === active ? "bg-amber-300/40 ring-2 ring-amber-500" : "bg-primary/5 ring-1 ring-primary/25",
-              )}
-              style={{
-                left: `${b.x0 * 100 - 0.4}%`,
-                top: `${b.y0 * 100 - 0.3}%`,
-                width: `${(b.x1 - b.x0) * 100 + 0.8}%`,
-                height: `${(b.y1 - b.y0) * 100 + 0.6}%`,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center justify-center gap-3 border-t py-2 text-sm">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={page === 0}
-          onClick={() => setPage((p) => p - 1)}
-          aria-label={t("previousPage")}
-        >
-          <CaretLeftIcon />
-        </Button>
-        <span className="tabular-nums">
-          {page + 1} / {pages}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={page >= pages - 1}
-          onClick={() => setPage((p) => p + 1)}
-          aria-label={t("nextPage")}
-        >
-          <CaretRightIcon />
-        </Button>
-      </div>
-    </Card>
   )
 }
 
@@ -334,7 +274,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
       <div className="p-5">
         <h2 className="mb-2 font-semibold">{t("extracted")}</h2>
         {processing || reanalyze.isPending ? (
-          <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <p role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
             <CircleNotchIcon className="size-4 animate-spin" /> {t("reading")}
           </p>
         ) : (
@@ -354,9 +294,10 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                     highlight && "rounded-md bg-red-50/70 text-red-600 dark:bg-red-500/10 dark:text-red-400",
                     (isMissing || doubt) && "rounded-md bg-amber-50/70 dark:bg-amber-500/10",
                   )}
-                  title={doubt ?? undefined}
                 >
-                  <dt className={cn("text-muted-foreground", highlight && "text-red-600 dark:text-red-400")}>{label}</dt>
+                  <dt className={cn("text-muted-foreground", highlight && "text-red-600 dark:text-red-400")}>
+                    <Glossed text={label} />
+                  </dt>
                   <dd className="font-medium">
                     {editing && row.type === "docType" ? (
                       <select
@@ -389,10 +330,17 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                     ) : doubt && row.display === "—" ? (
                       <span className="text-amber-700 dark:text-amber-400">{doubt}</span>
                     ) : (
-                      <span className="flex items-center gap-1.5">
-                        {highlight && <CalendarDotsIcon className="size-3.5" />}
-                        {row.display}
-                      </span>
+                      <>
+                        <span className="flex items-center gap-1.5">
+                          {highlight && <CalendarDotsIcon className="size-3.5" aria-hidden />}
+                          {row.key === "doc_type" ? <Glossed text={row.display} /> : row.display}
+                          {highlight && <span className="sr-only">, {t("dueSoon")}</span>}
+                        </span>
+                        {/* The doubt in words, not only as the amber tint. */}
+                        {doubt && (
+                          <span className="mt-0.5 block text-xs font-normal text-amber-700 dark:text-amber-400">{doubt}</span>
+                        )}
+                      </>
                     )}
                   </dd>
                 </div>
@@ -401,7 +349,9 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
             {!editing &&
               details.map((d) => (
                 <div key={d.key} className="grid grid-cols-[140px_1fr] items-center gap-3 px-2 py-2.5">
-                  <dt className="text-muted-foreground">{fieldLabel(d.key)}</dt>
+                  <dt className="text-muted-foreground">
+                    <Glossed text={fieldLabel(d.key)} />
+                  </dt>
                   <dd className="font-medium tabular-nums">{d.display}</dd>
                 </div>
               ))}
@@ -426,7 +376,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
               style={{ width: `${doc.confidence * 100}%` }}
             />
           </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
+          <p className="mt-1.5 text-[0.6875rem] text-muted-foreground">
             {doc.extractor === "rules"
               ? t("extractor.rules")
               : doc.extractor === "manual"
@@ -590,7 +540,9 @@ function RetentionInfo({ doc }: { doc: DocDetail }) {
     <div className="mt-5 rounded-lg bg-muted/60 px-4 py-3 text-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-medium">{t("retention")}</p>
+          <p className="font-medium">
+            <Glossed text={t("retention")} />
+          </p>
           <p className="text-muted-foreground">
             {doc.retention_rule}
             {doc.keep_until && !doc.keep_forever ? t("keepUntil", { date: formatDate(doc.keep_until) }) : ""}
@@ -666,7 +618,7 @@ function InShort({ doc }: { doc: DocDetail }) {
       ) : (
         <>
           <p className="leading-relaxed">
-            <GlossaryText text={ex.data.summary} />
+            <Glossed text={ex.data.summary} />
           </p>
           {ex.data.actions.length > 0 && (
             <ul className="mt-2 space-y-1">
@@ -674,7 +626,7 @@ function InShort({ doc }: { doc: DocDetail }) {
                 <li key={a.label} className="flex items-start gap-2 font-medium">
                   <CheckIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <span>
-                    {a.label}
+                    <Glossed text={a.label} />
                     {a.due_date && (
                       <span className="font-normal text-muted-foreground">{t("before", { date: formatDate(a.due_date) })}</span>
                     )}
@@ -687,12 +639,12 @@ function InShort({ doc }: { doc: DocDetail }) {
             <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
               {ex.data.key_points.map((p) => (
                 <li key={p}>
-                  <GlossaryText text={p} />
+                  <Glossed text={p} />
                 </li>
               ))}
             </ul>
           )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="mt-2 text-[0.6875rem] text-muted-foreground">
             {ex.data.engine === "llm" ? t("engine.llm") : t("engine.rules")}
           </p>
         </>

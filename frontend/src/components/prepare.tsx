@@ -137,7 +137,7 @@ function LetterTask({ kind, onDone }: { kind: LetterKind | null; onDone: () => v
 function Working() {
   const t = useT(messages)
   return (
-    <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+    <p role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
       <CircleNotchIcon className="size-4 animate-spin" /> {t("working")}
     </p>
   )

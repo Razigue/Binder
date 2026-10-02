@@ -1,12 +1,13 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { CheckCircleIcon, CircleDashedIcon, ArrowLeftIcon, CaretRightIcon, ListChecksIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Glossed } from "@/components/glossary"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useT } from "@/i18n"
 import { essentials as messages } from "@/i18n/messages/essentials"
 import { api, type Profile } from "@/lib/api"
@@ -58,9 +59,16 @@ export function AboutYou({ onDone }: { onDone: () => void }) {
   })
   const question = QUESTIONS[step]
   const current = profile.data?.[question]
+  // The answer pressed goes away with its question: focus moves to the next question instead.
+  const heading = useRef<HTMLHeadingElement>(null)
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) first.current = false
+    else heading.current?.focus()
+  }, [step])
   return (
     <Card className="gap-5 p-5 sm:p-7">
-      <div className="flex items-center gap-3 text-xs font-medium text-muted-foreground">
+      <div className="flex min-h-8 items-center gap-3 text-xs font-medium text-muted-foreground">
         {step > 0 && (
           <Button variant="ghost" size="icon-sm" onClick={() => setStep(step - 1)} aria-label={t("previous")}>
             <ArrowLeftIcon />
@@ -69,75 +77,38 @@ export function AboutYou({ onDone }: { onDone: () => void }) {
         <span>{t("progress", { current: step + 1, total: QUESTIONS.length })}</span>
         <span className="ml-auto flex gap-1" aria-hidden>
           {QUESTIONS.map((q, i) => (
-            <span key={q} className={cn("h-1.5 w-6 rounded-full", i <= step ? "bg-primary" : "bg-muted")} />
+            <span key={q} className={cn("h-1.5 w-6 rounded-full transition-colors duration-300", i <= step ? "bg-primary" : "bg-muted")} />
           ))}
         </span>
       </div>
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight">{t(`${question}.question`)}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("why")}</p>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {OPTIONS[question].map(([value, label]) => (
-          <Button
-            key={value}
-            size="lg"
-            variant={current === value ? "default" : "outline"}
-            disabled={save.isPending}
-            onClick={() => save.mutate({ [question]: value })}
-            className="h-12 justify-start text-[15px]"
-          >
-            {t(label)}
-          </Button>
-        ))}
+      {/* The next question fades in, so the change of question is seen. */}
+      <div key={step} className="animate-step flex flex-col gap-5">
+        <div>
+          <h2 ref={heading} tabIndex={-1} className="text-xl font-semibold tracking-tight outline-none">
+            {t(`${question}.question`)}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("why")}</p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {OPTIONS[question].map(([value, label]) => (
+            <Button
+              key={value}
+              size="lg"
+              variant={current === value ? "default" : "outline"}
+              aria-pressed={current === value}
+              disabled={save.isPending}
+              onClick={() => save.mutate({ [question]: value })}
+              className="h-12 justify-start text-[0.9375rem]"
+            >
+              {t(label)}
+            </Button>
+          ))}
+        </div>
       </div>
       <button onClick={onDone} className="self-start text-sm text-muted-foreground underline-offset-2 hover:underline">
         {t("skip")}
       </button>
     </Card>
-  )
-}
-
-/** "The papers you should have": a link with the count, opening the list (and the three
- * questions to change the answers). */
-export function EssentialsLink() {
-  const t = useT(messages)
-  const papers = useQuery({ queryKey: ["essentials"], queryFn: api.essentials })
-  const [open, setOpen] = useState(false)
-  const [asking, setAsking] = useState(false)
-  if (!papers.data?.length) return null
-  const present = papers.data.filter((p) => p.present).length
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="mb-5 flex w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-accent/40"
-      >
-        <ListChecksIcon className="size-5 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">{t("papersLink")}</span>
-          <span className="block text-xs text-muted-foreground">
-            {t("papersLinkHint", { present, total: papers.data.length })}
-          </span>
-        </span>
-        <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
-      </button>
-      <Dialog
-        open={open}
-        onOpenChange={(o) => {
-          setOpen(o)
-          if (!o) setAsking(false)
-        }}
-      >
-        <DialogContent className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-lg">{asking ? t("title") : t("papersTitle")}</DialogTitle>
-            <DialogDescription>{asking ? t("subtitle") : t("papersSubtitle")}</DialogDescription>
-          </DialogHeader>
-          {asking ? <AboutYou onDone={() => setAsking(false)} /> : <EssentialsList onChange={() => setAsking(true)} />}
-        </DialogContent>
-      </Dialog>
-    </>
   )
 }
 
@@ -180,8 +151,10 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
                     p.title
                   )}
                 </p>
-                <p className="text-sm text-muted-foreground">{p.why}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{t("keep", { keep: p.keep.charAt(0).toLowerCase() + p.keep.slice(1) })}</p>
+                <p className="text-sm text-muted-foreground">
+                  <Glossed text={p.why} />
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t("keep", { keep: p.keep })}</p>
               </div>
               {p.present ? (
                 <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -197,5 +170,51 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
         </ul>
       </Card>
     </div>
+  )
+}
+
+/** The way back to the papers to have once the welcome screen is gone: a row on My papers that
+ * opens the list (and the three questions, to change the answers) in a side panel. */
+export function EssentialsLink() {
+  const t = useT(messages)
+  const papers = useQuery({ queryKey: ["essentials"], queryFn: api.essentials })
+  const [open, setOpen] = useState(false)
+  const [asking, setAsking] = useState(false)
+  if (!papers.data?.length) return null
+  const present = papers.data.filter((p) => p.present).length
+  return (
+    <>
+      <button
+        onClick={() => {
+          setAsking(false)
+          setOpen(true)
+        }}
+        className="mb-6 flex min-h-12 w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-shadow hover:shadow-sm"
+      >
+        <ListChecksIcon className="size-5 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">{t("papersLink")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {t("papersLinkHint", { present, total: papers.data.length })}
+          </span>
+        </span>
+        <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="right" className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-lg">
+          <SheetHeader className="border-b px-5 py-3.5 pr-12">
+            <SheetTitle className="text-lg">{asking ? t("title") : t("papersTitle")}</SheetTitle>
+            <SheetDescription>{asking ? t("subtitle") : t("papersSubtitle")}</SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+            {asking ? (
+              <AboutYou onDone={() => setAsking(false)} />
+            ) : (
+              <EssentialsList onChange={() => setAsking(true)} />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }

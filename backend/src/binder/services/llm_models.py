@@ -268,6 +268,7 @@ def _switch(session: Session, name: str) -> None:
     config.model, config.auto = name, True
     settings_store.save(session, KEY, config)
     llm.select(name)
+    llm.warm()
     _advice.upgrade = _advice.accepted = None
     _advice.automatic = _automatic(config)
     msg = T.msg("upgraded", old=label(previous), new=label(name))
@@ -289,7 +290,10 @@ def choose(session: Session, name: str, *, actor: str = "user") -> None:
     config.model, config.auto = name, actor != "user"
     settings_store.save(session, KEY, config)
     _advice.automatic = _automatic(config)
+    changed = name != llm.model()
     llm.select(name)
+    if changed:
+        llm.warm()
 
 
 def remove(session: Session, name: str) -> None:

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentPage } from "@/components/DocumentPage"
-import { GlossaryText } from "@/components/glossary"
 import { useDocument, useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { questions as messages } from "@/i18n/messages/questions"
@@ -60,7 +59,7 @@ function QuestionsSession({ initial, onClose }: { initial: QuestionsRequest; onC
   if (!current)
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <CheckCircleIcon className="size-10 text-emerald-600 dark:text-emerald-400" />
+        <CheckCircleIcon className="animate-pop size-10 text-emerald-600 dark:text-emerald-400" weight="fill" />
         <DialogTitle className="text-lg">{t("doneTitle")}</DialogTitle>
         <DialogDescription className="max-w-sm">{t("doneHint")}</DialogDescription>
         <Button onClick={onClose} className="mt-2">
@@ -98,6 +97,9 @@ function QuestionScreen({
   onNavigate: () => void
 }) {
   const t = useT(messages)
+  // Each question replaces the last one and the answer pressed with it: focus goes to the new question.
+  const title = useRef<HTMLHeadingElement>(null)
+  useEffect(() => title.current?.focus(), [])
   const invalidate = useInvalidateAll()
   const [shown, setShown] = useState(0)
   const docId = item.document_ids[shown] ?? item.document_ids[0]
@@ -136,6 +138,7 @@ function QuestionScreen({
                 key={id}
                 onClick={() => setShown(i)}
                 aria-pressed={i === shown}
+                aria-label={t("documentN", { n: i + 1, total: item.document_ids.length })}
                 className={
                   i === shown
                     ? "rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground"
@@ -148,17 +151,16 @@ function QuestionScreen({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 flex-col gap-4 overflow-y-auto p-5 md:p-6">
+      {/* The next question fades in: the pile goes down, one answer at a time. */}
+      <div className="animate-step flex shrink-0 flex-col gap-4 overflow-y-auto p-5 md:p-6">
         <p className="text-xs font-medium text-muted-foreground">
           {t("progress", { current: position.current, total: position.total })}
         </p>
         <div>
-          <DialogTitle className="text-lg leading-snug">
-            <GlossaryText text={item.title} />
+          <DialogTitle ref={title} tabIndex={-1} className="text-lg leading-snug outline-none">
+            {item.title}
           </DialogTitle>
-          <DialogDescription className="mt-1.5">
-            <GlossaryText text={item.detail} />
-          </DialogDescription>
+          <DialogDescription className="mt-1.5">{item.detail}</DialogDescription>
           {field && item.extra.question === "confirm" && (
             <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{t("readHere")}</p>
           )}

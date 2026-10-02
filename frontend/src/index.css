@@ -33,6 +33,7 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-paper-ink: var(--paper-ink);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -60,10 +61,10 @@
     --secondary: oklch(0.965 0.006 255);
     --secondary-foreground: oklch(0.28 0.07 262);
     --muted: oklch(0.965 0.006 255);
-    --muted-foreground: oklch(0.55 0.02 258);
+    --muted-foreground: oklch(0.52 0.02 258);
     --accent: oklch(0.95 0.018 255);
     --accent-foreground: oklch(0.28 0.07 262);
-    --destructive: oklch(0.6 0.2 25);
+    --destructive: oklch(0.55 0.2 25);
     --border: oklch(0.925 0.008 255);
     --input: oklch(0.915 0.01 255);
     --ring: oklch(0.6 0.08 262);
@@ -81,45 +82,46 @@
     --sidebar-accent-foreground: oklch(0.28 0.07 262);
     --sidebar-border: oklch(0.925 0.008 255);
     --sidebar-ring: oklch(0.6 0.08 262);
+    /* Marks drawn on a paper page, which stays white in both themes: always the light navy. */
+    --paper-ink: oklch(0.28 0.07 262);
 }
 
-/* Dark theme: the same navy brand, tinted backgrounds rather than neutral greys. Surfaces get
-   lighter as they come forward (background < sidebar < card < popover); the primary turns into a
-   light periwinkle so that buttons keep their weight on a dark background. */
+/* Dark theme: the light theme inverted, not a blue night. Surfaces are neutral graphite and get
+   lighter as they come forward (sidebar < page < card < popover); the primary turns into paper
+   with ink text (navy ink on paper in light, paper on ink in dark), so it stays the brightest
+   thing on screen. Hue is left to the signals (urgency, categories). */
 .dark {
-    /* Night vault: ink surfaces with a faint blue cast, elevation by lightness steps
-       (sidebar < page < card < popover), colour kept for small signals. */
-    --background: oklch(0.168 0.011 256);
-    --foreground: oklch(0.935 0.006 256);
-    --card: oklch(0.203 0.012 256);
-    --card-foreground: oklch(0.935 0.006 256);
-    --popover: oklch(0.228 0.013 256);
-    --popover-foreground: oklch(0.935 0.006 256);
-    --primary: oklch(0.585 0.15 259);
-    --primary-foreground: oklch(0.985 0.003 256);
-    --secondary: oklch(0.25 0.013 256);
-    --secondary-foreground: oklch(0.9 0.008 256);
-    --muted: oklch(0.245 0.012 256);
-    --muted-foreground: oklch(0.69 0.013 256);
-    --accent: oklch(0.262 0.02 258);
-    --accent-foreground: oklch(0.95 0.008 256);
-    --destructive: oklch(0.66 0.17 24);
-    --border: oklch(1 0 0 / 7.5%);
-    --input: oklch(1 0 0 / 11%);
-    --ring: oklch(0.62 0.13 259);
+    --background: oklch(0.175 0.002 260);
+    --foreground: oklch(0.94 0.002 260);
+    --card: oklch(0.208 0.003 260);
+    --card-foreground: oklch(0.94 0.002 260);
+    --popover: oklch(0.235 0.003 260);
+    --popover-foreground: oklch(0.94 0.002 260);
+    --primary: oklch(0.93 0.004 260);
+    --primary-foreground: oklch(0.2 0.006 260);
+    --secondary: oklch(0.255 0.003 260);
+    --secondary-foreground: oklch(0.92 0.002 260);
+    --muted: oklch(0.25 0.003 260);
+    --muted-foreground: oklch(0.71 0.004 260);
+    --accent: oklch(0.275 0.004 260);
+    --accent-foreground: oklch(0.96 0.002 260);
+    --destructive: oklch(0.68 0.17 24);
+    --border: oklch(1 0 0 / 8%);
+    --input: oklch(1 0 0 / 12%);
+    --ring: oklch(0.7 0.004 260);
     --chart-1: oklch(0.7 0.15 25);
     --chart-2: oklch(0.79 0.12 70);
     --chart-3: oklch(0.73 0.11 160);
-    --chart-4: oklch(0.68 0.12 259);
+    --chart-4: oklch(0.72 0.1 264);
     --chart-5: oklch(0.7 0.1 300);
-    --sidebar: oklch(0.148 0.011 256);
-    --sidebar-foreground: oklch(0.86 0.008 256);
-    --sidebar-primary: oklch(0.585 0.15 259);
-    --sidebar-primary-foreground: oklch(0.985 0.003 256);
-    --sidebar-accent: oklch(0.225 0.016 257);
-    --sidebar-accent-foreground: oklch(0.96 0.006 256);
+    --sidebar: oklch(0.155 0.002 260);
+    --sidebar-foreground: oklch(0.87 0.002 260);
+    --sidebar-primary: oklch(0.93 0.004 260);
+    --sidebar-primary-foreground: oklch(0.2 0.006 260);
+    --sidebar-accent: oklch(0.245 0.004 260);
+    --sidebar-accent-foreground: oklch(0.96 0.002 260);
     --sidebar-border: oklch(1 0 0 / 6%);
-    --sidebar-ring: oklch(0.62 0.13 259);
+    --sidebar-ring: oklch(0.7 0.004 260);
 }
 
 @layer base {
@@ -132,6 +134,25 @@
   html {
     @apply font-sans;
     }
+  /* Tailwind v4 leaves buttons with the default cursor: everything clickable gets the hand. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([data-disabled]),
+  [role="menuitemcheckbox"]:not([data-disabled]),
+  [role="menuitemradio"]:not([data-disabled]),
+  [role="option"]:not([data-disabled]),
+  [role="tab"]:not([data-disabled]),
+  [role="checkbox"]:not([data-disabled]),
+  [role="radio"]:not([data-disabled]),
+  [role="switch"]:not([data-disabled]),
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 /* Browser surfaces follow the theme: selection, scrollbars, native controls. */
 ::selection {
@@ -145,11 +166,13 @@
   caret-color: var(--primary);
   text-underline-offset: 0.2em;
 }
-/* Links and plain buttons (list rows, chips, nav) get the same 3px ring/50 halo as the controls. */
+/* Links, plain buttons (list rows, chips, nav) and custom menu triggers get a solid ring, offset
+   from the element, so keyboard focus stands out (3:1) on every surface. */
 a:focus-visible,
-button:not([data-slot]):focus-visible {
-  outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent);
-  outline-offset: 0;
+button:not([data-slot]):focus-visible,
+button[data-slot$="-trigger"]:not([class*="focus-visible:"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 /* Desktop window with the app's own title bar (--titlebar-height, set by TitleBar.tsx): layers
    that cover the window start below it, so the window can still be moved and closed. */
@@ -160,20 +183,43 @@ button:not([data-slot]):focus-visible {
   height: auto;
 }
 
-/* Printing a letter: only its text, on white paper (components/panels.tsx, PrintLetter). */
-.print-only {
-  display: none;
+/* Motion: short, one-shot fades, only where they say something (a page arriving, a card that is
+   new, a step that moves on, a reward). Opacity only, never transforms; no looping decoration;
+   off with reduced motion. */
+@keyframes fade-in {
+  from { opacity: 0; }
 }
-@media print {
-  body:has(.print-only) > *:not(.print-only) {
-    display: none !important;
+@utility animate-page {
+  animation: fade-in 220ms ease-out backwards;
+}
+/* Lists: each item a little after the previous one (`--i`), capped so long lists stay quick. */
+@utility animate-rise {
+  animation: fade-in 300ms ease-out backwards;
+  animation-delay: calc(min(var(--i, 0), 8) * 45ms);
+}
+@utility animate-step {
+  animation: fade-in 200ms ease-out backwards;
+}
+@utility animate-pop {
+  animation: fade-in 400ms ease-out backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-page,
+  .animate-rise,
+  .animate-step,
+  .animate-pop {
+    animation: none;
   }
-  .print-only {
-    display: block;
-    color: #000;
-    background: #fff;
-    font: 11pt/1.5 Georgia, serif;
-    white-space: pre-wrap;
-    padding: 0;
+  /* Dialogs, menus, popovers and sheets keep their fade but lose the zoom and slide. */
+  * {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+  }
+  [data-slot="sheet-content"]:is([data-starting-style], [data-ending-style]) {
+    translate: none;
   }
 }

@@ -45,6 +45,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     scan.wait_for_analysis()
     llm.transport = updater.transport = None
     llm.select(None)
+    llm.set_accelerated(False)
     reset_engine()
     get_settings.cache_clear()
     i18n.system_locale.cache_clear()

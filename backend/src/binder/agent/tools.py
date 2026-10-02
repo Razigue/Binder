@@ -102,6 +102,8 @@ class ToolResult:
     # JPEG pages shown to the model with the result (vision).
     images: list[bytes] = field(default_factory=list)
     letters: list[Letter] = field(default_factory=list)
+    # Documents mentioned without being results (close in meaning): citable, shown if cited.
+    related: list[Document] = field(default_factory=list)
     packs: list[folders.FolderStatus] = field(default_factory=list)
     journeys: list[JourneyOut] = field(default_factory=list)
     # Something was written (document, deadline…): the interface refreshes its data.
@@ -285,14 +287,18 @@ def search_documents(
         col(Document.archived_at).is_not(None) if archived else col(Document.archived_at).is_(None),
     )
     ranking: list[int] | None = None
+    related: list[int] = []
     if terms:
         ids = _fts(session, terms, "AND", 200)
-        if not ids:
+        close = [doc_id for doc_id, _ in embeddings.search(session, query)]
+        if ids:
+            matched = set(ids)
+            related = [doc_id for doc_id in close if doc_id not in matched]
+        else:
             # No document has every word: documents close in meaning ("proof of address" →
             # EDF bill, rent receipt), merged with those that have some of the words.
-            related = [doc_id for doc_id, _ in embeddings.search(session, query)]
             some_words = _fts(session, terms, "OR", 200)
-            ids = ranking = _fuse(related, some_words) if related else some_words
+            ids = ranking = _fuse(close, some_words) if close else some_words
         if not ids:
             return ToolResult(payload={"results": [], "total": 0, "hint": NO_MATCH_HINT})
         stmt = stmt.where(col(Document.id).in_(ids))
@@ -326,7 +332,41 @@ def search_documents(
         payload["sum_amount"] = _sum_amount(session, stmt)
     else:
         payload["hint"] = NO_MATCH_HINT
-    return ToolResult(payload=payload, documents=shown)
+    # The words matched, but other documents mean the same ("justificatif de domicile" also
+    # finds the electricity bill): named apart, outside the results and their sum.
+    nearby = _close_in_meaning(session, related, archived)
+    if nearby:
+        payload["related"] = [_brief(d) for d in nearby]
+    return ToolResult(payload=payload, documents=shown, related=nearby)
+
+
+# Documents close in meaning listed next to the results of a search, at most.
+RELATED = 3
+
+
+def _close_in_meaning(session: Session, ranked: list[int], archived: bool) -> list[Document]:
+    """The best `ranked` documents still in view (not in the trash; archived or not, as the
+    search)."""
+    wanted = ranked[: RELATED * 2]
+    if not wanted:
+        return []
+    docs = session.exec(
+        select(Document)
+        .options(*WITHOUT_TEXT)
+        .where(
+            col(Document.id).in_(wanted),
+            col(Document.deleted_at).is_(None),
+            col(Document.archived_at).is_not(None)
+            if archived
+            else col(Document.archived_at).is_(None),
+        )
+    ).all()
+    by_id = {d.id: d for d in docs}
+    return [by_id[i] for i in wanted if i in by_id][:RELATED]
+
+
+def _brief(d: Document) -> dict[str, Any]:
+    return {"id": d.id, "title": d.title, "category": d.category, "issuer": d.issuer}
 
 
 NO_MATCH_HINT = (
@@ -830,6 +870,14 @@ def write_letter(
         "registered_mail_advised": letter.registered,
         "shown_to_user": True,
     }
+    if letter.recipient_address:
+        payload["recipient_address"] = letter.recipient_address
+    elif websearch.enabled():
+        # Looked up by the agent rather than left to the user.
+        payload["recipient_address_missing"] = (
+            "find the postal address this organisation gives for this request with "
+            "web_search and read_web_page, and give it with its site"
+        )
     if letter.blanks:
         payload["note"] = f"{letter.blanks} detail(s) left in [brackets] for the user to fill in."
     if letter.sources:
@@ -1467,6 +1515,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+NAMES = [t["function"]["name"] for t in TOOL_SCHEMAS]
 WEB_TOOLS = {"web_search", "read_web_page"}
 # Tools sent with one model call, at most: a small model picks worse among more.
 MAX_TOOLS = 10

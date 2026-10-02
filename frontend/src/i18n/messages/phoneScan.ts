@@ -6,6 +6,7 @@ export const phoneScan = defineMessages({
     title: "Scan with your phone",
     description: "Scan the QR code with your phone to photograph your documents page by page.",
     opening: "Opening the scanner…",
+    qrAlt: "QR code: scan it with your phone to open the scanner",
     stepWifi: "Connect your phone to the same Wi-Fi as this computer.",
     stepScan: "Scan this QR code with the phone's camera.",
     stepWarning:
@@ -30,6 +31,7 @@ export const phoneScan = defineMessages({
     title: "Scanner avec votre téléphone",
     description: "Scannez le QR code avec votre téléphone pour photographier vos documents page par page.",
     opening: "Ouverture du scanner…",
+    qrAlt: "QR code : scannez-le avec votre téléphone pour ouvrir le scanner",
     stepWifi: "Connectez le téléphone au même Wi-Fi que cet ordinateur.",
     stepScan: "Scannez ce QR code avec l'appareil photo du téléphone.",
     stepWarning:

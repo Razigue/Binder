@@ -6,8 +6,10 @@ import logging
 import mimetypes
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from sqlmodel import Session, col, or_, select
 
@@ -425,9 +427,18 @@ def analyze_waiting(session: Session, limit: int = 3) -> int:
     return len(ids)
 
 
-def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadResult, Extraction]:
+def extract(
+    data: bytes,
+    mime_type: str,
+    *,
+    use_llm: bool = True,
+    example: Callable[[str], dict[str, Any] | None] | None = None,
+) -> tuple[ReadResult, Extraction]:
     """Reading and extraction of a file, before anything about the library is applied (past
-    corrections, duplicates): what the evaluation measures (scripts/evaluate.py)."""
+    corrections, duplicates): what the evaluation measures (scripts/evaluate.py).
+
+    `example`: given the text, how the library filed the sender's last document, shown to the
+    model (learning.example)."""
     model = use_llm and llm.is_available()
     read = read_document(data, mime_type)
     images = _scan_pages(data, mime_type, read) if model else []
@@ -436,7 +447,9 @@ def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadR
         read.text = llm.transcribe(images)
     by_rules = rules.extract(read.text)
     by_rules.doubts = verify.check(by_rules, read.text)
-    by_llm = llm.extract(read.text, images) if read.text.strip() and model else None
+    by_llm = None
+    if read.text.strip() and model:
+        by_llm = llm.extract(read.text, images, example=example(read.text) if example else None)
     if by_llm is not None:
         # On a scan the model saw the pages: what it read is checked against the OCR text.
         by_llm.doubts = verify.check(by_llm, read.text, scanned=bool(images))
@@ -466,7 +479,8 @@ def _read_again(
     if not doubted:
         return
     other = [] if images else _scan_pages(data, mime_type, read, any_pdf=True)
-    second = llm.extract(read.text, other)
+    # Rare (only doubted values) and decisive: a large model reasons on this reading.
+    second = llm.extract(read.text, other, think=llm.think_hard())
     if second is None:
         return
     second.doubts = verify.check(second, read.text, scanned=bool(other))
@@ -521,7 +535,9 @@ def analyze(session: Session, doc: Document) -> Document:
     doc.duplicate_of = None
     data = load_file(doc)
     _link_own_letter(session, doc, data)
-    read, ext = extract(data, doc.mime_type)
+    read, ext = extract(
+        data, doc.mime_type, example=lambda text: learning.example(session, text, doc.id)
+    )
     doc.text = read.text
     doc.page_count = read.page_count
     learned = learning.apply(session, read.text, ext)

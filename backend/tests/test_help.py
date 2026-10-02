@@ -201,7 +201,7 @@ def test_llm_is_told_the_user_language(
     system = requests[0]["messages"][0]["content"]
     assert "Reply in French" in system and "France" in system and "EUR" in system
     # Ollama's default context (4096 tokens) would silently cut the conversation.
-    assert requests[0]["options"]["num_ctx"] == get_settings().llm_context
+    assert requests[0]["options"]["num_ctx"] == llm.context_window()
     # Without vision, the model is not offered a tool it cannot use.
     names = {t["function"]["name"] for t in requests[0]["tools"]}
     assert "view_document" not in names and "write_letter" in names

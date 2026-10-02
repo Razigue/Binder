@@ -1,69 +1,76 @@
-import { Fragment, type ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { useT } from "@/i18n"
-import { glossary as messages } from "@/i18n/messages/glossary"
+import { useLocale } from "@/i18n"
+import { glossary } from "@/i18n/messages/glossary"
 
-type Term = Exclude<keyof (typeof messages)["en"], "explain">
+interface Entry {
+  id: string
+  def: string
+}
 
-// Words as they appear in French documents and in either language of the interface.
-const TERMS: [Term, RegExp][] = [
-  ["rib", /\bRIB\b/],
-  ["iban", /\bIBAN\b/],
-  ["rent_receipt", /quittances? de loyer|rent receipts?/i],
-  ["tax_notice", /avis d'(?:imposition|impôt)|tax notice/i],
-  ["property_tax", /taxe foncière|property tax/i],
-  ["withholding", /prélèvement à la source|withholding tax/i],
-  ["caf", /\bCAF\b/],
-  ["overpayment", /trop-perçu|overpayment/i],
-  ["formal_notice", /mise en demeure|formal notice/i],
-  ["notice_period", /préavis|notice period/i],
-  ["supplementary", /\bmutuelle\b|supplementary (?:health )?insurance/i],
-  ["rfr", /revenu fiscal de référence|reference tax income/i],
-  ["registration", /carte grise|vehicle registration/i],
-  ["roadworthiness", /contrôle technique|roadworthiness test/i],
-  ["payment_notice", /avis d'échéance|payment notice/i],
-  ["charges", /régularisation des charges|service charges/i],
-  ["termination", /résiliation|termination/i],
-]
+// Per language: the matcher over every term (longest first, so that "recommandé avec accusé de
+// réception" wins over "recommandé") and the entry of each lower-cased term.
+const cache = new Map<string, { pattern: RegExp; entries: Map<string, Entry> }>()
 
-/** Text with its paperwork words explained: each known term (first time it appears) is a
- * button that shows one sentence. */
-export function GlossaryText({ text }: { text: string }) {
-  const t = useT(messages)
-  if (!text) return null
-  const found: { start: number; end: number; term: Term }[] = []
-  for (const [term, pattern] of TERMS) {
-    const m = pattern.exec(text)
-    if (!m) continue
-    const start = m.index
-    const end = start + m[0].length
-    if (found.some((f) => start < f.end && end > f.start)) continue
-    found.push({ start, end, term })
+function matcher(language: "en" | "fr") {
+  let found = cache.get(language)
+  if (found) return found
+  const dict = glossary[language] as Record<string, string>
+  const entries = new Map<string, Entry>()
+  for (const [key, value] of Object.entries(dict)) {
+    if (!key.endsWith(".terms")) continue
+    const id = key.slice(0, -".terms".length)
+    for (const term of value.split("|")) entries.set(term.toLowerCase(), { id, def: dict[`${id}.def`] })
   }
-  if (!found.length) return <>{text}</>
-  found.sort((a, b) => a.start - b.start)
-  const parts: ReactNode[] = []
-  let last = 0
-  for (const f of found) {
-    parts.push(<Fragment key={`t${f.start}`}>{text.slice(last, f.start)}</Fragment>)
-    const word = text.slice(f.start, f.end)
-    parts.push(
-      <Popover key={`g${f.start}`}>
-        <PopoverTrigger
-          render={<button type="button" />}
-          aria-label={t("explain", { term: word })}
-          className="cursor-help underline decoration-dotted underline-offset-2 hover:decoration-solid"
-        >
-          {word}
-        </PopoverTrigger>
-        <PopoverContent className="w-72 text-sm">
-          <p className="font-medium">{word}</p>
-          <p className="mt-1 text-muted-foreground">{t(f.term)}</p>
-        </PopoverContent>
-      </Popover>,
-    )
-    last = f.end
-  }
-  parts.push(<Fragment key="end">{text.slice(last)}</Fragment>)
+  const escaped = [...entries.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  // Whole words only: "TVA" in "TVA", not in "TVAX"; letters include accents.
+  found = { pattern: new RegExp(`(?<![\\p{L}\\d])(?:${escaped.join("|")})(?![\\p{L}\\d])`, "giu"), entries }
+  cache.set(language, found)
+  return found
+}
+
+/** An administrative word, dotted: tap it for its explanation in one sentence. */
+export function Term({ children, definition }: { children: ReactNode; definition: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="cursor-help rounded-sm underline decoration-primary/70 decoration-dotted decoration-2 underline-offset-[3px] outline-none hover:decoration-primary focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3 text-sm leading-snug font-normal text-popover-foreground">
+        {definition}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** `text` with the glossary's words made tappable (the first time each one appears). Do not use
+ * inside a button or a link: the words are buttons themselves. */
+export function Glossed({ text }: { text: string }) {
+  const { language } = useLocale()
+  const parts = useMemo(() => {
+    const { pattern, entries } = matcher(language)
+    const seen = new Set<string>()
+    const out: ReactNode[] = []
+    let last = 0
+    for (const match of text.matchAll(pattern)) {
+      const entry = entries.get(match[0].toLowerCase())
+      if (!entry || seen.has(entry.id)) continue
+      seen.add(entry.id)
+      out.push(text.slice(last, match.index))
+      out.push(
+        <Term key={match.index} definition={entry.def}>
+          {match[0]}
+        </Term>,
+      )
+      last = match.index + match[0].length
+    }
+    out.push(text.slice(last))
+    return out
+  }, [text, language])
   return <>{parts}</>
 }

@@ -39,15 +39,31 @@ export function PapersPage() {
   return (
     <>
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
-      <div role="tablist" aria-label={t("title")} className="mb-5 flex gap-1 overflow-x-auto border-b">
-        {TABS.map((key) => (
+      <div role="tablist" aria-label={t("title")} className="mb-5 flex gap-1 border-b">
+        {TABS.map((key, i) => (
           <button
             key={key}
+            id={`papers-tab-${key}`}
             role="tab"
             aria-selected={tab === key}
+            aria-controls="papers-panel"
+            tabIndex={tab === key ? 0 : -1}
             onClick={() => setTab(key)}
+            onKeyDown={(e) => {
+              // Arrow keys move between tabs; Tab goes on to the panel.
+              const next =
+                e.key === "ArrowRight" ? (i + 1) % TABS.length
+                : e.key === "ArrowLeft" ? (i - 1 + TABS.length) % TABS.length
+                : e.key === "Home" ? 0
+                : e.key === "End" ? TABS.length - 1
+                : null
+              if (next === null) return
+              e.preventDefault()
+              setTab(TABS[next])
+              document.getElementById(`papers-tab-${TABS[next]}`)?.focus()
+            }}
             className={cn(
-              "-mb-px min-h-11 shrink-0 border-b-2 px-3 py-2 text-[15px] font-medium transition-colors",
+              "-mb-px min-h-11 shrink-0 border-b-2 px-3 py-2 text-[0.9375rem] font-medium transition-colors",
               tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
@@ -55,11 +71,13 @@ export function PapersPage() {
           </button>
         ))}
       </div>
-      {tab === "calendar" ? (
-        <CalendarTab />
-      ) : (
-        <DocumentsTab key={tab} archived={tab === "archives"} area={area} onArea={setArea} />
-      )}
+      <div id="papers-panel" role="tabpanel" aria-labelledby={`papers-tab-${tab}`}>
+        {tab === "calendar" ? (
+          <CalendarTab />
+        ) : (
+          <DocumentsTab key={tab} archived={tab === "archives"} area={area} onArea={setArea} />
+        )}
+      </div>
     </>
   )
 }
@@ -77,13 +95,13 @@ function AreaTiles({ selected, onSelect }: { selected: Area | null; onSelect: (a
     )
   return (
     <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {areas.data.map((a) => (
-        <AreaTile key={a.area} summary={a} active={selected === a.area} onClick={() => onSelect(selected === a.area ? null : a.area)} />
+      {areas.data.map((a, i) => (
+        <AreaTile key={a.area} index={i} summary={a} active={selected === a.area} onClick={() => onSelect(selected === a.area ? null : a.area)} />
       ))}
       {selected && (
         <button
           onClick={() => onSelect(null)}
-          className="flex min-h-24 items-center justify-center rounded-xl border border-dashed px-3 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="animate-rise flex min-h-24 items-center justify-center rounded-xl border border-dashed px-3 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {t("allAreas")}
         </button>
@@ -99,20 +117,21 @@ const TONE_TEXT: Record<string, string> = {
   empty: "text-muted-foreground",
 }
 
-function AreaTile({ summary, active, onClick }: { summary: AreaSummary; active: boolean; onClick: () => void }) {
+function AreaTile({ summary, index, active, onClick }: { summary: AreaSummary; index: number; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={active}
+      style={{ "--i": index } as React.CSSProperties}
       className={cn(
-        "flex min-h-24 flex-col items-start gap-2 rounded-xl bg-card p-3.5 text-left ring-1 transition-shadow hover:shadow-sm",
+        "animate-rise flex min-h-24 flex-col items-start gap-2 rounded-xl bg-card p-3.5 text-left ring-1 transition-[box-shadow,background-color] hover:bg-accent/40 hover:shadow-sm",
         active ? "ring-2 ring-primary" : "ring-foreground/10",
       )}
     >
       <span className="flex w-full items-center gap-2.5">
         <AreaIcon area={summary.area} size="sm" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{summary.label}</span>
-        {active && <CheckIcon className="size-4 text-primary" />}
+        {active && <CheckIcon className="animate-pop size-4 text-primary" weight="bold" />}
       </span>
       <span className={cn("line-clamp-2 text-xs leading-snug", TONE_TEXT[summary.tone] ?? TONE_TEXT.ok)}>
         {summary.state}
@@ -168,7 +187,11 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
               {p ?? t("everyone")}
             </button>
           ))}
-        {docs.data && <span className="ml-auto text-xs text-muted-foreground">{t("count", { count: shown.length })}</span>}
+        {docs.data && (
+          <span role="status" className="ml-auto text-xs text-muted-foreground">
+            {t("count", { count: shown.length })}
+          </span>
+        )}
       </div>
       <Card className="gap-0 p-0">
         {!docs.data ? (
@@ -254,8 +277,15 @@ function CalendarTab() {
                 year.data
                   .filter((e) => e.month === m)
                   .map((e) => (
-                    <li key={e.key} className={cn("flex gap-4 px-5 py-3 text-sm", m === now && "bg-accent/50")}>
-                      <span className="w-24 shrink-0 font-medium capitalize">{monthName(m)}</span>
+                    <li
+                      key={e.key}
+                      aria-current={m === now ? "date" : undefined}
+                      className={cn("flex gap-4 px-5 py-3 text-sm", m === now && "bg-accent/50")}
+                    >
+                      <span className="w-24 shrink-0 font-medium capitalize">
+                        {monthName(m)}
+                        {m === now && <span className="block text-xs font-normal text-muted-foreground">{t("calendar.thisMonth")}</span>}
+                      </span>
                       <span className="min-w-0 flex-1">
                         {e.text}
                         {e.concerns_you && <span className="ml-2 text-xs font-medium text-primary">{t("calendar.concernsYou")}</span>}

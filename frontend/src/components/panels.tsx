@@ -2,18 +2,20 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { PrinterIcon, EnvelopeSimpleIcon } from "@phosphor-icons/react"
-import { WarningCircleIcon, CheckCircleIcon, CopyIcon, DownloadSimpleIcon, FileTextIcon, FolderOpenIcon, InfoIcon, CircleNotchIcon, EnvelopeIcon, PencilSimpleIcon, ScalesIcon, PaperPlaneTiltIcon, GlobeIcon } from "@phosphor-icons/react"
+import { WarningCircleIcon, CheckCircleIcon, CopyIcon, DownloadSimpleIcon, FileTextIcon, FolderOpenIcon, InfoIcon, CircleNotchIcon, EnvelopeIcon, PencilSimpleIcon, ScalesIcon, PaperPlaneTiltIcon, GlobeIcon, PrinterIcon, MailboxIcon, ArrowsOutIcon, XCircleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { CategoryIcon } from "@/components/CategoryIcon"
-import { GlossaryText } from "@/components/glossary"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
+import { Viewer } from "@/components/viewer"
+import { Glossed } from "@/components/glossary"
 import { JourneyDialog } from "@/components/journey"
 import { QuestionsDialog, type QuestionsRequest } from "@/components/questions"
-import { useInvalidateAll } from "@/hooks/queries"
+import { useDeleteLetter, useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { feed } from "@/i18n/messages/feed"
+import { viewer } from "@/i18n/messages/viewer"
 import { api, folderExportUrl, letterPdfUrl, type Folder, type ImportReport, type LegalCheck, type LegalPoint, type LegalSource, type Letter } from "@/lib/api"
 import { AreaIcon } from "@/lib/areas"
 import { formatDate } from "@/lib/format"
@@ -54,12 +56,12 @@ export function PanelsProvider({ children }: { children: ReactNode }) {
       <QuestionsDialog request={asking} onClose={() => setAsking(null)} />
       <JourneyDialog id={journeyId} onClose={() => setJourneyId(null)} />
       <Dialog open={letter !== null} onOpenChange={(open) => !open && setLetter(null)}>
-        <DialogContent className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="flex h-[92vh] max-h-[92vh] flex-col gap-4 sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="text-lg">{letter && t("letterTitle", { recipient: letter.recipient })}</DialogTitle>
             <DialogDescription className="sr-only">{letter?.subject}</DialogDescription>
           </DialogHeader>
-          {letter && <LetterView key={letter.id ?? letter.subject} letter={letter} />}
+          {letter && <LetterView key={letter.id ?? letter.subject} letter={letter} onCancelled={() => setLetter(null)} />}
         </DialogContent>
       </Dialog>
       <Dialog
@@ -159,25 +161,28 @@ function LegalCheckNote({
   )
 }
 
-/** Prints the letter's text alone (the PDF cannot be printed from inside the app). */
-function printLetter(body: string) {
-  const sheet = document.createElement("div")
-  sheet.className = "print-only"
-  sheet.textContent = body
-  document.body.appendChild(sheet)
-  const done = () => {
-    sheet.remove()
-    window.removeEventListener("afterprint", done)
-  }
-  window.addEventListener("afterprint", done)
-  window.print()
-}
-
-export function LetterView({ letter: initial, compact = false }: { letter: Letter; compact?: boolean }) {
+/** A letter: in the letter panel as an A4 sheet with zoom, and the "Cancel the letter" button
+ * (`onCancelled` closes the panel); `compact` in the agent, with "Enlarge" to open the panel. */
+export function LetterView({
+  letter: initial,
+  compact = false,
+  onCancelled,
+}: {
+  letter: Letter
+  compact?: boolean
+  onCancelled?: () => void
+}) {
   const t = useT(feed)
+  const tv = useT(viewer)
+  const panels = usePanels()
   const [letter, setLetter] = useState(initial)
   const [editing, setEditing] = useState(false)
   const [body, setBody] = useState(initial.body)
+  const [cancelling, setCancelling] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
+  const remove = useDeleteLetter()
+  // "Send by post" open: the steps, then "I sent it".
+  const [posting, setPosting] = useState(false)
   const invalidate = useInvalidateAll()
   const blanks = (body.match(/\[[^\]\n]{2,80}\]/g) ?? []).length
 
@@ -198,7 +203,6 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
     },
     onError: (e) => toast.error(e.message),
   })
-  const [posting, setPosting] = useState(false)
   const sent = useMutation({
     mutationFn: () => api.letterSent(letter.id!),
     onSuccess: (l) => {
@@ -208,11 +212,25 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
     onError: (e) => toast.error(e.message),
   })
 
+  // Leaving the editor: unsaved changes are only dropped once the user confirms.
+  const stopEditing = () => (body !== letter.body ? setDiscarding(true) : setEditing(false))
+
   return (
-    <div className="overflow-hidden rounded-lg border">
+    <div className={cn("overflow-hidden rounded-lg border", !compact && "flex min-h-0 flex-1 flex-col")}>
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
         <EnvelopeIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{letter.subject}</span>
+        {compact && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => panels.showLetter({ ...letter, body })}
+            aria-label={tv("enlarge")}
+            title={tv("enlarge")}
+          >
+            <ArrowsOutIcon />
+          </Button>
+        )}
         {letter.id !== null && !editing && (
           <Button variant="ghost" size="icon-sm" onClick={() => setEditing(true)} aria-label={t("letterEdit")} title={t("letterEdit")}>
             <PencilSimpleIcon />
@@ -229,23 +247,32 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
         </Button>
       </div>
       {editing ? (
-        <div className="space-y-2 p-3">
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="min-h-80 text-xs leading-relaxed" />
-          <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-            {t("letterSave")}
-          </Button>
+        <div className={cn("flex flex-col gap-2 p-3", !compact && "min-h-0 flex-1")}>
+          <Textarea
+            value={body}
+            aria-label={t("letterEdit")}
+            onChange={(e) => setBody(e.target.value)}
+            className={cn("leading-relaxed", compact ? "min-h-80 text-xs" : "min-h-0 flex-1 resize-none text-sm")}
+          />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+              {t("letterSave")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={stopEditing} disabled={save.isPending}>
+              {t("letterEditCancel")}
+            </Button>
+          </div>
         </div>
-      ) : (
-        <pre
-          className={cn(
-            "overflow-y-auto px-3 py-2.5 font-sans text-xs leading-relaxed whitespace-pre-wrap select-text",
-            compact ? "max-h-72" : "max-h-[50vh]",
-          )}
-        >
+      ) : compact ? (
+        <pre className="max-h-72 overflow-y-auto px-3 py-2.5 font-sans text-xs leading-relaxed whitespace-pre-wrap select-text">
           {body}
         </pre>
+      ) : (
+        <Viewer aspect={A4} pan={false} className="min-h-[40%] flex-1">
+          <LetterSheet body={body} />
+        </Viewer>
       )}
-      <div className="space-y-2 border-t px-3 py-2.5">
+      <div className={cn("space-y-2 border-t px-3 py-2.5", !compact && "max-h-[45%] shrink-0 overflow-y-auto")}>
         <p className={cn("flex items-center gap-1.5 text-xs", blanks ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
           {blanks ? <WarningCircleIcon className="size-3.5" /> : <CheckCircleIcon className="size-3.5 text-primary" />}
           {blanks ? t("letterBlanks", { count: blanks }) : t("letterComplete")}
@@ -261,51 +288,151 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
           body={body}
           onApply={letter.id !== null && !editing ? (point) => applyCorrection.mutate(point) : undefined}
         />
-        {letter.registered && <p className="text-xs text-muted-foreground">{t("letterRegistered")}</p>}
+        {letter.registered && (
+          <p className="text-xs text-muted-foreground">
+            <Glossed text={t("letterRegistered")} />
+          </p>
+        )}
         {letter.sent_on && letter.follow_up_on && (
           <p className="text-xs text-muted-foreground">
             {t("letterSentOn", { date: formatDate(letter.sent_on), followUp: formatDate(letter.follow_up_on) })}
           </p>
         )}
         {letter.id !== null && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {/* Printing and posting first: most letters still go on paper. */}
-            <Button onClick={() => printLetter(body)}>
-              <PrinterIcon /> {t("letterPrint")}
-            </Button>
-            {!letter.sent_on && (
-              <Button variant="outline" onClick={() => setPosting(!posting)} aria-expanded={posting}>
-                <EnvelopeSimpleIcon /> {t("letterPost")}
+          <>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button size="sm" onClick={() => printLetter(body, letter.subject)}>
+                <PrinterIcon /> {t("letterPrint")}
               </Button>
+              {!letter.sent_on && (
+                <Button size="sm" variant="outline" onClick={() => setPosting((p) => !p)} aria-expanded={posting}>
+                  <MailboxIcon /> {t("letterPost")}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" render={<a href={letterPdfUrl(letter.id)} download />} nativeButton={false}>
+                <DownloadSimpleIcon /> {t("letterPdf")}
+              </Button>
+              {onCancelled && (
+                <Button size="sm" variant="destructive" className="sm:ml-auto" onClick={() => setCancelling(true)} disabled={remove.isPending}>
+                  <XCircleIcon /> {t("letterCancel")}
+                </Button>
+              )}
+            </div>
+            {posting && !letter.sent_on && (
+              <div className="rounded-md bg-muted/60 px-3 py-2.5 text-sm">
+                <ol className="list-decimal space-y-1 pl-5">
+                  <li>{t("post.print")}</li>
+                  <li>{t("post.envelope", { recipient: letter.recipient })}</li>
+                  <li>
+                    <Glossed text={letter.registered ? t("post.registered") : t("post.stamp")} />
+                  </li>
+                  <li>{t("post.tell")}</li>
+                </ol>
+                <Button size="sm" className="mt-2.5" onClick={() => sent.mutate()} disabled={sent.isPending}>
+                  <PaperPlaneTiltIcon /> {t("letterSent")}
+                </Button>
+              </div>
             )}
-            <Button variant="ghost" render={<a href={letterPdfUrl(letter.id)} download />} nativeButton={false}>
-              <DownloadSimpleIcon /> {t("letterPdf")}
-            </Button>
-          </div>
+          </>
         )}
-        {posting && !letter.sent_on && (
-          <div className="rounded-lg bg-muted/50 p-3 text-sm">
-            <ol className="list-decimal space-y-1 pl-5">
-              <li>{t("postPrint")}</li>
-              <li>{t("postSign")}</li>
-              <li>
-                {letter.recipient_address ? t("postEnvelopeTo") : t("postEnvelope")}
-                {letter.recipient_address && (
-                  <span className="mt-1 block whitespace-pre-line text-muted-foreground">
-                    {`${letter.recipient}\n${letter.recipient_address}`}
-                  </span>
+      </div>
+      {letter.id !== null && onCancelled && (
+        <ConfirmDialog
+          open={cancelling}
+          onOpenChange={setCancelling}
+          title={t("letterCancelTitle")}
+          description={t("letterCancelHint", { subject: letter.subject })}
+          confirmLabel={t("letterCancelConfirm")}
+          cancelLabel={t("letterKeep")}
+          onConfirm={async () => {
+            // The backend answers with an "Undo" toast.
+            await remove.mutateAsync(letter.id!)
+            onCancelled()
+          }}
+        />
+      )}
+      <ConfirmDialog
+        open={discarding}
+        onOpenChange={setDiscarding}
+        title={t("letterDiscardTitle")}
+        description={t("letterDiscardHint")}
+        confirmLabel={t("letterDiscardConfirm")}
+        cancelLabel={t("letterKeepEditing")}
+        onConfirm={() => {
+          setBody(letter.body)
+          setEditing(false)
+        }}
+      />
+    </div>
+  )
+}
+
+const A4 = 297 / 210
+
+/** Splits a letter into its blocks, laid out like its PDF: sender, then recipient and date on
+ * the right, the subject in bold. Shared by the sheet on screen and printing. */
+function letterBlocks(body: string) {
+  return body.split("\n\n").map((block, i) => ({
+    style: /^(Objet|Subject)/.test(block) ? "subject" : i === 1 || i === 2 ? "right" : "",
+    lines: block.split("\n"),
+  }))
+}
+
+/** The letter as a sheet of A4 paper. Sizes are in container units, so the text scales with
+ * the sheet when zooming; the details left in [brackets] stand out. */
+function LetterSheet({ body }: { body: string }) {
+  return (
+    <div className="@container">
+      {/* White on purpose: it is a sheet of paper, in both themes. */}
+      <div className="aspect-[210/297] rounded bg-white p-[9.5cqw] text-[length:1.75cqw] leading-[1.45] text-gray-900 shadow-sm select-text dark:brightness-[0.88]">
+        {letterBlocks(body).map((block, i) => (
+          <p
+            key={i}
+            className={cn("mb-[0.85em]", block.style === "right" && "ml-[52%]", block.style === "subject" && "font-semibold")}
+          >
+            {block.lines.map((line, j) => (
+              <span key={j}>
+                {j > 0 && <br />}
+                {line.split(/(\[[^\]\n]{2,80}\])/).map((part, k) =>
+                  k % 2 ? (
+                    <mark key={k} className="rounded-sm bg-amber-200 px-[0.15em] text-inherit">
+                      {part}
+                    </mark>
+                  ) : (
+                    part
+                  ),
                 )}
-              </li>
-              <li>{letter.registered ? t("postRegistered") : t("postStamp")}</li>
-            </ol>
-            <Button size="sm" className="mt-3" onClick={() => sent.mutate()} disabled={sent.isPending}>
-              <PaperPlaneTiltIcon /> {t("letterSent")}
-            </Button>
-          </div>
-        )}
+              </span>
+            ))}
+          </p>
+        ))}
       </div>
     </div>
   )
+}
+
+/** Prints the letter laid out like its PDF (sender, then recipient and date on the right). The
+ * PDF itself cannot be framed (`guard.py` denies it), so the text is printed from a blank frame. */
+function printLetter(body: string, title: string) {
+  const escape = (text: string) =>
+    text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!)
+  const blocks = letterBlocks(body).map(
+    (block) => `<p class="${block.style}">${block.lines.map(escape).join("<br>")}</p>`,
+  )
+  const frame = document.createElement("iframe")
+  frame.style.cssText = "position:fixed;width:0;height:0;border:0;visibility:hidden"
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><title>${escape(title)}</title><style>
+@page { size: A4; margin: 2cm; }
+* { font-family: sans-serif; font-size: 10.5pt; line-height: 1.45; color: #111827; }
+p { margin: 0 0 9pt 0; } .right { margin-left: 52%; } .subject { font-weight: bold; }
+</style></head><body>${blocks.join("")}</body></html>`
+  frame.onload = () => {
+    frame.contentWindow?.focus()
+    frame.contentWindow?.print()
+    // The print dialog blocks until closed; the frame is no longer needed after that.
+    setTimeout(() => frame.remove(), 1000)
+  }
+  document.body.appendChild(frame)
 }
 
 export function FolderView({ folder }: { folder: Folder }) {
@@ -375,7 +502,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
   }
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+      <p role="status" className="text-sm text-muted-foreground">
         {data.processing ? (
           <span className="flex items-center gap-2">
             <CircleNotchIcon className="size-4 animate-spin" /> {t("reportAnalysing", { count: data.processing })}
@@ -399,21 +526,21 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
                   </p>
                 ) : (
                   <>
-                  {brief && (
-                    <p className="mt-0.5 text-sm">
-                      <GlossaryText text={brief} />
-                    </p>
-                  )}
-                  <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
-                    {facts.map((f) => (
-                      <li key={f}>{f}</li>
-                    ))}
-                    {events.map((e) => (
-                      <li key={e} className="flex items-start gap-1 text-foreground">
-                        <InfoIcon className="mt-0.5 size-3 shrink-0 text-primary" /> {e}
-                      </li>
-                    ))}
-                  </ul>
+                    {brief && (
+                      <p className="mt-0.5 text-sm">
+                        <Glossed text={brief} />
+                      </p>
+                    )}
+                    <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                      {facts.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                      {events.map((e) => (
+                        <li key={e} className="flex items-start gap-1 text-foreground">
+                          <InfoIcon className="mt-0.5 size-3 shrink-0 text-primary" /> {e}
+                        </li>
+                      ))}
+                    </ul>
                   </>
                 )}
               </div>

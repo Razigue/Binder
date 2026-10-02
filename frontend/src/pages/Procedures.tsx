@@ -110,22 +110,22 @@ export function ProceduresPage() {
         <section>
           <h2 className="mb-3 font-semibold">{t("events")}</h2>
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {EVENTS.map((e) => {
+            {EVENTS.map((e, i) => {
               const Icon = EVENT_ICON[e]
               return (
-                <li key={e}>
+                <li key={e} className="animate-rise" style={{ "--i": i } as React.CSSProperties}>
                   <button
                     onClick={() => setEvent(e)}
-                    className="group flex h-full min-h-20 w-full items-center gap-3 rounded-xl bg-card px-4 py-3.5 text-left ring-1 ring-foreground/10 transition-[background-color,box-shadow] outline-none hover:bg-accent/40 hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="group flex h-full min-h-20 w-full items-center gap-3 rounded-xl bg-card px-4 py-3.5 text-left ring-1 ring-foreground/10 transition-[background-color,box-shadow] outline-none hover:bg-accent/40 hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring"
                   >
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                       <Icon className="size-5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] font-medium">{t(`event.${e}`)}</span>
+                      <span className="block text-[0.9375rem] font-medium">{t(`event.${e}`)}</span>
                       <span className="block text-sm text-muted-foreground">{t(`event.${e}Hint`)}</span>
                     </span>
-                    <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <CaretRightIcon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
                   </button>
                 </li>
               )
@@ -250,7 +250,7 @@ function StepRow({ step, onClick }: { step: Step; onClick: () => void }) {
     <li>
       <button
         onClick={onClick}
-        className="group flex min-h-14 w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors outline-none hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="group flex min-h-14 w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors outline-none hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring"
       >
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
           <Icon className="size-4" />

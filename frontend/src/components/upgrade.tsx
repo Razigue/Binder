@@ -33,7 +33,13 @@ export function UpgradeOffer({ upgrade }: { upgrade: ModelUpgrade }) {
         <p className="text-sm text-muted-foreground">{t("offer.switch")}</p>
         {ratio !== null && (
           <div className="space-y-1">
-            <Progress value={ratio} />
+            <Progress
+              value={ratio}
+              aria-label={t("offer.downloading", { label: upgrade.label })}
+              getAriaValueText={() =>
+                t("offer.progress", { done: formatSize(download.completed), total: formatSize(download.total) })
+              }
+            />
             <p className="text-xs text-muted-foreground tabular-nums">
               {t("offer.progress", { done: formatSize(download.completed), total: formatSize(download.total) })}
             </p>
@@ -49,7 +55,7 @@ export function UpgradeOffer({ upgrade }: { upgrade: ModelUpgrade }) {
       </span>
       <div className="min-w-0 flex-1 basis-60">
         <p className="font-medium">{t("offer.title")}</p>
-        <p className="text-sm text-muted-foreground">
+        <p role={failed ? "alert" : undefined} className="text-sm text-muted-foreground">
           {failed
             ? t("offer.failed", { error: download?.error ?? "" })
             : t("offer.text", { label: upgrade.label, size: formatSize(upgrade.size) })}

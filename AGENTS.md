@@ -38,6 +38,10 @@ npm run dev              # :5173, proxies /api to :8765
 CI runs all of the above on Linux, Windows and macOS: keep code cross-platform (`pathlib`, no
 shell-specific calls, UTF-8 I/O).
 
+`main` is only fed by pull requests, and each merged PR is a release: `tag.yml` tags the merge
+commit (patch bump; PR label `minor` or `major` for more, `no-release` for none) and the tag builds
+and publishes the GitHub release (`docs/release.md`). Label the PR before merging it.
+
 ## Rules
 
 - **Local only.** Never add network calls that send document data off the machine. Ollama

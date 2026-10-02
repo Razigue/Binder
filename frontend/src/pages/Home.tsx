@@ -41,10 +41,13 @@ export function HomePage() {
     .map((item, index) => ({ item, index }))
     .sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index)
     .map(({ item }) => item)
+  // What needs the user, one card each; what is only worth knowing, quieter, in one card below.
+  const needs = items.filter((i) => i.kind === "report" || i.tone !== "info")
+  const notes = items.filter((i) => i.kind !== "report" && i.tone === "info")
   const attention = items.filter((i) => i.tone !== "info").length
   const summary = attention ? t("summary", { count: attention }) : t("summaryNone")
   return (
-    <div className="mx-auto max-w-3xl">
+    <div>
       <PageHeader title={greeting} subtitle={data ? `${formatDate(toIso(day), "long")} · ${summary}` : formatDate(toIso(day), "long")} />
       {data && <SetupCard setup={data.setup} />}
       {!data ? (
@@ -54,16 +57,33 @@ export function HomePage() {
           ))}
         </div>
       ) : (
-        <div className="space-y-3">
-          {attention === 0 && <AllInOrder />}
-          {items.map((item) => (
-            <Card key={item.key} className="gap-0 p-0">
-              <ul>
-                <FeedCard item={item} />
-              </ul>
-            </Card>
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {/* Cards rise in one after the other; a card that arrives later rises on its own. */}
+            {needs.map((item, i) => (
+              <Card key={item.key} className="animate-rise gap-0 p-0" style={{ "--i": i } as React.CSSProperties}>
+                <ul>
+                  <FeedCard item={item} />
+                </ul>
+              </Card>
+            ))}
+            {attention === 0 && <AllInOrder />}
+          </div>
+          {notes.length > 0 && (
+            <section aria-labelledby="todo-notes" className="mt-10">
+              <h2 id="todo-notes" className="mb-3 font-semibold">
+                {t("notes")}
+              </h2>
+              <Card className="animate-rise gap-0 p-0" style={{ "--i": needs.length } as React.CSSProperties}>
+                <ul className="divide-y">
+                  {notes.map((item) => (
+                    <FeedCard key={item.key} item={item} />
+                  ))}
+                </ul>
+              </Card>
+            </section>
+          )}
+        </>
       )}
     </div>
   )
@@ -77,8 +97,8 @@ function rank(item: FeedItem): number {
 function AllInOrder() {
   const t = useT(today)
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl bg-card px-6 py-10 text-center ring-1 ring-foreground/10">
-      <CheckCircleIcon className="size-12 text-emerald-600 dark:text-emerald-400" weight="fill" />
+    <div className="animate-rise flex flex-col items-center gap-2 rounded-xl bg-card px-6 py-10 text-center ring-1 ring-foreground/10">
+      <CheckCircleIcon className="animate-pop size-12 text-emerald-600 [animation-delay:150ms] dark:text-emerald-400" weight="fill" />
       <p className="text-lg font-semibold">{t("allGood")}</p>
       <p className="max-w-md text-sm text-muted-foreground">{t("allGoodHint")}</p>
     </div>
@@ -129,7 +149,9 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
           {error ? <VaultIcon className="size-4" /> : <CircleNotchIcon className="size-4 animate-spin" />}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-medium">{t(`setup.${setup.phase}`)}</p>
+          <p role="status" className="font-medium">
+            {t(`setup.${setup.phase}`)}
+          </p>
           <p className="text-sm text-muted-foreground">{error ? setup.error || t("setup.errorHint") : t("setup.hint")}</p>
         </div>
         {error && (
@@ -140,7 +162,11 @@ function SetupCard({ setup }: { setup: SetupStatus }) {
       </div>
       {!error && ratio !== null && (
         <div className="space-y-1">
-          <Progress value={ratio} />
+          <Progress
+            value={ratio}
+            aria-label={t(`setup.${setup.phase}`)}
+            getAriaValueText={() => t("setup.progress", { done: formatSize(setup.completed), total: formatSize(setup.total) })}
+          />
           <p className="text-xs text-muted-foreground tabular-nums">
             {t("setup.progress", { done: formatSize(setup.completed), total: formatSize(setup.total) })}
           </p>
@@ -170,7 +196,7 @@ function Welcome({ setup }: { setup: SetupStatus }) {
   const [asking, setAsking] = useState<boolean | null>(null)
   const ask = asking ?? (profile.data !== undefined && !answered(profile.data))
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="max-w-3xl">
       <PageHeader title={t("welcome")} subtitle={t("welcomeSubtitle")} />
       <SetupCard setup={setup} />
       {!profile.data ? (

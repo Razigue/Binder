@@ -5,8 +5,10 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -23,7 +25,6 @@ _availability: tuple[float, bool] | None = None
 # Capabilities reported by Ollama per model ("vision", "tools", "thinking"…).
 _capabilities: dict[str, set[str]] = {}
 AVAILABILITY_TTL = 30.0
-MAX_CHARS = 8000
 # First Ollama release that runs the Qwen 3.5 small models (2B to 9B) Binder offers, with the
 # fixes for their tool calls and repetitions (0.17.5 release notes). Larger models may need a
 # newer one: llm_models.CatalogEntry.min_ollama.
@@ -41,6 +42,41 @@ CONTEXT_ALERT = 0.8
 SEED = 42
 # Prompt tokens of the last call, as counted by Ollama.
 last_prompt_tokens: int | None = None
+
+# Sampling: greedy with a fixed seed, the same document reads the same way each time. Qwen's
+# recommended non-reasoning sampling (temperature 0.7, top_p 0.8, presence_penalty 1.5) was
+# measured worse for the agent: 28 and 27 of 36 scenarios against 31 with qwen3.5:9b, picking
+# the wrong tool more often. Reasoning uses Qwen's settings: greedy, it loops in its thoughts.
+EXACT: dict[str, Any] = {"temperature": 0}
+THINKING: dict[str, Any] = {
+    "temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0, "presence_penalty": 1.5,
+}  # fmt: skip
+
+
+@dataclass(frozen=True)
+class Profile:
+    """How much the active model is given: a large model on a large machine reads more of a
+    document, sees every tool and reasons on difficult tasks."""
+
+    # Context window asked of Ollama (num_ctx). Qwen 3.5/3.6 keep a key-value cache on a quarter
+    # of their layers only, so a larger window costs little memory.
+    context: int
+    # Document text in a prompt; beyond, its start and its end (compact).
+    doc_chars: int
+    # The agent gets every tool, rather than those its request calls for (a small model picks
+    # worse among more, a large one misses the tool the router did not foresee).
+    all_tools: bool
+    # Reasons before the rare, difficult tasks (letters, legal checks, a second reading), when
+    # a graphics card runs it (on a processor alone, minutes per task).
+    think_hard: bool
+
+
+SMALL = Profile(context=16384, doc_chars=8000, all_tools=False, think_hard=False)
+LARGE = Profile(context=32768, doc_chars=24000, all_tools=True, think_hard=True)
+# Catalogue models (llm_models.CATALOG) given more than SMALL; any other model gets SMALL.
+PROFILES = {"qwen3.6:35b-a3b": LARGE, "qwen3.6:27b": LARGE}
+# Set from the machine measured at launch (setup.py): a graphics card, or Apple silicon.
+_accelerated = False
 
 # Model chosen in the settings; otherwise the configured one (BINDER_LLM_MODEL).
 _selected: str | None = None
@@ -94,6 +130,11 @@ Document:
 """
 SCAN_NOTE = """The images are the document's pages; the text below was read from them by OCR \
 and may contain errors: trust the images.
+"""
+# The last document filed from the same sender: recurring bills and payslips read alike.
+EXAMPLE_NOTE = """A previous document from the same sender was filed as: {example}. If this one \
+is of the same kind, keep that category, type, issuer name and title style; its own amounts, \
+dates and references are in the text below.
 """
 TRANSCRIBE_PROMPT = """Transcribe all the text of this administrative document page, line by \
 line, in reading order, keeping table rows on one line. Output only the text."""
@@ -168,9 +209,11 @@ def _squeeze(text: str) -> str:
     return _BLANK_LINES.sub("\n", _BLANKS.sub(" ", text)).strip()
 
 
-def compact(text: str, limit: int = MAX_CHARS) -> str:
+def compact(text: str, limit: int | None = None) -> str:
     """Document text for a prompt: runs of spaces and blank lines cost tokens, not meaning.
-    Beyond `limit`, the start and the end are kept, not the start alone."""
+    Beyond `limit` (default: the model's profile), the start and the end are kept, not the
+    start alone."""
+    limit = limit or profile().doc_chars
     body = _squeeze(text)
     if len(body) <= limit:
         return body
@@ -181,9 +224,9 @@ def compact(text: str, limit: int = MAX_CHARS) -> str:
     return body[:head] + CUT + body[-tail:]
 
 
-def truncated(text: str, limit: int = MAX_CHARS) -> bool:
+def truncated(text: str, limit: int | None = None) -> bool:
     """The text does not fit in a prompt whole: the model reads only its start and its end."""
-    return len(_squeeze(text)) > limit
+    return len(_squeeze(text)) > (limit or profile().doc_chars)
 
 
 def dumps(value: Any) -> str:
@@ -213,6 +256,49 @@ def select(name: str | None) -> None:
     global _selected
     _selected = name
     forget_availability()
+
+
+def profile() -> Profile:
+    """What the active model is given (context, document length, tools, reasoning)."""
+    return PROFILES.get(model().removesuffix(":latest"), SMALL)
+
+
+def context_window() -> int:
+    """Context window of every chat request: BINDER_LLM_CONTEXT, otherwise the profile's. The
+    same for every call, or Ollama would reload the model."""
+    return get_settings().llm_context or profile().context
+
+
+def set_accelerated(value: bool) -> None:
+    global _accelerated
+    _accelerated = value
+
+
+def think_hard() -> bool:
+    """Reason before a difficult task: a large model the graphics card runs, or asked for."""
+    return get_settings().llm_think or (profile().think_hard and _accelerated)
+
+
+def _load(name: str) -> None:
+    try:
+        with client(timeout=get_settings().llm_timeout) as c:
+            payload = {
+                "model": name,
+                "messages": [],
+                "keep_alive": get_settings().llm_keep_alive,
+                "options": {"num_ctx": context_window()},
+            }
+            c.post("/api/chat", json=payload).raise_for_status()
+        log.info("Model %s loaded", name)
+    except httpx.HTTPError as e:
+        log.info("Could not preload %s: %s", name, e)
+
+
+def warm() -> None:
+    """Loads the active model in the background, with the context window of the requests to
+    come: the first question does not wait for it (up to a minute on a processor)."""
+    if is_available():
+        threading.Thread(target=_load, args=(model(),), name="llm-warm", daemon=True).start()
 
 
 def forget_availability() -> None:
@@ -335,7 +421,7 @@ def _log_usage(prompt_tokens: Any) -> None:
     if not isinstance(prompt_tokens, int):
         return
     last_prompt_tokens = prompt_tokens
-    window = get_settings().llm_context
+    window = context_window()
     if prompt_tokens >= CONTEXT_ALERT * window:
         log.warning("Prompt of %d tokens: %d%% of the context window", prompt_tokens,
                     100 * prompt_tokens // window)  # fmt: skip
@@ -354,14 +440,14 @@ def chat(
     """One model turn. With `on_token`, the answer is streamed: each piece of text is passed
     to it as it comes, and the complete message is returned at the end."""
     settings = get_settings()
+    sampling = THINKING if think else EXACT
     payload: dict[str, Any] = {
         "model": model(),
         "messages": messages,
         "stream": on_token is not None,
         "think": think,
         "keep_alive": settings.llm_keep_alive,
-        # Fixed seed with temperature 0: the same document reads the same way each time.
-        "options": {"temperature": 0, "seed": SEED, "num_ctx": settings.llm_context},
+        "options": {**sampling, "seed": SEED, "num_ctx": context_window()},
     }
     if tools:
         payload["tools"] = tools
@@ -430,13 +516,21 @@ def _stream(
     return _with_stats(message, last)
 
 
-def extract(text: str, images: list[bytes] | None = None) -> Extraction | None:
+def extract(
+    text: str,
+    images: list[bytes] | None = None,
+    *,
+    example: dict[str, Any] | None = None,
+    think: bool = False,
+) -> Extraction | None:
     """Extraction by the local model. None on failure: the pipeline keeps the rules.
 
     `images`: pages of a scan or photo, shown to the model along with the OCR text, which may
-    have misread the layout or a figure."""
+    have misread the layout or a figure. `example`: how the last document of the same sender
+    was filed (learning.example)."""
     context = user_context()
-    prompt = EXTRACTION_PROMPT.format(
+    note = EXAMPLE_NOTE.format(example=dumps(example)) if example else ""
+    prompt = note + EXTRACTION_PROMPT.format(
         categories=", ".join(c.value for c in Category),
         doc_types=doc_types(),
         title_example=TITLE_EXAMPLES[i18n.current_language()],
@@ -448,7 +542,7 @@ def extract(text: str, images: list[bytes] | None = None) -> Extraction | None:
         request["content"] = SCAN_NOTE + prompt
         request["images"] = [image(i) for i in images]
     try:
-        message = chat([request], fmt=EXTRACTION_SCHEMA)
+        message = chat([request], fmt=EXTRACTION_SCHEMA, think=think)
         data = json.loads(message.get("content") or "{}")
         # The model's own confidence means nothing: it is computed from the checks.
         for ignored in ("missing_fields", "doubts", "confidence", "amount"):

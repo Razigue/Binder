@@ -4,6 +4,7 @@ The system web engine on Windows (Edge WebView2) and macOS (WebKit), Qt on Linux
 The server lives in a thread of the same process: closing the window stops everything.
 """
 
+import base64
 import contextlib
 import json
 import logging
@@ -14,6 +15,7 @@ import sys
 import threading
 import time
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -55,47 +57,70 @@ CAPTION_DARK = ("#0e141e", "#d1d8e2")
 
 SPLASH = """<!doctype html>
 <html lang="__LANG__"><head><meta charset="utf-8"><style>
-  :root { --bg: #1c2a4f; --fg: #fff; --soft: #c7d0e6; --mute: #9aa6c4;
-    --track: rgba(199,208,230,.16); --warn: #f2c879; --out: cubic-bezier(.16,1,.3,1); }
+  __FONT__
+  /* The app's tokens (index.css): cool paper and ink navy, graphite and paper in dark mode. */
+  :root { --bg: oklch(0.985 0.003 250); --fg: oklch(0.22 0.03 260);
+    --soft: oklch(0.4 0.025 260); --mute: oklch(0.52 0.02 258);
+    --tile: oklch(0.28 0.07 262); --glyph: #fff; --track: oklch(0.93 0.008 255);
+    --edge: oklch(0.925 0.008 255); --warn: #b45309; --out: cubic-bezier(.16,1,.3,1); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: oklch(0.175 0.002 260); --fg: oklch(0.94 0.002 260);
+      --soft: oklch(0.82 0.003 260); --mute: oklch(0.71 0.004 260);
+      --tile: oklch(0.93 0.004 260); --glyph: oklch(0.2 0.006 260);
+      --track: oklch(0.27 0.004 260); --edge: oklch(1 0 0 / 8%); --warn: #fcd34d; }
+  }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
     overflow: hidden; cursor: default; user-select: none; -webkit-user-select: none;
-    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 13px/1.45 Geist, system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased; }
+  /* Frameless window: a hairline keeps a light splash apart from a light desktop. */
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 0 1px var(--edge); }
   /* Layout anchored at the top: a two-line status does not move the logo. */
   main { height: 100%; display: flex; flex-direction: column; align-items: center;
-    padding-top: 84px; box-sizing: border-box; }
-  svg { width: 64px; height: 64px; display: block; }
-  .shackle { transform: translateY(-2.5px); animation: lock .7s var(--out) .15s forwards; }
-  @keyframes lock { to { transform: none; } }
-  h1 { margin: 14px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
-  .work { margin-top: 28px; width: 248px; display: flex; flex-direction: column;
+    padding-top: 80px; box-sizing: border-box; animation: page .22s ease-out; }
+  @keyframes page { from { opacity: 0; } }
+  svg { width: 60px; height: 60px; display: block; }
+  .tile { fill: var(--tile); }
+  .glyph { fill: var(--glyph); }
+  /* The sleeves of the binder appear one after the other. */
+  .sleeve { fill: var(--tile); opacity: 0; animation: sleeve .35s var(--out) .1s forwards; }
+  .sleeve:nth-of-type(2) { animation-delay: .2s; }
+  .sleeve:nth-of-type(3) { animation-delay: .3s; }
+  .sleeve:nth-of-type(4) { animation-delay: .4s; }
+  @keyframes sleeve { to { opacity: 1; } }
+  h1 { margin: 16px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
+  .work { margin-top: 26px; width: 248px; display: flex; flex-direction: column;
     align-items: center; }
-  #status { width: 100%; text-align: center; color: var(--soft); min-height: 18px;
-    text-wrap: balance; transition: opacity .14s ease-out, transform .14s ease-out; }
-  #status.out { opacity: 0; transform: translateY(2px); }
+  #status { width: 100%; text-align: center; color: var(--soft); min-height: 19px;
+    text-wrap: balance; transition: opacity .14s ease-out; }
+  #status.out { opacity: 0; }
   #status.warn { color: var(--warn); }
-  .bar { margin-top: 12px; width: 160px; height: 3px; border-radius: 3px;
+  .bar { margin-top: 14px; width: 168px; height: 4px; border-radius: 4px;
     background: var(--track); overflow: hidden; }
-  .bar div { height: 100%; border-radius: inherit; background: var(--fg);
+  .bar div { height: 100%; border-radius: inherit; background: var(--tile);
     transform: scaleX(0); transform-origin: left; transition: transform .25s var(--out); }
   .bar.busy div { width: 32%; transition: none;
     animation: slide 1.4s cubic-bezier(.65,0,.35,1) infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(315%); } }
-  #detail { margin-top: 8px; min-height: 15px; font-size: 11px; color: var(--mute);
+  #detail { margin-top: 8px; min-height: 16px; font-size: 11px; color: var(--mute);
     font-variant-numeric: tabular-nums; }
-  footer { position: absolute; left: 0; right: 0; bottom: 14px; text-align: center;
+  footer { position: absolute; left: 0; right: 0; bottom: 16px; text-align: center;
     font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
   @media (prefers-reduced-motion: reduce) {
-    .shackle { animation: none; transform: none; }
+    main { animation: none; }
+    .sleeve { animation: none; opacity: 1; }
     .bar.busy div { width: 100%; opacity: .35; animation: none; transform: none; }
   }
 </style></head><body><main>
   <svg viewBox="0 0 32 32" aria-hidden="true">
-    <rect width="32" height="32" rx="8" fill="#2c3d6b"/>
-    <path class="shackle" d="M12 14v-3a4 4 0 0 1 8 0v3"
-      stroke="#fff" stroke-width="2.4" fill="none"/>
-    <rect x="9" y="14" width="14" height="11" rx="2.5" fill="#fff"/>
-    <circle cx="16" cy="19.5" r="1.8" fill="#2c3d6b"/></svg>
+    <rect class="tile" width="32" height="32" rx="8"/>
+    <rect class="glyph" x="8" y="6" width="16" height="20" rx="2.2"/>
+    <rect class="tile" x="11" y="6" width="1.1" height="20"/>
+    <g><rect class="sleeve" x="13.6" y="10" width="3.8" height="5.4" rx=".6"/>
+      <rect class="sleeve" x="18.6" y="10" width="3.8" height="5.4" rx=".6"/>
+      <rect class="sleeve" x="13.6" y="16.6" width="3.8" height="5.4" rx=".6"/>
+      <rect class="sleeve" x="18.6" y="16.6" width="3.8" height="5.4" rx=".6"/></g></svg>
   <h1>Binder</h1>
   <div class="work" role="status" aria-live="polite">
     <div id="status">__STARTING__</div>
@@ -153,9 +178,23 @@ def _remember_language() -> None:
         )
 
 
+def _splash_font() -> str:
+    """The app's Geist, inlined: the splash shows before the server that serves it."""
+    assets = Path(__file__).parent / "static" / "assets"
+    for path in sorted(assets.glob("geist-latin-wght-normal-*.woff2")):
+        with contextlib.suppress(OSError):
+            data = base64.b64encode(path.read_bytes()).decode("ascii")
+            return (
+                "@font-face { font-family: Geist; font-weight: 100 900; "
+                f'src: url(data:font/woff2;base64,{data}) format("woff2"); }}'
+            )
+    return ""  # interface not built: system font
+
+
 def splash_html(language: i18n.Language) -> str:
     starting = T.get("starting", language)
     replacements = {
+        "__FONT__": _splash_font(),
         "__LANG__": language,
         "__STARTING_JSON__": json.dumps(starting),
         "__STARTING__": starting,
@@ -262,6 +301,53 @@ def _paint_windows_caption(hwnd: int, background: str, foreground: str, dark: bo
         set_attribute(hwnd, attribute, ctypes.byref(data), ctypes.sizeof(data))
 
 
+def _center_windows(hwnd: int) -> None:
+    """Centres the window in the work area of the screen under the mouse pointer.
+
+    WinForms' CenterScreen places the window before its size is final under display scaling,
+    so the splash screen ended up off centre.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class MonitorInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    user32 = ctypes.windll.user32
+    user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    cursor, window = wintypes.POINT(), wintypes.RECT()
+    user32.GetCursorPos(ctypes.byref(cursor))
+    info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+    monitor = user32.MonitorFromPoint(cursor, 2)  # MONITOR_DEFAULTTONEAREST
+    if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return
+    user32.GetWindowRect(hwnd, ctypes.byref(window))
+    work = info.rcWork
+    x = work.left + (work.right - work.left - (window.right - window.left)) // 2
+    y = work.top + (work.bottom - work.top - (window.bottom - window.top)) // 2
+    # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    user32.SetWindowPos(hwnd, None, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
+
+
 def _set_macos_appearance(native: Any, dark: bool) -> None:
     from AppKit import NSAppearance
     from PyObjCTools import AppHelper
@@ -338,6 +424,20 @@ class WindowApi:
     def close(self) -> None:
         if self._window is not None:
             self._window.destroy()
+
+    def choose_folder(self, initial: str = "") -> str | None:
+        """System folder dialog, for the watched folder. None if cancelled."""
+        import webview
+
+        if self._window is None:
+            return None
+        start = Path(str(initial)).expanduser() if initial else Path.home()
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.FOLDER, directory=str(start if start.is_dir() else Path.home())
+        )
+        if not chosen:
+            return None
+        return str(chosen[0] if isinstance(chosen, (list, tuple)) else chosen)
 
     def _attach(self, window: Any, dark: bool) -> None:
         """Paints the interface's colours if already sent, otherwise defaults for `dark`."""
@@ -433,7 +533,9 @@ class Desktop:
             height=360,
             resizable=False,
             frameless=True,
-            background_color="#1c2a4f",
+            # Windows: shown once centred by _boot.
+            hidden=sys.platform == "win32",
+            background_color="#101011" if _system_dark() else "#f9fafc",  # --bg
             # pywebview blocks text selection by default: answers and documents must be copyable.
             text_select=True,
         )
@@ -452,6 +554,10 @@ class Desktop:
 
     def _boot(self, window: Any) -> None:
         window.events.loaded.wait(10)
+        if sys.platform == "win32":
+            with contextlib.suppress(Exception):  # a misplaced splash beats no splash
+                _center_windows(int(window.native.Handle.ToInt64()))
+            window.show()
         splash = Splash(window, self.language)
         try:
             if self._update(splash):
@@ -477,7 +583,7 @@ class Desktop:
             height=860,
             min_size=(960, 640),
             hidden=True,
-            background_color="#0a1018" if dark else "#f9fafc",  # --background
+            background_color="#101011" if dark else "#f9fafc",  # --background
             js_api=api,
         )
         assert main is not None  # None only when called before webview.start()

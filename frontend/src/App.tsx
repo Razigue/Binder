@@ -1,4 +1,5 @@
 import { lazy } from "react"
+import { IconContext } from "@phosphor-icons/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom"
 import { Toaster } from "@/components/ui/sonner"
@@ -18,6 +19,10 @@ const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default:
 const SettingsPage = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.SettingsPage })))
 const TrashPage = lazy(() => import("@/pages/Trash").then((m) => ({ default: m.TrashPage })))
 
+// Icons sit beside their words: screen readers skip them (an icon that means something on its own
+// gets its name from the button or link around it).
+const ICONS = { "aria-hidden": true } as const
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1, refetchOnWindowFocus: true } },
 })
@@ -31,6 +36,7 @@ function AreaRedirect() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <IconContext.Provider value={ICONS}>
       <I18nProvider>
         <BrowserRouter>
           <PanelsProvider>
@@ -59,6 +65,7 @@ export default function App() {
           <Toaster position="bottom-right" />
         </BrowserRouter>
       </I18nProvider>
+      </IconContext.Provider>
     </QueryClientProvider>
   )
 }

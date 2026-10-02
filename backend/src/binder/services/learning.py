@@ -11,10 +11,11 @@ import re
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.models import Category, Document, Learned
+from binder.db import WITHOUT_TEXT
+from binder.models import Category, Document, DocumentStatus, Learned
 from binder.schemas import Extraction
 from binder.services import activity, rules
 
@@ -175,3 +176,60 @@ def log_applied(session: Session, doc: Document, fields: list[str]) -> None:
             document=doc,
             details={"fields": fields},
         )
+
+
+# Where the sender's name stands: the letterhead and the first lines.
+HEAD_CHARS = 1500
+# Fields whose presence the example reports (not their values: they are each document's own).
+EXAMPLE_FIELDS = (
+    "amount_ht", "amount_tva", "amount_ttc", "amount_due", "issue_date", "due_date",
+    "expiry_date", "period_start", "period_end", "reference", "iban", "siret", "person",
+)  # fmt: skip
+
+
+def example(session: Session, text: str, exclude: int | None = None) -> dict[str, Any] | None:
+    """How the last filed document of the sender of `text` was read, shown to the model with
+    the new one: recurring bills and payslips are then filed alike. The sender is the issuer
+    of the library whose name the first lines of `text` carry (the longest, most specific)."""
+    head = rules.normalize(text[:HEAD_CHARS])
+    issuers = session.exec(
+        select(Document.issuer)
+        .where(
+            col(Document.deleted_at).is_(None),
+            Document.status == DocumentStatus.CLASSIFIED,
+            col(Document.issuer).is_not(None),
+        )
+        .distinct()
+    ).all()
+    named = [
+        issuer
+        for issuer in issuers
+        if issuer
+        and len(key := rules.normalize(issuer).strip()) >= 3
+        and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", head)
+    ]
+    if not named:
+        return None
+    sender = max(named, key=len)
+    stmt = (
+        select(Document)
+        .options(*WITHOUT_TEXT)
+        .where(
+            col(Document.deleted_at).is_(None),
+            Document.status == DocumentStatus.CLASSIFIED,
+            Document.issuer == sender,
+        )
+    )
+    if exclude is not None:
+        stmt = stmt.where(Document.id != exclude)
+    order = (col(Document.issue_date).desc(), col(Document.id).desc())
+    doc = session.exec(stmt.order_by(*order)).first()
+    if doc is None:
+        return None
+    return {
+        "category": doc.category.value,
+        "doc_type": doc.doc_type,
+        "issuer": doc.issuer,
+        "title": doc.title,
+        "fields": [f for f in EXAMPLE_FIELDS if getattr(doc, f) is not None],
+    }

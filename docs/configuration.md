@@ -8,10 +8,10 @@ Through environment variables, or in a `backend/.env` file:
 | `BINDER_DB_KEY` | generated in `DATA_DIR/key` | encryption master secret |
 | `BINDER_LLM_MODEL` | `qwen3.5:9b` | default Ollama model (the choice made in Settings wins) |
 | `BINDER_LLM_ENABLED` | `true` | `false`: no model at all, the rules read every document (tests, demo on a modest machine; they are tuned on the demo documents only). With `true`, real documents imported before the model is ready wait for it |
-| `BINDER_LLM_CONTEXT` | `16384` | context window asked of Ollama (its own default, 4096, cuts agent conversations) |
+| `BINDER_LLM_CONTEXT` | the model's profile (16384, 32768 for the large models) | context window asked of Ollama (its own default, 4096, cuts agent conversations); see [models.md](models.md#what-each-model-is-given) |
 | `BINDER_LLM_KEEP_ALIVE` | `30m` | how long Ollama keeps the model loaded after a request |
 | `BINDER_LLM_VISION` | `true` | show scans, photos and pages to the model when it reads images |
-| `BINDER_LLM_THINK` | `false` | let the agent reason before each step (slower) |
+| `BINDER_LLM_THINK` | `false` | let the agent reason before each step (slower); also makes letters and second readings reason on any model |
 | `BINDER_WEB_SEARCH` | `true` | let the agent search the web for general facts (queries with personal data are refused) |
 | `BINDER_WEB_SEARCH_URL` | `https://html.duckduckgo.com/html/` | search page queried |
 | `BINDER_EMBED_MODEL` | `qwen3-embedding:0.6b` | embedding model for semantic search (used when installed) |

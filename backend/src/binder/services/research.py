@@ -30,18 +30,29 @@ log = logging.getLogger(__name__)
 # Each query costs a search, each page a download read by the model: a few seconds each.
 MAX_QUERIES = 3
 MAX_PAGES = 3
+# The organisation's own pages often give a phone number or a form and no postal address:
+# a few more results are read until one gives it.
+MAX_READS = 6
+# Passages around postal addresses kept from a page, and their length before the postcode.
+MAX_ADDRESSES = 3
+ADDRESS_LEAD = 160
+# A postcode starting a line or following a comma, then a town ("91003 Evry Cedex"), or a
+# PO box ("BP 40090", "CS 70001", "TSA 12345").
+POSTAL = re.compile(
+    r"(?:^|,\s*)\d{4,5}\s+[A-ZÀ-Ý][^\n,]{1,40}|\b(?:BP|CS|TSA)\s?\d{3,6}\b", re.MULTILINE
+)
 
 PLAN_PROMPT = """A letter is about to be written for a private person. Country: {country}. \
 Today: {today}.
 What it must do: {purpose}
 {document}
 List the web searches (at most {limit}, in {language}) that would make this letter specific to \
-the organisation and the situation instead of a generic template: the postal address or \
-channel the organisation asks for this kind of request, its own conditions (commitment \
-period, notice, fees, details or documents to give, equipment to return), the rules that \
-apply to this kind of contract. Short queries naming the organisation and the subject only, \
-never the person's name, address, amounts, dates, numbers or references. An empty list if no \
-search would help.
+the organisation and the situation instead of a generic template: first the postal address \
+the organisation gives for this kind of request ("adresse résiliation Freebox"), then its own \
+conditions (commitment period, notice, fees, details or documents to give, equipment to \
+return) and the rules that apply to this kind of contract. Short queries naming the \
+organisation and the subject only, never the person's name, address, amounts, dates, numbers \
+or references. An empty list if no search would help.
 Return JSON: organisation (who the letter goes to, "" if unknown), queries."""
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -115,17 +126,44 @@ def gather(session: Session, purpose: str, document: str, language: i18n.Languag
     unique = list({r.url: r for r in results}.values())
     topic = " ".join([plan.organisation, *queries])
     pages: list[Page] = []
-    for result in sorted(unique, key=lambda r: _rank(r, plan.organisation)):
-        if len(pages) >= MAX_PAGES:
+    addressed = False
+    ranked = sorted(unique, key=lambda r: _rank(r, plan.organisation))
+    for read, result in enumerate(ranked):
+        if read >= MAX_READS or (len(pages) >= MAX_PAGES and addressed):
             break
         try:
             title, body = websearch.read_page(result.url, lawcheck.PAGE_CHARS)
         except (ValueError, httpx.HTTPError):
             continue
-        if body.strip():
-            source = LegalSource(title=title or result.title, url=result.url)
-            pages.append(Page(source=source, excerpt=lawcheck.excerpt(body, topic)))
+        if not body.strip():
+            continue
+        found = addresses(body, topic)
+        if len(pages) >= MAX_PAGES and not found:
+            continue  # read only for the address it might give
+        excerpt = lawcheck.excerpt(body, topic)
+        extra = [a for a in found if a not in excerpt]
+        source = LegalSource(title=title or result.title, url=result.url)
+        pages.append(Page(source=source, excerpt="\n[…]\n".join([excerpt, *extra])))
+        addressed = addressed or bool(found)
     return pages
+
+
+def addresses(body: str, topic: str) -> list[str]:
+    """Passages of a page around its postal addresses, those sharing most words with the
+    request first: the excerpt around the request often stops before the address block."""
+    words = set(re.findall(r"[a-z0-9]{4,}", normalize(topic)))
+    spans: list[tuple[int, int]] = []
+    for m in POSTAL.finditer(body):
+        start = max(0, m.start() - ADDRESS_LEAD)
+        end = body.find("\n", m.end())
+        end = len(body) if end < 0 else end
+        if spans and start <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], end)
+        else:
+            spans.append((start, end))
+    passages = [body[a:b].strip() for a, b in spans]
+    passages.sort(key=lambda p: -len(words & set(re.findall(r"[a-z0-9]{4,}", normalize(p)))))
+    return passages[:MAX_ADDRESSES]
 
 
 def prompt_block(pages: list[Page]) -> str:

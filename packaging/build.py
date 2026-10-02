@@ -103,7 +103,11 @@ def installer(version: str) -> None:
     if icon is not None:
         cmd += ["--icon", str(icon)]
     if sys.platform == "win32":
-        cmd += ["--splashImage", str(PACKAGING / "binder.png")]
+        # Same screen as the update splash; Velopack draws its progress bar along the bottom.
+        splash = PACKAGING / "build" / "splash.png"
+        run("uv", "run", "python", str(PACKAGING / "splash.py"), str(splash), version,
+            cwd=ROOT / "backend")
+        cmd += ["--splashImage", str(splash), "--splashProgressColor", "#15284b"]
     if os.environ.get("RELEASE_NOTES"):
         cmd += ["--releaseNotes", os.environ["RELEASE_NOTES"]]
     run(*cmd, cwd=ROOT)

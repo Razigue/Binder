@@ -85,9 +85,9 @@ export function urgency(days: number): Urgency {
 
 export const urgencyStyles: Record<Urgency, { dot: string; pill: string; text: string }> = {
   late: { dot: "bg-red-600", pill: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300", text: "text-red-600 dark:text-red-400" },
-  urgent: { dot: "bg-red-500", pill: "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300", text: "text-red-600 dark:text-red-400" },
-  soon: { dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300", text: "text-amber-600 dark:text-amber-400" },
-  later: { dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300", text: "text-emerald-600 dark:text-emerald-400" },
+  urgent: { dot: "bg-red-500", pill: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300", text: "text-red-600 dark:text-red-400" },
+  soon: { dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300", text: "text-amber-700 dark:text-amber-400" },
+  later: { dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300", text: "text-emerald-700 dark:text-emerald-400" },
 }
 
 export function formatSize(bytes: number): string {

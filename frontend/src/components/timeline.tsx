@@ -23,9 +23,10 @@ const DAY = 86_400_000
 // Geometry in pixels: the label row, the axis, then same-place dots stacked below it.
 const AXIS = 30
 const DOT = 12
-const STEP = 18
+// 24px apart at least: each dot keeps a 24px target of its own (WCAG 2.5.8).
+const STEP = 24
 // Dots closer than this merge into one stack: a dot and its ring need that much room.
-const GAP = 18
+const GAP = 24
 // Beyond this, a stack ends in a "+n" that lists the rest.
 const STACK = 3
 // Room a month name needs, so it never runs into "Today" or past the right edge.
@@ -121,7 +122,7 @@ export function Timeline({
                 const at = x(m.day)
                 const shown = Math.abs(at - todayX) > LABEL && at + LABEL < width
                 return (
-                  <span key={m.key} className="absolute" style={{ left: at, top: 0 }}>
+                  <span key={m.key} aria-hidden className="absolute" style={{ left: at, top: 0 }}>
                     {shown && (
                       <span className="absolute top-0 left-1 text-xs leading-4 whitespace-nowrap text-muted-foreground first-letter:uppercase">
                         {m.label}
@@ -136,6 +137,7 @@ export function Timeline({
                 style={{ left: todayX, top: 18, height: AXIS - 18 + DOT }}
               />
               <span
+                aria-hidden
                 className="absolute top-0 -translate-x-1/2 text-xs leading-4 font-medium whitespace-nowrap text-primary"
                 style={{ left: todayX }}
               >
@@ -168,7 +170,7 @@ export function Timeline({
 function Dot({ deadline: d }: { deadline: TimelineDeadline }) {
   const t = useT(messages)
   const className = cn(
-    "block size-3 shrink-0 rounded-full ring-4 ring-card outline-none hover:scale-125 focus-visible:scale-125 focus-visible:ring-ring/60 motion-safe:transition-transform",
+    "block size-3 shrink-0 rounded-full ring-4 ring-card outline-none hover:scale-125 focus-visible:scale-125 focus-visible:ring-ring motion-safe:transition-transform",
     d.done ? "bg-muted-foreground/40" : urgencyStyles[urgency(d.days_left)].dot,
   )
   const label = `${d.title} · ${formatDate(d.due_date)} · ${d.done ? t("done") : daysLabel(d.days_left)}`
@@ -179,7 +181,7 @@ function Dot({ deadline: d }: { deadline: TimelineDeadline }) {
           d.document_id ? (
             <Link to={`/documents/${d.document_id}`} aria-label={label} className={className} />
           ) : (
-            <span tabIndex={0} aria-label={label} className={className} />
+            <button type="button" aria-label={label} className={className} />
           )
         }
       />
@@ -197,7 +199,7 @@ function More({ deadlines }: { deadlines: TimelineDeadline[] }) {
     <Popover>
       <PopoverTrigger
         aria-label={t("moreLabel", { count: deadlines.length })}
-        className="flex h-4 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-[10px] leading-none font-medium text-muted-foreground tabular-nums ring-4 ring-card outline-none hover:bg-accent hover:text-foreground focus-visible:ring-ring/60 data-popup-open:bg-accent data-popup-open:text-foreground"
+        className="flex h-4 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-[0.625rem] leading-none font-medium text-muted-foreground tabular-nums ring-4 ring-card outline-none hover:bg-accent hover:text-foreground focus-visible:ring-ring data-popup-open:bg-accent data-popup-open:text-foreground"
       >
         {t("more", { count: deadlines.length })}
       </PopoverTrigger>

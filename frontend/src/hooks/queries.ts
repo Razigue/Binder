@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, type BulkPatch, type Category, type DocPatch, type DocumentStatus } from "@/lib/api"
 
@@ -40,6 +41,22 @@ export function useDocument(id: number | null) {
 
 export function useDeadlines(p: { start?: string; end?: string; include_done?: boolean } = {}) {
   return useQuery({ queryKey: keys.deadlines(p), queryFn: () => api.deadlines(p) })
+}
+
+/** Refreshes every view when Binder changed something on its own (a file dropped in the
+ * watched folder, an email, an analysis that waited for the model). */
+export function useLiveChanges() {
+  const qc = useQueryClient()
+  const seen = useRef<number | null>(null)
+  const changes = useQuery({ queryKey: ["changes"], queryFn: api.changes, refetchInterval: 3000 })
+  const revision = changes.data?.revision
+  useEffect(() => {
+    if (revision === undefined) return
+    if (seen.current !== null && revision !== seen.current) {
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "changes" })
+    }
+    seen.current = revision
+  }, [revision, qc])
 }
 
 export function useInvalidateAll() {

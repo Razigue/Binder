@@ -5,6 +5,7 @@ export const questions = defineMessages({
   en: {
     title: "Binder has a question",
     progress: "Question {current} of {total}",
+    documentN: "Document {n} of {total}",
     skip: "Later",
     openDocument: "Open the document",
     loading: "Loading the questions…",
@@ -16,6 +17,7 @@ export const questions = defineMessages({
   fr: {
     title: "Binder a une question",
     progress: "Question {current} sur {total}",
+    documentN: "Document {n} sur {total}",
     skip: "Plus tard",
     openDocument: "Ouvrir le document",
     loading: "Chargement des questions…",

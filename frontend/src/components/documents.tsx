@@ -60,8 +60,9 @@ export function DocumentsByYear({ docs }: { docs: Doc[] }) {
                       selectedRowClass,
                     )}
                   >
-                    {/* The category tile sits over this space, as the row's checkbox. */}
+                    {/* The category tile sits over this space, as the row's checkbox; its name is read here. */}
                     <span className="size-9" />
+                    <span className="sr-only">{categoryLabel(d.category)} · </span>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">
                         {d.status === "processing" ? (

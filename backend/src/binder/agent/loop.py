@@ -90,7 +90,8 @@ with web_search in this turn (official sites first: legifrance.gouv.fr, service-
 name the site; if it cannot be checked, say so. write_letter looks up the organisation's \
 procedure itself (name the sites in adapted_from) and checks its own legal points: say \
 which ones the source contradicts (what it says instead) or could not be checked; the app \
-shows them under the letter.
+shows them under the letter. A contact the user lacks (an organisation's address, phone, \
+form): look it up yourself with web_search, never tell the user to search for it.
 """
 VISION_HINT = ", or view_document to look at the page itself (scans, photos, tables)"
 ATTACHED_NOTE = (
@@ -510,6 +511,9 @@ class _Collector:
         for d in result.documents:
             if d.id is not None:
                 self.documents[d.id] = d
+        for d in result.related:
+            if d.id is not None and d.id not in self.documents:
+                self.earlier[d.id] = d
         for dl in result.deadlines:
             if dl.id is not None:
                 self.deadlines[dl.id] = dl
@@ -721,7 +725,7 @@ def fit_context(messages: list[dict[str, Any]], schemas: list[dict[str, Any]] | 
     its start (the system prompt). Never touched: the system prompt, the tool schemas, this
     turn's request and the latest step. Removed in turn: images of past steps, then old tool
     results (oldest first), then earlier turns (before the message marked `turn`)."""
-    budget = get_settings().llm_context - llm.ANSWER_TOKENS
+    budget = llm.context_window() - llm.ANSWER_TOKENS
     start = next((i for i, m in enumerate(messages) if m.get("turn")), 1)
 
     def fits() -> bool:
@@ -751,7 +755,7 @@ def check_context(session: Session | None = None) -> None:
         return
     fixed = [{"role": "system", "content": system_prompt(session, vision=True)}]
     tokens = llm.estimate_tokens(fixed, tools.TOOL_SCHEMAS)
-    window = get_settings().llm_context
+    window = llm.context_window()
     if tokens > FIXED_SHARE * window:
         raise RuntimeError(
             f"System prompt and tools take about {tokens} tokens, more than "
@@ -760,16 +764,21 @@ def check_context(session: Session | None = None) -> None:
 
 
 def select_tools(message: str, *, vision: bool) -> list[str]:
-    """Names of the tools sent with this turn's model calls (at most tools.MAX_TOOLS): finding
-    and reading documents and listings always, web search whenever it is on, the tools the
-    request calls for (the router's own patterns), then the most useful others. The tools
-    asked for come right after the first ones: a small model favours what it reads first."""
+    """Names of the tools sent with this turn's model calls (at most tools.MAX_TOOLS, every
+    tool for a large model): finding and reading documents and listings always, web search
+    whenever it is on, the tools the request calls for (the router's own patterns), then the
+    most useful others. The tools asked for come right after the first ones: a model favours
+    what it reads first."""
     norm = normalize(message)
     core = ["search_documents", "read_document", "list"] + (["view_document"] if vision else [])
     web = ["web_search", "read_web_page"] if websearch.enabled() else []
     wanted = [name for pattern, group in INTENT_TOOLS if re.search(pattern, norm) for name in group]
     if re.search(HELP, norm) and re.search(APP_WORDS, norm):
         wanted.insert(0, "app_help")
+    if llm.profile().all_tools:
+        rest = [n for n in tools.NAMES if n not in core and n not in web]
+        asked = [n for n in dict.fromkeys(wanted) if n in rest]
+        return [*core, *asked, *web, *(n for n in rest if n not in asked)]
     room = tools.MAX_TOOLS - len(core) - len(web)
     asked = list(dict.fromkeys(wanted))[:room]
     others = [n for n in DEFAULT_TOOLS if n not in asked][: room - len(asked)]
@@ -825,7 +834,10 @@ def _run_llm(
         fit_context(messages, schemas)
         try:
             reply = llm.chat(
-                _sent(messages), tools=schemas, think=think, on_token=stream.token if emit else None
+                _sent(messages),
+                tools=schemas,
+                think=think,
+                on_token=stream.token if emit else None,
             )
         except llm.ModelError as exc:
             if not exc.unparsable or retries >= MAX_CALL_RETRIES:

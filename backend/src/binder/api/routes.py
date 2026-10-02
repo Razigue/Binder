@@ -112,6 +112,10 @@ T = i18n.catalog(
         "deadline_not_found": {"en": "Deadline not found", "fr": "Échéance introuvable"},
         "dir_not_found": {"en": "Folder not found: {path}", "fr": "Dossier introuvable : {path}"},
         "empty_path": {"en": "(empty)", "fr": "(vide)"},
+        "no_folder_picker": {
+            "en": "No folder dialog available: type the folder path.",
+            "fr": "Sélecteur de dossier indisponible : saisissez le chemin du dossier.",
+        },
         "mail_incomplete": {
             "en": "Server, username and password are required",
             "fr": "Serveur, identifiant et mot de passe sont nécessaires",
@@ -849,12 +853,14 @@ def get_import_settings(session: SessionDep) -> ImportSettings:
 
 @router.put("/import/settings")
 def update_import_settings(body: ImportSettingsIn, session: SessionDep) -> ImportSettings:
+    changed = False
     if body.folder is not None:
         folder = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
         path = body.folder.path.strip()
         if body.folder.enabled and not Path(path).expanduser().is_dir():
             raise HTTPException(400, T("dir_not_found", path=path or T("empty_path")))
-        if (folder.enabled, folder.path) != (body.folder.enabled, path):
+        changed = (folder.enabled, folder.path) != (body.folder.enabled, path)
+        if changed:
             msg = (
                 T.msg("watch_enabled", path=path)
                 if body.folder.enabled
@@ -879,7 +885,29 @@ def update_import_settings(body: ImportSettingsIn, session: SessionDep) -> Impor
         mail.last_error = None
         settings_store.save(session, importers.MAIL_KEY, mail)
     session.commit()
+    if changed:
+        importers.folder_changed()
     return _import_settings(session)
+
+
+@router.post("/import/folder/choose")
+def choose_import_folder(session: SessionDep) -> dict[str, str | None]:
+    """Browser mode: the system's folder dialog, opened on this machine (loopback only)."""
+    current = settings_store.load(session, importers.FOLDER_KEY, importers.FolderConfig)
+    try:
+        return {"path": importers.choose_folder(current.path)}
+    except importers.NoFolderPicker as e:
+        raise HTTPException(501, T("no_folder_picker")) from e
+
+
+@router.get("/changes")
+def changes(session: SessionDep) -> dict[str, int]:
+    """Latest entry Binder logged on its own (imports, analyses): the interface polls it and
+    refreshes when it moves, so documents arriving in the background show up by themselves."""
+    latest = session.exec(
+        select(Activity.id).where(Activity.actor != "user").order_by(col(Activity.id).desc())
+    ).first()
+    return {"revision": latest or 0}
 
 
 @router.post("/import/run")

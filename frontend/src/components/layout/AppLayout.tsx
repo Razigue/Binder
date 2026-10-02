@@ -1,21 +1,24 @@
-import { Suspense, useEffect } from "react"
-import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { VaultIcon, RobotIcon, FilesIcon, ClockCounterClockwiseIcon, CompassIcon, GearSixIcon, CheckSquareIcon, TrashIcon, PlusIcon, DeviceMobileIcon, UploadSimpleIcon, UserCircleIcon, type Icon } from "@phosphor-icons/react"
+import { Suspense, useEffect, useRef } from "react"
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { RobotIcon, FilesIcon, ClockCounterClockwiseIcon, CompassIcon, GearSixIcon, CheckSquareIcon, TrashIcon, PlusIcon, DeviceMobileIcon, UploadSimpleIcon, UserCircleIcon, type Icon } from "@phosphor-icons/react"
+import { BinderMark } from "@/components/layout/BinderMark"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useAgent } from "@/components/agent"
 import { TitleBar, useDesktopWindow } from "@/components/layout/TitleBar"
+import { HistoryButtons, useHistoryPosition, useScrollMemory } from "@/components/layout/HistoryNav"
 import { useUpload } from "@/components/upload"
 import { useFeed, useProfile } from "@/hooks/queries"
+import { useLiveChanges } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { layout } from "@/i18n/messages/layout"
 import { cn } from "@/lib/utils"
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-[15px] font-medium transition-colors",
+    "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-[0.9375rem] font-medium transition-colors",
     isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/60",
   )
 
@@ -24,8 +27,13 @@ export function AppLayout() {
   const t = useT(layout)
   const desktop = useDesktopWindow()
   const titleBar = desktop?.custom === true
+  const location = useLocation()
+  const history = useHistoryPosition()
+  const scroller = useRef<HTMLDivElement>(null)
+  useScrollMemory(scroller)
   const feed = useFeed()
   useNoFocusOnLaunch()
+  useLiveChanges()
   // What needs the user: the to-do cards that are not merely for information.
   const waiting = feed.data?.items.filter((i) => i.tone !== "info").length ?? 0
 
@@ -37,19 +45,29 @@ export function AppLayout() {
 
   const shell = (
     <div className={cn("flex", titleBar ? "min-h-full" : "min-h-svh")}>
+      <a
+        href="#main"
+        onClick={(e) => {
+          e.preventDefault()
+          document.getElementById("main")?.focus()
+        }}
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-background focus:px-4 focus:py-2.5 focus:text-sm focus:font-medium focus:shadow-sm"
+      >
+        {t("skipToContent")}
+      </a>
       <div className="hidden w-60 shrink-0 border-r bg-sidebar md:block">
         <aside className="sticky top-0 flex h-[calc(100svh-var(--titlebar-height,0px))] flex-col px-3 py-5 select-none">
           {/* The desktop title bar already carries the logo and name. */}
           {!titleBar && (
             <div className="mb-6 flex items-center gap-3 px-2">
               <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <VaultIcon className="size-4" />
+                <BinderMark className="size-5" />
               </span>
-              <p className="text-[15px] font-semibold">Binder</p>
+              <p className="flex-1 text-[0.9375rem] font-semibold">Binder</p>
             </div>
           )}
           <AddMenu>
-            <Button className="mb-5 h-11 w-full justify-start gap-2.5 px-3 text-[15px]">
+            <Button className="mb-5 h-11 w-full justify-start gap-2.5 px-3 text-[0.9375rem]">
               <PlusIcon className="size-4" weight="bold" /> {t("add")}
             </Button>
           </AddMenu>
@@ -72,19 +90,29 @@ export function AppLayout() {
         {/* Phone: the brand and the profile on top, the three places and ＋ at the bottom. */}
         <header className="flex items-center gap-3 border-b bg-sidebar px-4 py-2.5 md:hidden">
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <VaultIcon className="size-4" />
+            <BinderMark className="size-5" />
           </span>
-          <p className="flex-1 text-[15px] font-semibold">Binder</p>
+          <p className="flex-1 text-[0.9375rem] font-semibold">Binder</p>
+          <HistoryButtons position={history} buttonClassName="size-9" />
           <ProfileMenu>
             <Button variant="ghost" size="icon" aria-label={t("profile")}>
               <UserCircleIcon className="size-6" />
             </Button>
           </ProfileMenu>
         </header>
-        <main className="w-full flex-1 px-4 pt-6 pb-28 md:px-8 md:pt-8 md:pb-12 2xl:px-12">
+        {/* Without the desktop title bar, back and forward sit top left of the content. */}
+        {!titleBar && (
+          <div className="hidden h-12 shrink-0 items-center px-6 md:flex 2xl:px-10">
+            <HistoryButtons position={history} buttonClassName="size-8" />
+          </div>
+        )}
+        <main id="main" tabIndex={-1} className={cn("w-full flex-1 outline-none px-4 pt-6 pb-28 md:px-8 md:pb-12 2xl:px-12", titleBar ? "md:pt-8" : "md:pt-2")}>
           {/* Pages load on first visit: the menu stays in place meanwhile. */}
           <Suspense fallback={null}>
-            <Outlet />
+            {/* Each page fades in; a filter kept in the address does not replay it. */}
+            <div key={location.pathname} className="animate-page">
+              <Outlet />
+            </div>
           </Suspense>
         </main>
         <nav
@@ -103,12 +131,12 @@ export function AppLayout() {
                 )
               }
             >
-              <item.icon className="size-6" />
-              <span className="truncate">{item.label}</span>
-              {item.count > 0 && (
-                <span className="absolute top-1.5 left-1/2 ml-2 min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[11px] font-semibold text-amber-800 tabular-nums dark:bg-amber-500/15 dark:text-amber-300">
-                  {item.count}
-                </span>
+              {({ isActive }) => (
+                <>
+                  <item.icon className="size-6" weight={isActive ? "fill" : "regular"} />
+                  <span className="truncate">{item.label}</span>
+                  {item.count > 0 && <CountBadge count={item.count} className="absolute top-1.5 left-1/2 ml-2" />}
+                </>
               )}
             </NavLink>
           ))}
@@ -129,8 +157,10 @@ export function AppLayout() {
   // Desktop window: the page scrolls under the title bar, whose buttons keep the window corner.
   return (
     <div className="flex h-svh flex-col">
-      <TitleBar maximized={desktop.maximized} />
-      <div className="min-h-0 flex-1 overflow-y-auto">{shell}</div>
+      <TitleBar maximized={desktop.maximized} history={history} />
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+        {shell}
+      </div>
     </div>
   )
 }
@@ -243,18 +273,36 @@ function useNoFocusOnLaunch() {
 function NavItem({ to, label, icon: Icon, end, count }: { to: string; label: string; icon: Icon; end: boolean; count: number }) {
   return (
     <NavLink to={to} end={end} className={linkClass}>
-      <Icon className="size-5" />
-      <span className="flex-1">{label}</span>
-      {count > 0 && (
-        <span className="min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[11px] font-semibold text-amber-800 tabular-nums dark:bg-amber-500/15 dark:text-amber-300">
-          {count}
-        </span>
+      {({ isActive }) => (
+        <>
+          <Icon className="size-5" weight={isActive ? "fill" : "regular"} />
+          <span className="flex-1">{label}</span>
+          {count > 0 && <CountBadge count={count} />}
+        </>
       )}
     </NavLink>
   )
 }
 
+/** The number of cards waiting: it fades in again when it changes, so a new one is noticed. */
+function CountBadge({ count, className }: { count: number; className?: string }) {
+  const t = useT(layout)
+  return (
+    <span
+      key={count}
+      className={cn(
+        "animate-pop min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[0.6875rem] font-semibold text-amber-800 tabular-nums dark:bg-amber-500/15 dark:text-amber-300",
+        className,
+      )}
+    >
+      <span aria-hidden>{count}</span>
+      <span className="sr-only">{t("waiting", { count })}</span>
+    </span>
+  )
+}
+
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
+  useDocumentTitle(title)
   return (
     <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
       <div>
@@ -264,4 +312,11 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
       {actions && <div className="flex items-center gap-3">{actions}</div>}
     </div>
   )
+}
+
+/** The window and tab title names the page, so screen readers announce where a link led. */
+export function useDocumentTitle(title: string | undefined) {
+  useEffect(() => {
+    if (title) document.title = `${title} · Binder`
+  }, [title])
 }

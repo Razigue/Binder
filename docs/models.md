@@ -23,6 +23,34 @@ graphics card cannot hold and the model stays fast, which is why the 35B-A3B win
 9B even on a processor alone. `pick_model` then steps down the ranks while the free disk lacks
 `size × DISK_MARGIN`, or while the running Ollama is older than the model's `min_ollama`.
 
+## What each model is given
+
+`llm.Profile`, by model (`llm.PROFILES`; any other model gets `SMALL`):
+
+| Profile | Models | Context | Document text | Agent tools | Reasoning on hard tasks |
+| --- | --- | --- | --- | --- | --- |
+| `SMALL` | 2B, 4B, 9B, outside the catalogue | 16k | 8,000 characters | 10, chosen per request | no |
+| `LARGE` | 35B-A3B, 27B | 32k | 24,000 characters | all | with a graphics card |
+
+Qwen 3.5 and 3.6 keep a key-value cache on a quarter of their layers only: a larger window costs
+little memory. Every chat request uses the same window, or Ollama would reload the model.
+`BINDER_LLM_CONTEXT` overrides the window. Reasoning (`llm.think_hard()`) is used for the rare,
+decisive tasks: composing a letter and the second reading of doubted values. It needs the large
+profile and a machine measured with a graphics card of 8 GB or more, or Apple silicon
+(`setup._run`): on a processor alone it takes minutes per task. `BINDER_LLM_THINK=true` turns it
+on for any model. The legal check's judgement does not reason: measured as accurate without it,
+and minutes faster.
+
+**Loaded ahead.** Once setup is ready, and when the active model changes, `llm.warm()` loads the
+model in the background with the requests' window: the first question does not wait for it.
+
+**Same sender, same reading.** Before reading a document, `learning.example` looks for the issuer
+of the library that its first lines name (the longest, so "EDF Entreprises" beats "EDF") and
+shows the model how the last filed document of that issuer was read: category, type, issuer,
+title, and which fields it had (not their values). Corrections the user made still apply after
+the model (`learning.apply`). The evaluation (`scripts/evaluate.py`) reads each document alone,
+without the example.
+
 ## Every launch
 
 `setup._run` measures the machine (`setup.measure()`: RAM, NVIDIA VRAM, free disk, Ollama
@@ -63,5 +91,6 @@ At each new generation of models:
 5. **Measure** before switching the default: `scripts/evaluate.py --llm --model <tag>` and
    `scripts/evaluate_agent.py --model <tag>` (see [evaluation.md](evaluation.md),
    [agent.md](agent.md)).
-6. **Tests** (`tests/test_model_choice.py`): one case per rung of the ladder, the disk fallback,
+6. **Profile** (`llm.PROFILES`): a model that runs on large machines only gets `LARGE`.
+7. **Tests** (`tests/test_model_choice.py`): one case per rung of the ladder, the disk fallback,
    the Ollama version fallback; update `README.md` (which model for which computer).

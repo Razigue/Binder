@@ -1,6 +1,6 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api, type Preferences, type PreferencesUpdate, type Theme } from "@/lib/api"
+import { api, type Preferences, type PreferencesUpdate, type TextSize, type Theme } from "@/lib/api"
 import { setFormatLocale } from "@/lib/format"
 import { detectBrowserCountry, detectBrowserLanguage, translate, type Dict, type Language, type Messages, type Translate } from "./core"
 
@@ -15,7 +15,11 @@ interface Cached {
   country: string | null
   currency: string
   theme: Theme
+  textSize?: TextSize
 }
+
+// Root font size per text size: rem-based sizes and spacing follow, the layout scales as a whole.
+const ROOT_SIZE: Record<TextSize, string> = { normal: "100%", large: "112.5%", larger: "125%" }
 
 function readCache(): Cached | null {
   try {
@@ -39,6 +43,7 @@ interface I18nContextValue {
   country: string | null
   currency: string
   theme: Theme
+  textSize: TextSize
   resolvedTheme: "light" | "dark"
   /** Saved preferences, including what the operating system reports. */
   preferences: Preferences | undefined
@@ -70,6 +75,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const country = prefs ? prefs.effective_country : (cached?.country ?? detectBrowserCountry())
   const currency = prefs?.currency ?? cached?.currency ?? "EUR"
   const theme: Theme = prefs?.theme ?? cached?.theme ?? "system"
+  const textSize: TextSize = prefs?.text_size ?? cached?.textSize ?? "normal"
   const systemDark = useSystemDark()
   const resolvedTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme
 
@@ -87,8 +93,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [resolvedTheme])
 
   useEffect(() => {
-    if (prefs) writeCache({ language, country, currency, theme })
-  }, [prefs, language, country, currency, theme])
+    document.documentElement.style.fontSize = ROOT_SIZE[textSize] ?? ROOT_SIZE.normal
+  }, [textSize])
+
+  useEffect(() => {
+    if (prefs) writeCache({ language, country, currency, theme, textSize })
+  }, [prefs, language, country, currency, theme, textSize])
 
   const mutation = useMutation({
     mutationFn: api.updatePreferences,
@@ -107,11 +117,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       country,
       currency,
       theme,
+      textSize,
       resolvedTheme,
       preferences: prefs,
       update: (patch) => mutation.mutateAsync(patch),
     }),
-    [language, country, currency, theme, resolvedTheme, prefs, mutation],
+    [language, country, currency, theme, textSize, resolvedTheme, prefs, mutation],
   )
 
   return (

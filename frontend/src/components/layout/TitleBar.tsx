@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { VaultIcon } from "@phosphor-icons/react"
+import { BinderMark } from "@/components/layout/BinderMark"
 import { useLocale, useT } from "@/i18n"
 import { layout } from "@/i18n/messages/layout"
+import { HistoryButtons, type HistoryPosition } from "@/components/layout/HistoryNav"
 import { cn } from "@/lib/utils"
 
 // Desktop window title bar. On Windows the shell keeps the native frame (Snap, Win + arrows,
@@ -23,6 +24,7 @@ interface DesktopApi {
   toggle_maximize?: () => Promise<void>
   snap_layouts?: () => Promise<void>
   close?: () => Promise<void>
+  choose_folder?: (initial: string) => Promise<string | null>
 }
 
 declare global {
@@ -56,7 +58,7 @@ function themeColor(name: string): string | null {
   return toHex(getComputedStyle(document.documentElement).getPropertyValue(name).trim())
 }
 
-const call = (method: keyof Omit<DesktopApi, "set_title_bar" | "window_state">) => {
+const call = (method: keyof Omit<DesktopApi, "set_title_bar" | "window_state" | "choose_folder">) => {
   window.pywebview?.api?.[method]?.().catch(() => {
     // The window is closing, or an older shell: nothing to do.
   })
@@ -152,7 +154,7 @@ function useWindowActive() {
 const buttonClass =
   "flex h-full w-[46px] items-center justify-center text-sidebar-foreground transition-colors duration-100 hover:bg-foreground/[0.07] active:bg-foreground/[0.12]"
 
-export function TitleBar({ maximized }: { maximized: boolean }) {
+export function TitleBar({ maximized, history }: { maximized: boolean; history: HistoryPosition }) {
   const t = useT(layout)
   const active = useWindowActive()
   const lastPress = useRef(0)
@@ -177,13 +179,15 @@ export function TitleBar({ maximized }: { maximized: boolean }) {
   const cancelSnap = () => clearTimeout(snapTimer.current)
 
   return (
-    <header onMouseDown={onMouseDown} className="flex h-9 shrink-0 items-center border-b bg-sidebar select-none">
+    <div onMouseDown={onMouseDown} className="flex h-9 shrink-0 items-center border-b bg-sidebar select-none">
       <div className={cn("flex items-center gap-2 px-3.5 transition-opacity", !active && "opacity-55")}>
         <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-primary-foreground">
-          <VaultIcon className="size-3" />
+          <BinderMark className="size-3.5" />
         </span>
         <span className="text-[13px] font-medium text-sidebar-foreground">Binder</span>
       </div>
+      {/* Back and forward where a browser has them: top left. */}
+      <HistoryButtons position={history} buttonClassName="h-7 w-8" />
       {/* Native caption buttons are not in the tab order either: Win + arrows and Alt + F4 remain. */}
       <div className="ml-auto flex h-full">
         <button type="button" tabIndex={-1} aria-label={t("window.minimize")} className={buttonClass} onClick={() => call("minimize")}>
@@ -218,7 +222,7 @@ export function TitleBar({ maximized }: { maximized: boolean }) {
           <Glyph d="M.5.5l9 9M9.5.5l-9 9" />
         </button>
       </div>
-    </header>
+    </div>
   )
 }
 

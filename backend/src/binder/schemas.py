@@ -491,6 +491,7 @@ class PreferencesOut(BaseModel):
     language: str
     country: str | None
     theme: str
+    text_size: str
     effective_language: str
     effective_country: str | None
     currency: str

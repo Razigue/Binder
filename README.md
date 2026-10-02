@@ -52,20 +52,19 @@ way (Windows: Settings > Apps); your documents stay in place (see [Your data](#y
 
 ## First steps
 
-1. **Open Binder.** The welcome screen asks three things, one tap each: your situation
-   (student, employee, self-employed, looking for work, retired), where you live (renting,
-   owning, housed by someone) and whether you have a vehicle. Binder then lists **the papers
-   you should have**: why each one matters, how long to keep it, and which ones are missing.
-   Scan your first paper with your phone, or choose a file. No document at hand? Click **Load
-   demo documents** to explore with fictitious examples. Moving to a new computer? Click
-   **Restore a backup** (see [Your data](#your-data)). The list stays in **My papers**, where
-   you can change your answers.
+1. **Open Binder.** The welcome screen asks three quick questions (your situation, your
+   housing, whether you have a vehicle), then lists **the papers you should have**: why each one
+   matters, how long to keep it, and which ones Binder already holds. **Scan my first paper** or
+   **Choose a file** to start; **Skip for now** goes straight to the list. No document at hand?
+   Click **Load demo documents** to explore with fictitious examples. Moving to a new computer?
+   Click **Restore a backup** (see [Your data](#your-data)).
 2. **That's it.** Binder gets its AI ready on its own the first time: it sets up its local AI
    engine, picks the model that suits your computer and downloads it. The **To do** page shows
    the progress; Binder keeps working meanwhile. The engine is part of Binder: nothing else to
    start, and it stops when you close Binder.
 
-Language, country and theme follow your system.
+Language, country and theme follow your system. In **Settings**, **Text size** makes the whole
+interface larger (Normal, Large, Larger).
 
 ## Adding documents
 
@@ -82,8 +81,9 @@ Accepted formats: PDF, JPG, PNG.
 - **About you**: Binder fills in your name, address, email and mobile from your documents
   (**Settings**, never over what you typed). Tell it about your situation there or in a
   sentence to the agent ("I'm a tenant, two children"): it keeps it in mind.
-- **Synced folder**: in **Settings**, point Binder at your scanner's or cloud drive's folder:
-  every PDF, JPG or PNG that lands in it is imported.
+- **Synced folder**: in **Settings**, click **Choose a folder…** and pick your scanner's or
+  cloud drive's folder. That is all: the PDF, JPG and PNG files already in it are imported at
+  once, and each new one as soon as it arrives.
 
 After each import, Binder tells you **what it did**: where each document went, what it asks of
 you (amount and date to pay, renewal), what it did on its own (replaced an older version, noticed
@@ -121,7 +121,8 @@ the AI": Binder reads and files them on its own as soon as it is ready.
 Binder has three places: **To do**, **My papers** and **Life events**. The **＋ Add** button,
 on every page, adds a paper (scan it with your phone, or choose a file) or asks Binder a
 question (Ctrl K does too). **Settings**, **History** and **Trash** are in the profile menu.
-On a phone, the three places and ＋ sit in a bar at the bottom of the screen.
+The back and forward arrows at the top (or Alt + ← / →, or the mouse side buttons) move
+through the pages you opened, as in a browser. On a phone, the three places and ＋ sit in a bar at the bottom of the screen.
 
 **To do** greets you with one sentence on your day, then a pile of cards, the most urgent on
 top. Each card says what it is, what to do and by when, with its button:
@@ -167,18 +168,17 @@ search can also go to Binder as a question in one click. Three tabs:
   papers show it concerns you;
 - **Archives**: old papers, still readable (see below).
 
+Under the tiles, **The papers you should have** brings back the list from the welcome screen,
+where you can also change your answers.
+
 Open a document to see its preview: hover a field (amount, due date…) and Binder **highlights
-where it read it** on the page. **In short** explains the letter in plain language. Right after
+where it read it** on the page. Zoom with the buttons, Ctrl + wheel, a pinch or a double-click,
+and drag to move around the page. **In short** explains the letter in plain language. Right after
 an import, each new paper gets one line saying what it is, whether to act and by when, and how
 long it is kept.
 
-**Words of paperwork** (RIB, rent receipt, tax notice, overpayment, formal notice…) are
-underlined with dots: tap one for a one-sentence explanation.
-
-**Letters**: **Print** and **Send by post** come first (the steps: print, sign, envelope,
-stamp or registered mail, then "I sent it"); **Download (PDF)** is there too.
-
-**Text size**: Settings > Appearance offers Normal, Large and Larger.
+Administrative words shown with a dotted underline (due date, VAT, direct debit, registered
+letter, tax notice…) explain themselves in one sentence when you tap them.
 
 **Ask Binder**: ＋ Add, then **Ask a question**, on every page, or Ctrl K. Ask in your own words,
 it looks
@@ -191,8 +191,10 @@ through your documents and acts for you:
   "Dispute the CAF overpayment". The common ones (cancellation, complaint, payment plan,
   challenging a fine, a tax or a CAF decision, formal notice, change of address) carry the legal
   points and time limits that apply. The letter is complete, with your name and address and the
-  organisation's, as found in your documents; download it as a PDF, tell Binder you sent it, and
-  it suggests a reminder letter if no answer comes;
+  organisation's, as found in your documents. **Print** it, or **Send by post** for the steps
+  (sign, envelope, registered letter when it should be one); then **I sent it**, and Binder
+  suggests a reminder letter if no answer comes. The PDF can still be downloaded. A letter you
+  no longer need can be cancelled: it leaves your ongoing procedures (and can be undone);
 - files for any purpose: "Prepare my rental application", "renew my passport", "school
   enrolment", "my retirement claim", "the file for the nursery". Binder lists
   what is ready, missing or too old, and gives a ZIP.

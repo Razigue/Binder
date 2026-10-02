@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { cloneElement, isValidElement, useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CopyIcon, CpuIcon, EraserIcon, FlaskIcon, FoldersIcon, KeyIcon, EnvelopeIcon, MonitorIcon, MoonIcon, ArrowsClockwiseIcon, SunIcon, CircleHalfIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
+import { CopyIcon, CpuIcon, EraserIcon, FlaskIcon, FolderOpenIcon, FoldersIcon, KeyIcon, EnvelopeIcon, MonitorIcon, MoonIcon, ArrowsClockwiseIcon, SunIcon, CircleHalfIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -17,12 +17,11 @@ import { useInvalidateAll, useModels } from "@/hooks/queries"
 import { useLocale, useT } from "@/i18n"
 import { localAi } from "@/i18n/messages/localAi"
 import { settings as messages } from "@/i18n/messages/settings"
-import { api, type ImportSettings, type Preferences, type PreferencesUpdate, type Profile, type Theme } from "@/lib/api"
+import { api, type ImportSettings, type Preferences, type PreferencesUpdate, type Profile, type TextSize, type Theme } from "@/lib/api"
 import { countryName, countryOptions } from "@/lib/countries"
 import { currentLocale, formatDateTime } from "@/lib/format"
 import { imapHost } from "@/lib/mail"
 import { cn } from "@/lib/utils"
-import { TextSizeSetting } from "@/components/textSize"
 
 // Language names are written in their own language, so that anyone can find theirs.
 const LANGUAGE_NAMES = { en: "English", fr: "Français" } as const
@@ -54,9 +53,13 @@ export function SettingsPage() {
           <ProfileCard />
         </Section>
         <Section title={t("region.title")} description={t("region.description")}>
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <RegionCard />
-            <AppearanceCard />
+          {/* Side by side only when there is room: a container query, so that it follows the text
+              size (media queries do not). */}
+          <div className="@container">
+            <div className="grid items-start gap-6 @3xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+              <RegionCard />
+              <AppearanceCard />
+            </div>
           </div>
         </Section>
         <Section
@@ -137,8 +140,15 @@ function Field({ id, label, hint, className, children }: { id: string; label: st
   return (
     <div className={cn("space-y-2", className)}>
       <Label htmlFor={id}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {/* The hint is read with the field, not only seen under it. */}
+      {hint && isValidElement<{ "aria-describedby"?: string }>(children)
+        ? cloneElement(children, { "aria-describedby": `${id}-hint` })
+        : children}
+      {hint && (
+        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      )}
     </div>
   )
 }
@@ -331,9 +341,29 @@ const THEMES: { value: Theme; icon: Icon }[] = [
   { value: "dark", icon: MoonIcon },
 ]
 
+// The letter drawn at each size, so that the choice shows what it does.
+const TEXT_SIZES: { value: TextSize; sample: string }[] = [
+  { value: "normal", sample: "text-sm" },
+  { value: "large", sample: "text-base" },
+  { value: "larger", sample: "text-lg" },
+]
+
+/** Radio group keys: arrows move to the next choice and pick it, like native radio buttons. */
+function radioKeys<V>(values: V[], current: V, pick: (value: V) => void) {
+  return (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    const i = (values.indexOf(current) + step + values.length) % values.length
+    pick(values[i])
+    const buttons = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    buttons?.[i]?.focus()
+  }
+}
+
 function AppearanceCard() {
   const t = useT(messages)
-  const { theme } = useLocale()
+  const { theme, textSize } = useLocale()
   const save = useSavePreference()
   return (
     <Card className="gap-5 p-6">
@@ -349,9 +379,15 @@ function AppearanceCard() {
               type="button"
               role="radio"
               aria-checked={theme === value}
+              tabIndex={theme === value ? 0 : -1}
+              onKeyDown={radioKeys(
+                THEMES.map((th) => th.value),
+                theme,
+                (next) => save({ theme: next }),
+              )}
               onClick={() => theme !== value && save({ theme: value })}
               className={cn(
-                "flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                "flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring",
                 theme === value
                   ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/5"
                   : "text-muted-foreground hover:text-foreground",
@@ -362,39 +398,119 @@ function AppearanceCard() {
           ))}
         </div>
       </div>
-      <TextSizeSetting />
+      <div className="space-y-2">
+        <p id="pref-text-size" className="text-sm font-medium">
+          {t("textSize.label")}
+        </p>
+        <div role="radiogroup" aria-labelledby="pref-text-size" className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+          {TEXT_SIZES.map(({ value, sample }) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={textSize === value}
+              tabIndex={textSize === value ? 0 : -1}
+              onKeyDown={radioKeys(
+                TEXT_SIZES.map((size) => size.value),
+                textSize,
+                (next) => save({ text_size: next }),
+              )}
+              onClick={() => textSize !== value && save({ text_size: value })}
+              className={cn(
+                "flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring",
+                textSize === value
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/5"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <span aria-hidden className={cn("font-semibold leading-none", sample)}>
+                A
+              </span>
+              {t(`textSize.${value}` as const)}
+            </button>
+          ))}
+        </div>
+      </div>
     </Card>
   )
 }
 
 // --- Automatic import --------------------------------------------------------------------------
 
+/** The system's folder dialog: the desktop window's own, else one the local server opens. */
+async function chooseFolder(initial: string): Promise<string | null> {
+  const desktop = window.pywebview?.api?.choose_folder
+  if (desktop) return desktop(initial)
+  return (await api.chooseImportFolder()).path
+}
+
 function FolderCard({ settings }: { settings: ImportSettings }) {
   const t = useT(messages)
-  const [enabled, setEnabled] = useState(settings.folder.enabled)
-  const [path, setPath] = useState(settings.folder.path)
+  const folder = settings.folder
+  const watching = folder.enabled && Boolean(folder.path)
+  // Without a folder dialog (no display, packaged without Tk), the path is typed.
+  const [manual, setManual] = useState(false)
+  const [path, setPath] = useState(folder.path)
   const invalidate = useInvalidateAll()
+  // Choosing the folder is the whole setup: the server starts watching and importing at once.
   const save = useMutation({
-    mutationFn: () => api.saveImportSettings({ folder: { enabled, path } }),
-    onSuccess: () => {
+    mutationFn: (next: { enabled: boolean; path: string }) => api.saveImportSettings({ folder: next }),
+    onSuccess: (_, next) => {
       invalidate()
-      toast.success(enabled ? t("folder.enabled") : t("folder.disabled"))
+      toast.success(next.enabled ? t("folder.enabled") : t("folder.disabled"))
     },
     onError: (e) => toast.error(e.message),
   })
+  const browse = useMutation({
+    mutationFn: () => chooseFolder(folder.path),
+    onSuccess: (chosen) => {
+      if (chosen) save.mutate({ enabled: true, path: chosen })
+    },
+    onError: (e) => {
+      setManual(true)
+      toast.info(e.message)
+    },
+  })
+  const busy = browse.isPending || save.isPending
 
   return (
     <Card className="gap-5 p-6">
       <CardHeading icon={FoldersIcon} title={t("folder.title")} description={t("folder.description")} />
-      <Toggle checked={enabled} onChange={setEnabled} label={t("folder.toggle")} />
-      <Field id="watch-path" label={t("folder.path")}>
-        <Input id="watch-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="~/Documents/Scans" />
-      </Field>
-      <LastCheck at={settings.folder.last_check} error={settings.folder.last_error} />
-      <div>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
-          {t("save")}
+      {watching && (
+        <div className="space-y-1.5 rounded-lg border bg-muted/40 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <span className="size-2 shrink-0 rounded-full bg-emerald-500" />
+            {t("folder.watching")}
+          </p>
+          <p className="font-mono text-xs break-all text-muted-foreground">{folder.path}</p>
+          <LastCheck at={folder.last_check} error={folder.last_error} />
+        </div>
+      )}
+      {manual && (
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            save.mutate({ enabled: true, path })
+          }}
+        >
+          <Field id="watch-path" label={t("folder.path")} className="min-w-0 flex-1">
+            <Input id="watch-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="~/Documents/Scans" />
+          </Field>
+          <Button type="submit" disabled={busy || !path.trim()}>
+            {t("folder.watch")}
+          </Button>
+        </form>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button variant={watching ? "outline" : "default"} onClick={() => browse.mutate()} disabled={busy}>
+          <FolderOpenIcon /> {watching ? t("folder.change") : t("folder.choose")}
         </Button>
+        {watching && (
+          <Button variant="ghost" onClick={() => save.mutate({ enabled: false, path: folder.path })} disabled={busy}>
+            {t("folder.stop")}
+          </Button>
+        )}
       </div>
     </Card>
   )

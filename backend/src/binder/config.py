@@ -34,15 +34,18 @@ class Settings(BaseSettings):
     # Generous: on CPU only, a 9B model takes 1 to 3 minutes per document.
     llm_timeout: float = 300.0
     # Context window asked of Ollama (its default, 4096 tokens, silently cuts the start of an
-    # agent conversation: system prompt, tools, page images).
-    llm_context: int = 16384
+    # agent conversation: system prompt, tools, page images). None: the active model's profile
+    # (llm.PROFILES), larger for the models of powerful machines.
+    llm_context: int | None = None
     # How long Ollama keeps the model in memory after a request (fast follow-up questions).
     llm_keep_alive: str = "30m"
     # Vision: scans and photos are also shown to the model as images, when it supports them.
     llm_vision: bool = True
     # Small multilingual model for semantic search ("proof of address" finds the EDF bill).
     embed_model: str = "qwen3-embedding:0.6b"
-    # Reasoning before each agent step (slower, rarely better on short requests).
+    # Reasoning before each agent step (slower, rarely better on short requests). The rare,
+    # difficult tasks (letters, legal checks, a second reading) reason anyway on a large model
+    # with a graphics card (llm.think_hard).
     llm_think: bool = False
     # The agent can look up general facts online (legal delays, procedures): only the query
     # leaves the machine, and queries carrying personal data are refused (services/websearch.py).

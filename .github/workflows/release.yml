@@ -1,11 +1,12 @@
 name: Release
 
-# Pushing a v* tag (e.g. v1.2.0): full CI, build for Linux, Windows and macOS, then a GitHub
-# release with:
+# A v* tag (e.g. v1.2.0), set by the "Tag" workflow when a PR is merged into main, or pushed by
+# hand: full CI, build for Linux, Windows and macOS, then a GitHub release with:
 # - the installers (Velopack): BinderApp-windows-Setup.exe, .pkg (macOS), .AppImage (Linux);
 # - the update packages and feeds (releases.<channel>.json) the installed application reads.
 # No portable archive: Binder is distributed only through its installers.
-# Manual run: builds everything (run artifacts) without publishing a release.
+# Manual run on a branch: builds everything (run artifacts) without publishing a release; on a
+# v* tag ("Tag" dispatches it so, its tag push triggers nothing): publishes like a tag push.
 #
 # Signing, optional (unsigned builds work, but SmartScreen and Gatekeeper warn):
 # - Windows, Azure Trusted Signing: secrets AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET

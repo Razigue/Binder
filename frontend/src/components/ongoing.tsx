@@ -74,7 +74,7 @@ function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void 
               {tj("progress", { done: journey.done, total: journey.total })}
             </span>
           </span>
-          <Progress value={journey.total ? (journey.done / journey.total) * 100 : 0} className="mt-1.5" />
+          <Progress value={journey.total ? (journey.done / journey.total) * 100 : 0} className="mt-1.5" aria-hidden />
           <span className="mt-1 block truncate text-xs text-muted-foreground">
             {next ? tj("nextStep", { step: next.title }) : tj("allDone")}
           </span>

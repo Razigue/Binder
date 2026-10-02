@@ -119,11 +119,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 <ErrorBox key={it.key} message={`${it.name} · ${it.error}`} />
               ))}
               {batch && (sent || !items.length) && <ReportView batch={batch} onNavigate={() => onOpenChange(false)} />}
-              {batch && !sent && items.length > failed.length && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CircleNotchIcon className="size-4 animate-spin" /> {t("analysing")}
-                </p>
-              )}
+              {/* Mounted before the upload starts, so screen readers hear the change. */}
+              <div role="status">
+                {batch && !sent && items.length > failed.length && (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CircleNotchIcon className="size-4 animate-spin" /> {t("analysing")}
+                  </p>
+                )}
+              </div>
               {batch && (
                 <div className="flex justify-between gap-2">
                   <DropZone compact className="flex-1" />
@@ -193,7 +196,7 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
 
 function ErrorBox({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+    <div role="alert" className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
       <WarningCircleIcon className="size-4" /> {message}
     </div>
   )

@@ -143,44 +143,38 @@ choice, and what is left. One commit per step.
   `GET /api/essentials`: why, how long to keep, present or missing (missing first).
 - **Welcome screen**: three screens of one question, then the list with "Scan my first paper"
   and "Choose a file"; demo and restore stay at the bottom. "Skip for now" goes to the list.
-- **Afterwards**: a row at the top of My papers ("The papers you should have · 6 of 9 already
-  here") opens the list, with "Change my answers". The answers are not in Settings (the
-  Settings page holds uncommitted changes of yours): the list is the place to change them.
+- **Link from My papers**: a row under the tiles, "The papers you should have · 4 of 5 already
+  here", opens the list in a side sheet (full width on a phone), with "Change my answers".
+- **Checked on screen** (desktop and 390 px, light theme, demo data): the three questions, the
+  list, the sheet. The header of question 1 (no back button) was shorter than the next ones and
+  made the card jump; it has a fixed height now.
+- **Document page**: its preview is now `DocumentPage` (the pager shows only with several pages).
 
-### Step 7: in short, glossary, accessibility
+### Step 7: glossary and accessibility
 
 - **In short at import**: each import report line starts with one sentence from the document's
   fields (`reports.brief`): what it is, the payment or renewal date or "nothing to do", how
   long it is kept. Immediate and without the model (the model's own "In short" stays on the
-  document page, where it may take a few seconds). The details below no longer repeat it.
-- **Glossary**: 17 terms, EN+FR definitions in `i18n/messages/glossary.ts`, matched in French
-  and English wording (documents are French whatever the interface language). Applied to the
-  To do cards, the question panel, the import report and "In short".
-- **Print**: the app cannot print the PDF itself (every response carries `X-Frame-Options:
-  DENY`, which `guard.py` must keep), so Print prints the letter's text through a print-only
-  sheet; the PDF stays one click away.
-- **Send by post**: no online posting service (local only): the four steps, with the
-  recipient's address when Binder has it, then "I sent it", which starts the follow-up.
-- **Text size**: kept in the browser's local storage (a display preference of this screen,
-  like the theme of a window), applied before the first paint.
-- **Labelled buttons**: every icon-only button already had an `aria-label` (or a screen-reader
-  text); nothing to add.
-
-## Summary
-
-The seven steps are done, each in its own commit. Verified at every step: ruff, mypy, pytest,
-`scripts/evaluate.py` (97.9%, the same telecom → other mistake as before the overhaul: not
-touched), oxlint, frontend build, and the screens touched, on a desktop width and at 390 px
-(headless Chrome with device emulation once the Chrome extension disconnected). On the demo,
-an import shows 2 questions.
+  document page). The details below no longer repeat it.
+- **Glossary**: `i18n/messages/glossary.ts` (EN+FR, `<id>.terms` separated by "|", `<id>.def`),
+  `components/glossary.tsx`: `Term` (dotted word, popover) and `Glossed` (marks the first
+  occurrence of each term in a text, whole words, longest term first). Used on the document page
+  (field labels, type, retention, "In short"), the papers to have and the letter (registered
+  mail, postal steps). Not on feed cards: they are buttons, a term inside would nest buttons.
+  Backend texts are glossed where the interface shows them, nothing changes server side.
+- **Letters**: **Print** (primary) and **Send by post** (the steps: print and sign, envelope,
+  registered letter or stamp, then "I sent it") come first; the PDF download is a ghost button.
+  Print does not frame the PDF (`guard.py` denies framing of `/api/`, and must not be loosened):
+  it prints the letter text from a blank `srcdoc` frame with the PDF's layout. `window.print()`
+  works in WebView2 (Windows) and browsers; macOS WKWebView and Qt may ignore it, the PDF stays
+  one tap away. The draft status in Life events says "print it and post it".
+- **Text size**: `Preferences.text_size` (`normal`, `large`, `larger`; additive in the stored
+  JSON), the root font size 100 / 112.5 / 125 %, cached with the theme for the first frame.
+  Text sizes in px became rem (title bar excepted) so that they follow. Media queries do not
+  follow the root size: the Language / appearance cards of Settings switched to a container
+  query, the one layout that broke at 1280 px and "Larger".
 
 ## Left to do
 
-- `DocumentDetail`'s preview to reuse `DocumentPage` (the file holds uncommitted changes of
-  yours).
-- The first-launch answers can only be changed from the papers list, not in Settings (same
-  reason).
-- A test of the model's second reading (needs the fake Ollama of the tests).
-- `evaluate.py`: the demo telecom bill read as "other" (rules: 97.9%, not 100% as PRODUCT.md
-  says).
-- `DocumentDetail`'s preview to reuse `DocumentPage`.
+- Check in the desktop window: printing from WebView2, the text size with the custom title bar.
+- Glossary on the other pages that show administrative words outside buttons, if needed.

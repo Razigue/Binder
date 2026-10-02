@@ -3,19 +3,19 @@ name: Binder
 description: AI administrative agent, 100% local
 colors:
   primary: "oklch(0.28 0.07 262)"
-  primary-dark: "oklch(0.585 0.15 259)"
+  primary-dark: "oklch(0.93 0.004 260)"
   background: "oklch(0.985 0.003 250)"
-  background-dark: "oklch(0.168 0.011 256)"
+  background-dark: "oklch(0.175 0.002 260)"
   foreground: "oklch(0.22 0.03 260)"
-  foreground-dark: "oklch(0.935 0.006 256)"
+  foreground-dark: "oklch(0.94 0.002 260)"
   card: "oklch(1 0 0)"
-  card-dark: "oklch(0.203 0.012 256)"
+  card-dark: "oklch(0.208 0.003 260)"
   sidebar: "oklch(0.975 0.004 250)"
-  sidebar-dark: "oklch(0.148 0.011 256)"
-  muted-foreground: "oklch(0.55 0.02 258)"
+  sidebar-dark: "oklch(0.155 0.002 260)"
+  muted-foreground: "oklch(0.52 0.02 258)"
   accent: "oklch(0.95 0.018 255)"
   border: "oklch(0.925 0.008 255)"
-  destructive: "oklch(0.6 0.2 25)"
+  destructive: "oklch(0.55 0.2 25)"
 typography:
   page-title:
     fontFamily: "Geist Variable, sans-serif"
@@ -88,7 +88,8 @@ primitives), Phosphor icons (`@phosphor-icons/react`, `*Icon` names), Geist Vari
 Binder greets you, tells you what needs your attention today, and keeps everything else quietly in
 order. The interface is an Operate surface: calm, dense enough to scan, never decorative. Ink navy
 carries the brand; colour elsewhere is a signal (urgency, category), never ornament. Dark mode is a
-"night vault": ink surfaces with a faint blue cast, depth by lightness steps.
+the light theme inverted: neutral graphite surfaces (no blue cast), depth by lightness steps,
+the primary as paper with ink text.
 
 **Key Characteristics:**
 - Navy brand, cool near-white surfaces, one accent family.
@@ -99,21 +100,23 @@ carries the brand; colour elsewhere is a signal (urgency, category), never ornam
 ## Colors
 
 ### Primary
-- **Ink Navy** (`primary`): primary buttons, logo tile, active nav text, links. Turns **Periwinkle**
-  (`primary-dark`) in dark mode so buttons keep their weight.
+- **Ink Navy** (`primary`): primary buttons, logo tile, active nav text, links. Turns **Paper**
+  (`primary-dark`, near-white with ink text) in dark mode: navy on paper in light, paper on ink
+  in dark, the brightest thing on screen in both. Marks drawn on a document page (white in both
+  themes) use `paper-ink`, the light navy, in both themes.
 
 ### Neutral
 - **Cool Paper** (`background`) page; **White** (`card`) cards and popovers; **Sidebar Mist**
   (`sidebar`) navigation; **Ink** (`foreground`) text; **Slate** (`muted-foreground`) secondary
   text; **Haze** (`accent`) hover and active fills; hairline `border`.
 - Dark: surfaces lighten as they come forward: sidebar < background < card < popover. Borders are
-  white at 6-11% alpha.
+  white at 6-12% alpha. Dark surfaces are neutral: hue only in the signals.
 
 ### Signals (Tailwind palette, not tokens)
 - Urgency (`urgencyStyles`, `lib/format.ts`): late/urgent red, soon amber, later emerald; as dot,
   pill (`-50` bg / `-700` text; dark `-500/15` bg / `-300` text) or text.
 - Categories (`CATEGORY_STYLE`, `lib/categories.tsx`): one hue + Phosphor icon per category, pastel
-  tile in light, `/15` tint in dark.
+  tile in light, a `-400/12` tint with a `-300` icon in dark.
 - `destructive` red for delete actions, always as a soft tint (`/10` bg), never solid.
 
 **The Signal-Only Rule.** Hue outside navy appears only to say something (urgency, category,
@@ -133,6 +136,12 @@ status). In dark mode a tinted card goes neutral: the hue stays on the icon and 
 **The Sentence Rule.** Headings and hints are plain sentences in sentence case, translated via the
 i18n catalogs; never all-caps outside the sidebar overline.
 
+**Text size** (Settings: Normal, Large, Larger) sets the root font size (100, 112.5, 125%), so
+every size above is in `rem` and scales with it: write `text-[0.6875rem]`, never `text-[11px]`
+(the desktop title bar is the one exception). Breakpoints do not follow it (media queries ignore
+the root size): a layout that must stack when the text grows uses a container query
+(`@container`, `@3xl:`), as the Language and appearance cards do.
+
 ## Layout
 
 Fixed 240px sidebar (`md`+): the navy **＋ Add** button first (a menu: "Scan with your phone",
@@ -141,10 +150,16 @@ of cards that need the user), My papers, Life events; the profile row pinned bot
 with Settings, History and Trash. Below `md`: a slim top bar (logo, profile button) and a fixed
 bottom bar of four 64px cells: the three places (icon over label) and a round navy ＋. No ask bar:
 the agent opens from ＋ or Ctrl K. Content `px-4 pt-6 pb-28` mobile (room for the bottom bar),
-`px-8 py-8` desktop. Page header then content, `mb-7`. To do: a centred column (`max-w-3xl`),
-greeting and one-sentence summary, then one card per item, urgent first, the import report on
-top; empty state: a large green check and "All in order ✓". My papers: the area tiles, then
-search, person chips and the list; tabs Documents / Calendar / Archives. Life events: "In
+`px-8 py-8` desktop. Page header then content, `mb-7`. To do: full width and left-aligned like every page (detail sentences capped at 70ch),
+greeting and one-sentence summary, then one card per item that needs the user, urgent first,
+the import report on top; what is only worth knowing comes after, quieter, as rows of one card
+under "Good to know"; nothing to do: a large green check and "All in order ✓". First launch (no document yet):
+"Tell me about yourself", one question per screen in a card (progress bars, full-width answer
+buttons, 2 columns from `sm`), then "The papers you should have" (scan and file buttons, then
+the list: area icon, title, why, how long to keep, "Here" or "To add"); demo and restore stay
+quiet at the bottom. My papers: the area tiles, then a row "The papers you should have" (opens
+the list in a side sheet), search, person chips and the list; tabs Documents / Calendar /
+Archives. Life events: "In
 progress" on top when there is any, the eight life events as large rows in a 1-2-3 column grid
 (icon tile, title, one-line hint, chevron), each opening a dialog of its sub-actions (same rows,
 smaller), then "Other procedures" and the "Ask Binder" fallback. Settings: one section per row, title and
@@ -156,13 +171,35 @@ Grids: `sm:grid-cols-3` stats, `lg:grid-cols-2` sections, gaps 16-24px. Lists ar
 
 Flat. Cards use a 1px ring (`foreground/10`) or border, no resting shadow. `shadow-sm` appears only
 on hover of clickable cards. Dark mode conveys depth by surface lightness, not shadow. Focus is a
-3px `ring/50` halo.
+3px `ring/50` halo on the shadcn controls (with their `ring` border), a 2px solid `ring` outline
+offset 2px on links, plain buttons and custom controls: always at least 3:1 against the surface.
 
 ## Shapes
 
 `--radius` 0.75rem drives the scale (sm 0.6x … 4xl 2.6x). Buttons, inputs, nav items, icon tiles:
 `rounded-lg` (12px). Cards: `rounded-xl` (~17px). Badges and pills: fully round. Status dots: 8px
 circles with a 4px soft ring.
+
+## Motion
+
+Binder should feel light, not bureaucratic: things move when it says something, never to
+decorate. Utilities in `index.css`, all one-shot fades and switched off by
+`prefers-reduced-motion`. **No transform animations** (no slide, scale, rotate or lift): opacity
+and colour only.
+
+- `animate-page`: each page fades in (220ms). A filter in the address does not replay it.
+- `animate-rise`: cards and tiles fade in one after the other (`--i` index, 45ms apart, capped);
+  a card that arrives later fades in on its own.
+- `animate-step`: a new question or step fades in.
+- `animate-pop`: a reward or a change worth noticing (the "All in order" check, a selected tile's
+  check, the to-do count when it changes).
+- Hover: colour and the `shadow-sm` of clickable cards only; the active nav icon turns filled.
+
+**Navigation:** Back and Forward (`HistoryButtons`) sit top left: in the desktop title bar, at
+the top left of the content area in a browser (never in the sidebar), in the phone top bar.
+Bold arrows at `foreground/80`, a dead one at `/25`; both hidden (space kept) while there is
+nowhere to go, as on the first page. A new page opens at its top; Back returns to
+the scroll position the user left.
 
 ## Components
 
@@ -181,30 +218,37 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Navigation:** 14px/500 rows with 16px Phosphor icon, `gap-3`, at least 40px high; active = `sidebar-accent` fill.
 - **Agent:** opened from the nav or the ask bar as a side sheet, not a route.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
-  (the urgency in words), amount right-aligned, then its actions as buttons: one primary,
-  outline for the others, ghost for dismiss.
+  (the urgency in words), amount right-aligned, then its actions as buttons, under the text
+  from `sm` and full width on a phone: the primary first, "See the document" (a preview, so no
+  second "Open"), outline for the others, the dismiss ("All good", "Not needed") as a muted
+  ghost at the end of the row.
 - **Area tile** (My papers): card-like button, area icon tile + label, then its state in one
   or two lines of 12px text (red/amber text when it calls for action, muted otherwise);
   selected = 2px primary ring and a check. Grid: 2 columns on a phone, 3 from `sm`, 4 from `lg`.
 - **Tabs** (My papers): text tabs on a hairline, the active one with a 2px primary underline,
   at least 44px high; the tab is kept in the address (`?tab=calendar`).
-- **First launch** (`components/essentials.tsx`): one question per card (progress dots,
-  20px question, full-width 48px answer buttons in 1-2 columns, "Skip for now" link), then
-  the papers to have as rows (area tile, title, why, how long to keep, "Here" in emerald with
-  a filled check or "To add" in muted text with a dashed circle). The same list opens from a
-  row at the top of My papers.
 - **Question panel** (`components/questions.tsx`): a large dialog, one question per screen:
   the document page (`DocumentPage`, the place Binder read highlighted) on the left, the
   progress, question and full-width answer buttons on the right; stacked on a phone (document
   on top, answers below). Ends on "All in order ✓".
-- **Glossary term** (`components/glossary.tsx`): a known paperwork word, dotted underline (solid
-  on hover), opens a 288px popover with the word and one sentence. Only the first occurrence of
-  each word in a text.
-- **Letter actions:** Print (primary) and Send by post (outline, unfolds four numbered steps
-  and "I sent it"), then Download (ghost). Printing uses a `.print-only` sheet (index.css):
-  the letter's text alone, black on white, serif 11pt.
-- **Text size:** a three-way radio group (Normal 100%, Large 112.5%, Larger 125%) under the
-  theme in Settings > Appearance; it sets the root font size, so every rem-based size follows.
+- **Viewer** (`components/viewer.tsx`): a page on a grey desk at the width of its frame, a
+  toolbar below (zoom out, percentage = fit to width, zoom in, whole page, then the pager).
+  Ctrl + wheel or pinch zooms around the cursor, double-click toggles 200 %, + / − / 0 keys;
+  the mouse drags the page (not on a letter, whose text stays selectable).
+- **Document page** (`DocumentPage`): the page image in the `Viewer`, on a white backing in
+  both themes, the places Binder read outlined, the active field highlighted. Shared by the
+  document page (fixed-height frame), the question panel and the feed's document preview (a
+  large dialog, one chip per document).
+- **Glossary term** (`components/glossary.tsx`): an administrative word with a dotted primary
+  underline; a tap opens a popover with one sentence. `Glossed` marks the first occurrence of
+  each term in a text (explanations, field labels, the papers to have, letter steps); never
+  inside a button or a link. Terms and sentences: `i18n/messages/glossary.ts`.
+- **Letter:** in its large dialog, an A4 sheet in the `Viewer` (laid out like the PDF, details
+  in [brackets] marked amber); in the agent, the plain text with "Enlarge". Actions **Print**
+  (primary) and **Send by post** (outline: numbered steps, then "I sent it"), the PDF download
+  as ghost, **Cancel the letter** (destructive, right, after a confirmation; undoable).
+  Leaving the editor with changes asks first. Print lays the text
+  out like the PDF from a blank frame (the PDF route cannot be framed).
 - **Undo:** every change ends with a Sonner toast carrying "Undo".
 - **Toasts:** Sonner. Destructive confirmations: `ConfirmDialog`.
 
@@ -214,6 +258,13 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Do** use theme tokens (`bg-card`, `text-muted-foreground`, `bg-primary`) and add both light
   and `dark:` styles for any raw Tailwind hue.
 - **Do** pair every urgency colour with a text label.
+- **Do** keep text at 4.5:1: urgency text uses `-700` in light (`-600` amber/emerald fail on
+  white), muted text stays `muted-foreground` without extra opacity.
+- **Do** name every icon-only control (`aria-label`), expose state (`aria-pressed`,
+  `aria-checked`, `aria-expanded`, `aria-current`) and give targets at least 24px (an `after:`
+  inset widens a small one). Icons are hidden from screen readers app-wide (`IconContext`).
+- **Do** announce what changes on its own (`role="status"`, mounted before it changes; errors
+  `role="alert"`), and move focus to the next question or list when the control pressed goes away.
 - **Do** use `PageHeader` for page titles and `CategoryIcon` for categories.
 - **Do** show `Skeleton` while loading and a plain reassuring sentence when empty.
 
@@ -222,7 +273,7 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Don't** add resting shadows or heavy borders; depth stays flat.
 - **Don't** use solid red fills; destructive is a soft tint.
 - **Don't** reach for generated-UI defaults: purple/violet for "AI", sparkle icons, gradient text,
-  glassmorphism, glows, pulsing or bouncing decoration, monospace outside code, pastel-tinted
+  glassmorphism, glows, looping (pulsing, bouncing) decoration, monospace outside code, pastel-tinted
   card grids. The agent uses the navy brand like everything else.
 - **Don't** hard-code UI strings; add EN and FR keys to `src/i18n/messages/*`.
 - **Don't** restyle the phone scan page (`backend/src/binder/mobile/`) after the main app: it is a
