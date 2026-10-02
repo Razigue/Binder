@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, func, select
 
 from binder import i18n
+from binder.db import in_use
 from binder.models import Correspondence, Deadline, Document
 from binder.services import llm, settings_store
 
@@ -123,7 +124,7 @@ def figures(session: Session, today: date) -> dict[str, Any]:
     late = [d for d in open_rows if d.due_date < today]
     expiring = session.exec(
         select(Document).where(
-            col(Document.deleted_at).is_(None),
+            in_use(),
             col(Document.expiry_date).is_not(None),
             col(Document.superseded_by).is_(None),
         )

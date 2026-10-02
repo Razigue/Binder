@@ -23,7 +23,7 @@ from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, DocType, Document
 from binder.services import llm, settings_store
 from binder.services.rules import normalize
@@ -405,7 +405,7 @@ def current_documents(session: Session) -> list[Document]:
             select(Document)
             .options(*WITHOUT_TEXT)
             .where(
-                col(Document.deleted_at).is_(None),
+                in_use(),
                 col(Document.superseded_by).is_(None),
                 col(Document.duplicate_of).is_(None),
             )

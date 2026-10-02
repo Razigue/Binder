@@ -97,7 +97,7 @@ def test_question_answered_in_one_tap(client: TestClient, demo: dict[str, Any]) 
     housing = next(a for a in question["actions"] if a["params"].get("choice") == "area:vehicle")
     r = client.post("/api/actions", json={"type": "answer", "params": housing["params"]})
     assert r.status_code == 200 and r.headers["X-Undo"]
-    doc = client.get(f"/api/documents/{housing['params']['document_id']}").json()
+    doc = client.get(f"/api/documents/{housing['params']['document_ids'][0]}").json()
     assert doc["category"] == "vehicle" and doc["area"] == "vehicle"
     assert doc["status"] == "classified"
     assert question["key"] not in {i["key"] for i in feed_items(client)}
@@ -166,7 +166,7 @@ def test_import_report_groups_a_drop_of_files(client: TestClient, samples: list[
     assert len(report["items"]) == 3
     tax = report["items"][0]
     assert "Filed under Money" in tax["facts"]
-    assert any(f.startswith("$1,240.00 to pay by") for f in tax["facts"])
+    assert "$1,240.00 to pay by" in tax["brief"]
     assert "documents filed" in report["summary"] and "to pay" in report["summary"]
     assert client.get("/api/reports/nothing").status_code == 404
 
@@ -493,15 +493,8 @@ def test_backup_runs_once_a_day_when_something_changed(
 # --- Local AI setup -------------------------------------------------------------------------
 
 
-def test_model_suits_the_machine() -> None:
-    gb = setup.GB
-    assert setup.pick_model(8 * gb, 0, 500 * gb) == "qwen3.5:2b"
-    assert setup.pick_model(12 * gb, 0, 500 * gb) == "qwen3.5:4b"
-    assert setup.pick_model(16 * gb, 0, 500 * gb) == "qwen3.5:9b"
-    assert setup.pick_model(32 * gb, 24 * gb, 500 * gb) == "qwen3.5:27b"
-    # Not enough room for the 9B: the next smaller one.
-    assert setup.pick_model(16 * gb, 0, 5 * gb) == "qwen3.5:4b"
-    assert setup.pick_model(16 * gb, 0, 1 * gb) is None
+def test_ollama_archive_suits_the_system() -> None:
+    # The model for each machine: test_model_choice.py.
     assert setup.asset_name("linux", "x86_64") == "ollama-linux-amd64.tar.zst"
     assert setup.asset_name("win32", "amd64") == "ollama-windows-amd64.zip"
     assert setup.asset_name("darwin", "arm64") == "ollama-darwin.tgz"

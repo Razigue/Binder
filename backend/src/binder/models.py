@@ -188,6 +188,11 @@ class Document(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_now)
     # Trash: a deleted document can be restored until it is permanently deleted.
     deleted_at: datetime | None = Field(default=None, index=True)
+    # Archives: an old document (retention period over, or replaced by a newer version) leaves
+    # every active view but stays encrypted, searchable and restorable (services/archive.py).
+    archived_at: datetime | None = Field(default=None, index=True)
+    # Why it was archived: "retention" or "replaced".
+    archive_reason: str | None = None
 
     # Large columns, last (see HEAVY_COLUMNS): SQLite stores the end of a long row in
     # overflow pages, read through to reach any column stored after them.

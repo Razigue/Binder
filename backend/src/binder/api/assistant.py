@@ -1,4 +1,4 @@
-"""Routes of the agent's proactive side: Today feed and its actions, undo, import reports, life
+"""Routes of the agent's proactive side: To do feed and its actions, undo, import reports, life
 areas, household, letters, packs, local AI setup and backups."""
 
 import contextlib
@@ -11,19 +11,21 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT, get_engine, get_session, reset_engine
+from binder.db import WITHOUT_TEXT, get_engine, get_session, in_use, reset_engine
 from binder.models import Correspondence, Deadline, Document
 from binder.schemas import DeadlineOut, DocumentOut, Letter, LetterEdit, LetterRequest
 from binder.services import (
     areas,
     backup,
+    calendar,
+    essentials,
     feed,
     folders,
     household,
@@ -31,6 +33,9 @@ from binder.services import (
     letters,
     llm_models,
     organize,
+    preferences,
+    profile,
+    questions,
     reports,
     setup,
     sources,
@@ -45,6 +50,19 @@ T = i18n.catalog(
     "assistant_api",
     {
         "bad_action": {"en": "This action is no longer possible", "fr": "Action impossible"},
+        # State of a life area, in words, on its tile in My papers.
+        "area_up_to_date": {"en": "Up to date", "fr": "À jour"},
+        "area_empty": {"en": "Nothing here yet", "fr": "Rien pour l'instant"},
+        "area_more_one": {"en": "{state} (+{n} more)", "fr": "{state} (+{n} autre)"},
+        "area_more_other": {"en": "{state} (+{n} more)", "fr": "{state} (+{n} autres)"},
+        "area_expires_one": {
+            "en": "{title} expires in {n} month",
+            "fr": "{title} expire dans {n} mois",
+        },
+        "area_expires_other": {
+            "en": "{title} expires in {n} months",
+            "fr": "{title} expire dans {n} mois",
+        },
         "undo_expired": {
             "en": "Too late to undo this action",
             "fr": "Trop tard pour annuler cette action",
@@ -88,7 +106,7 @@ def _doc(session: Session, doc_id: int) -> Document:
     return doc
 
 
-# --- Today feed ------------------------------------------------------------------------------
+# --- To do feed ------------------------------------------------------------------------------
 
 
 class FeedOut(BaseModel):
@@ -101,10 +119,23 @@ class FeedOut(BaseModel):
 def get_feed(session: SessionDep) -> FeedOut:
     items = feed.build(session)
     session.commit()  # the recovery code is created on first use
-    total = session.exec(
-        select(func.count()).select_from(Document).where(col(Document.deleted_at).is_(None))
-    ).one()
+    total = session.exec(select(func.count()).select_from(Document).where(in_use())).one()
     return FeedOut(items=items, documents=total, setup=setup.status())
+
+
+@router.get("/questions")
+def list_questions(
+    session: SessionDep,
+    documents: Annotated[list[int] | None, Query(max_length=500)] = None,
+) -> list[feed.FeedItem]:
+    """Every question worth asking, as cards (grouped, most useful first): the sorting
+    session goes through them one by one, the document next to each. `documents`: one
+    question per document, about these only (a grouped question seen in detail)."""
+    if documents:
+        found = questions.pending(session, group=False, ids=documents)
+    else:
+        found = questions.pending(session)
+    return [feed.question_item(q) for q in found]
 
 
 class ActionIn(BaseModel):
@@ -158,6 +189,47 @@ class AreaSummary(BaseModel):
     label: str
     documents: int
     attention: int
+    # Its state in words ("Up to date", "Identity card: renew it") and how pressing it is:
+    # "urgent", "soon", "ok" or "empty".
+    state: str = ""
+    tone: str = "ok"
+
+
+# An end of validity this close is mentioned on the area's tile.
+EXPIRY_HINT_DAYS = 180
+
+
+def _area_state(
+    area: str, docs: list[Document], items: list[feed.FeedItem], today: date
+) -> tuple[str, str]:
+    # Questions are asked in To do; the tile says what the area itself needs.
+    pressing = [i for i in items if i.area == area and i.tone != "info" and i.kind != "question"]
+    if pressing:
+        first = pressing[0]
+        # A payment says when: "Tax notice 2026 · Due 7 Oct 2026".
+        state = f"{first.title} · {first.detail}" if first.kind == "deadline" else first.title
+        if len(pressing) > 1:
+            return T.plural("area_more", len(pressing) - 1, state=state), first.tone
+        return state, first.tone
+    mine = [d for d in docs if d.area == area]
+    expiring = sorted(
+        (
+            d
+            for d in mine
+            if d.expiry_date is not None
+            and d.superseded_by is None
+            and 0 <= (d.expiry_date - today).days <= EXPIRY_HINT_DAYS
+        ),
+        key=lambda d: d.expiry_date or today,
+    )
+    if expiring:
+        doc = expiring[0]
+        assert doc.expiry_date is not None
+        months = max(1, round((doc.expiry_date - today).days / 30))
+        return T.plural("area_expires", months, title=doc.title), "ok"
+    if mine:
+        return T("area_up_to_date"), "ok"
+    return T("area_empty"), "empty"
 
 
 class AreaOut(BaseModel):
@@ -176,7 +248,7 @@ def _active_docs(session: Session) -> list[Document]:
         session.exec(
             select(Document)
             .options(*WITHOUT_TEXT)
-            .where(col(Document.deleted_at).is_(None))
+            .where(in_use())
             .order_by(col(Document.issue_date).desc(), col(Document.created_at).desc())
         )
     )
@@ -186,15 +258,34 @@ def _active_docs(session: Session) -> list[Document]:
 def list_areas(session: SessionDep) -> list[AreaSummary]:
     docs = _active_docs(session)
     items = feed.build(session)
-    return [
-        AreaSummary(
-            area=a,
-            label=areas.label(a),
-            documents=sum(d.area == a for d in docs),
-            attention=sum(i.area == a and i.tone != "info" for i in items),
+    today = date.today()
+    out = []
+    for a in areas.AREAS:
+        state, tone = _area_state(a, docs, items, today)
+        out.append(
+            AreaSummary(
+                area=a,
+                label=areas.label(a),
+                documents=sum(d.area == a for d in docs),
+                attention=sum(i.area == a and i.tone != "info" for i in items),
+                state=state,
+                tone=tone,
+            )
         )
-        for a in areas.AREAS
-    ]
+    return out
+
+
+@router.get("/essentials")
+def get_essentials(session: SessionDep) -> list[essentials.PaperOut]:
+    """The papers the user should have, from the three answers of the first launch."""
+    return essentials.papers(session, profile.load(session))
+
+
+@router.get("/calendar")
+def get_calendar(session: SessionDep) -> list[calendar.CalendarEntry]:
+    """The administrative year (what usually comes back each month), for the Calendar tab."""
+    country = preferences.effective(preferences.load(session)).country
+    return calendar.year(session, country)
 
 
 @router.get("/areas/{area}")

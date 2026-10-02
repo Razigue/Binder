@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, DocType, Document
 from binder.services import activity
 from binder.services.rules import normalize
@@ -133,9 +133,7 @@ def _build(key: str, docs: list[Document]) -> Subscription:
 def detect(session: Session, like: Document | None = None) -> list[Subscription]:
     """`like`: only the series of this document (same category and type)."""
     stmt = (
-        select(Document)
-        .options(*WITHOUT_TEXT)
-        .where(col(Document.deleted_at).is_(None), col(Document.amount).is_not(None))
+        select(Document).options(*WITHOUT_TEXT).where(in_use(), col(Document.amount).is_not(None))
     )
     if like is not None:
         stmt = stmt.where(Document.category == like.category)

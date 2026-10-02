@@ -41,16 +41,22 @@ Features: see README.md (user guide); configuration: docs/configuration.md. Prod
 - UI in English and French, following the OS locale and theme; Settings hold what the AI must know about the user (identity,
   address, situation in their own words), language/country, theme, import sources (synced folder,
   mailbox), the recovery code and clearing the demo data.
-- Navigation: the agent first (Ctrl K anywhere), Today, Prepare (everything Binder can do on request,
-  and what it is following), Documents (search), then seven life areas (Housing, Money, Work &
-  benefits, Family, Health, Identity, Vehicle).
+- Navigation: three places. **To do** (one pile of cards, the most urgent on top, "All in
+  order ✓" when empty), **My papers** (the seven life areas as tiles with their state in words,
+  search and filters, tabs Documents / Calendar / Archives) and **Life events** ("Démarches":
+  what to do when you move, start a job, have a child… with the letters, files and what is
+  under way). A **＋ Add** button on every page adds a paper (phone scan first, or a file) or
+  asks the agent (also Ctrl K, never the only way). History, Trash and Settings sit in the
+  profile menu. On a phone: a bottom bar with the three places and ＋.
 - Loopback-only server; phone scan opens a temporary token-protected HTTPS server only during a
   session. Losing `DATA_DIR/key` loses the data unless a backup and its recovery code exist.
   Builds are not code-signed yet.
 
 ## Brand Commitments
 
-- Name **Binder**; mark: `BookLock` icon in a navy square.
+- Name **Binder**; mark: a binder seen from the front (spine and four card sleeves) in a navy
+  square, drawn once in `components/layout/BinderMark.tsx` and mirrored in `favicon.svg`, the
+  desktop loader, the installer splash and `packaging/binder.png`.
 - Voice: plain, calm, second person ("Here's what needs your attention today.", "Nothing urgent.
   Everything is in order."). Privacy restated where it matters ("They stay on your computer.").
 - Privacy restated in words where it matters, not as a status badge.
@@ -75,6 +81,8 @@ pricing exist: never invent them.
 4. **Show the source.** Cite the document, highlight where each figure was read; when unsure,
    ask one question with one-tap answers.
 5. **Say what to do and by when.** Next action in plain words, not raw data.
+6. **Only bother when it matters.** One question per screen, details on demand; Binder asks only
+   when the answer changes something today, a few questions at a time.
 
 ## Accessibility & Inclusion
 

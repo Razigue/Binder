@@ -57,10 +57,11 @@ mostly French: "taxe foncière", "EDF", "carte identité"; or a category). The f
 passages often answer; otherwise read_document{vision}.
 - Chain tools when needed (find the document, then act on it). Totals and dates: use those \
 tools give (sum_amount, total, days_left), otherwise calculate; never compute in your head.
-- Change data (reminder, paid, correction, validation, trash) only when the user asks, then \
-say what you did. A reminder needs no document: create it with the date given (next \
-occurrence of that date). For any letter, call write_letter with what it must obtain and \
-every detail the user gave (organisation, offer, dates, reasons): the \
+- Change data (reminder, paid, correction, validation, archive, trash) only when the user \
+asks, then say what you did. Old papers go to the archives (archive_documents), never to \
+the trash unless the user asks to delete them. A reminder needs no document: create it with \
+the date given (next occurrence of that date). For any letter, call write_letter with what \
+it must obtain and every detail the user gave (organisation, offer, dates, reasons): the \
 app shows it with its PDF, do not rewrite it. For a file of documents (rental, CAF, nursery…), \
 call prepare_folder. Problems (billed twice, overpayment, price rise) and missing documents: \
 list with kind alerts. A life event (moving, a birth, a death, the tax return): start_journey, \
@@ -89,7 +90,8 @@ with web_search in this turn (official sites first: legifrance.gouv.fr, service-
 name the site; if it cannot be checked, say so. write_letter looks up the organisation's \
 procedure itself (name the sites in adapted_from) and checks its own legal points: say \
 which ones the source contradicts (what it says instead) or could not be checked; the app \
-shows them under the letter.
+shows them under the letter. A contact the user lacks (an organisation's address, phone, \
+form): look it up yourself with web_search, never tell the user to search for it.
 """
 VISION_HINT = ", or view_document to look at the page itself (scans, photos, tables)"
 ATTACHED_NOTE = (
@@ -370,18 +372,19 @@ T = i18n.catalog(
         "to_renew": {"en": "To renew: {items}.", "fr": "À renouveler : {items}."},
         "renew_item": {"en": "{title} ({date:date})", "fr": "{title} ({date:date})"},
         "nothing_to_sort": {
-            "en": "Nothing to throw away for now: every document is still within its "
-            "retention period.",
-            "fr": "Rien à jeter pour l'instant : tous vos documents sont encore dans leur durée "
-            "de conservation.",
+            "en": "Nothing to archive for now: every document is still within its retention "
+            "period.",
+            "fr": "Rien à archiver pour l'instant : tous vos documents sont encore dans leur "
+            "durée de conservation.",
         },
         "to_sort_one": {
-            "en": "{n} document can be thrown away: {titles}.",
-            "fr": "{n} document peut être jeté : {titles}.",
+            "en": "{n} old document can go to the archives (nothing is deleted): {titles}.",
+            "fr": "{n} ancien document peut aller aux archives (rien n'est supprimé) : {titles}.",
         },
         "to_sort_other": {
-            "en": "{n} documents can be thrown away: {titles}.",
-            "fr": "{n} documents peuvent être jetés : {titles}.",
+            "en": "{n} old documents can go to the archives (nothing is deleted): {titles}.",
+            "fr": "{n} anciens documents peuvent aller aux archives (rien n'est supprimé) : "
+            "{titles}.",
         },
         "letter_ready": {
             "en": "Here is a draft: “{subject}”, to {recipient}.",
@@ -508,6 +511,9 @@ class _Collector:
         for d in result.documents:
             if d.id is not None:
                 self.documents[d.id] = d
+        for d in result.related:
+            if d.id is not None and d.id not in self.documents:
+                self.earlier[d.id] = d
         for dl in result.deadlines:
             if dl.id is not None:
                 self.deadlines[dl.id] = dl
@@ -719,7 +725,7 @@ def fit_context(messages: list[dict[str, Any]], schemas: list[dict[str, Any]] | 
     its start (the system prompt). Never touched: the system prompt, the tool schemas, this
     turn's request and the latest step. Removed in turn: images of past steps, then old tool
     results (oldest first), then earlier turns (before the message marked `turn`)."""
-    budget = get_settings().llm_context - llm.ANSWER_TOKENS
+    budget = llm.context_window() - llm.ANSWER_TOKENS
     start = next((i for i, m in enumerate(messages) if m.get("turn")), 1)
 
     def fits() -> bool:
@@ -749,7 +755,7 @@ def check_context(session: Session | None = None) -> None:
         return
     fixed = [{"role": "system", "content": system_prompt(session, vision=True)}]
     tokens = llm.estimate_tokens(fixed, tools.TOOL_SCHEMAS)
-    window = get_settings().llm_context
+    window = llm.context_window()
     if tokens > FIXED_SHARE * window:
         raise RuntimeError(
             f"System prompt and tools take about {tokens} tokens, more than "
@@ -758,16 +764,21 @@ def check_context(session: Session | None = None) -> None:
 
 
 def select_tools(message: str, *, vision: bool) -> list[str]:
-    """Names of the tools sent with this turn's model calls (at most tools.MAX_TOOLS): finding
-    and reading documents and listings always, web search whenever it is on, the tools the
-    request calls for (the router's own patterns), then the most useful others. The tools
-    asked for come right after the first ones: a small model favours what it reads first."""
+    """Names of the tools sent with this turn's model calls (at most tools.MAX_TOOLS, every
+    tool for a large model): finding and reading documents and listings always, web search
+    whenever it is on, the tools the request calls for (the router's own patterns), then the
+    most useful others. The tools asked for come right after the first ones: a model favours
+    what it reads first."""
     norm = normalize(message)
     core = ["search_documents", "read_document", "list"] + (["view_document"] if vision else [])
     web = ["web_search", "read_web_page"] if websearch.enabled() else []
     wanted = [name for pattern, group in INTENT_TOOLS if re.search(pattern, norm) for name in group]
     if re.search(HELP, norm) and re.search(APP_WORDS, norm):
         wanted.insert(0, "app_help")
+    if llm.profile().all_tools:
+        rest = [n for n in tools.NAMES if n not in core and n not in web]
+        asked = [n for n in dict.fromkeys(wanted) if n in rest]
+        return [*core, *asked, *web, *(n for n in rest if n not in asked)]
     room = tools.MAX_TOOLS - len(core) - len(web)
     asked = list(dict.fromkeys(wanted))[:room]
     others = [n for n in DEFAULT_TOOLS if n not in asked][: room - len(asked)]
@@ -823,7 +834,10 @@ def _run_llm(
         fit_context(messages, schemas)
         try:
             reply = llm.chat(
-                _sent(messages), tools=schemas, think=think, on_token=stream.token if emit else None
+                _sent(messages),
+                tools=schemas,
+                think=think,
+                on_token=stream.token if emit else None,
             )
         except llm.ModelError as exc:
             if not exc.unparsable or retries >= MAX_CALL_RETRIES:
@@ -1095,7 +1109,7 @@ UNDO = r"\bannule|\bdefais|\bundo\b|revert|cancel (?:that|what you did|it)\b"
 LETTER_PURPOSE = re.compile(r"^.*?\b(?:pour|afin de|to ask|in order to|asking|to)\s+", re.I)
 SUBSCRIPTIONS = r"abonnement|recurrent|subscription|recurring|hausse|augment|price rise|increase"
 RENEW = r"renouvel|perime|plus valable|papiers|renew|expired|still valid"
-SORT_OUT = r"jeter|trier|faire le tri|me debarrasser|throw (?:away|out)|sort out|get rid"
+SORT_OUT = r"jeter|trier|faire le tri|me debarrasser|archiv|throw (?:away|out)|sort out|get rid"
 LETTER = (
     r"lettre|courrier|resili|reclamation|contester|conteste|mise en demeure|echelonn"
     r"|changement d'adresse|letter|cancel my|complaint|dispute|appeal|formal notice"
@@ -1233,8 +1247,8 @@ def _router_intents(session: Session, collector: _Collector, message: str, norm:
             answer += T("missing_found", items=sep.join(absent))
         return answer.strip()
     if re.search(SORT_OUT, norm):
-        payload = collector.run(session, "documents_to_sort_out", {}).payload
-        found = payload["can_be_thrown_away"]
+        payload = collector.run(session, "documents_to_archive", {}).payload
+        found = payload["can_be_archived"]
         if not found:
             return T("nothing_to_sort")
         titles = sep.join(f"{d['title']} [#{d['id']}]" for d in found[:5])
@@ -1319,6 +1333,7 @@ INTENT_TOOLS: list[tuple[str, list[str]]] = [
     (PAID, ["mark_deadline_paid"]),
     (REMINDER, ["create_reminder"]),
     (PROFILE, ["update_profile"]),
+    (SORT_OUT, ["archive_documents", "unarchive_documents"]),
     (EDIT, ["update_document", "validate_document", "trash_document", "undo_last_action"]),
     (LETTER, ["write_letter", "explain_document"]),
     ("|".join(p for p, _ in JOURNEY_KINDS), ["start_journey", "mark_journey_step"]),

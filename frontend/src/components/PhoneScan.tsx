@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { WarningCircleIcon, CircleNotchIcon, ScanIcon, DeviceMobileIcon, XIcon } from "@phosphor-icons/react"
+import { WarningCircleIcon, WarningIcon, CircleNotchIcon, ScanIcon, DeviceMobileIcon, XIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/i18n"
 import { phoneScan } from "@/i18n/messages/phoneScan"
@@ -58,7 +58,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
   if (error) {
     return (
       <div className="space-y-4">
-        <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
           <WarningCircleIcon className="mt-0.5 size-4 shrink-0" /> {error}
         </div>
         <div className="flex justify-end gap-2">
@@ -80,7 +80,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
 
   if (!session) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div role="status" className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
         <CircleNotchIcon className="size-4 animate-spin" /> {t("opening")}
       </div>
     )
@@ -102,7 +102,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
     <div className="space-y-5">
       <div className={cn("grid items-center gap-5", pageCount ? "grid-cols-[112px_1fr]" : "sm:grid-cols-[208px_1fr]")}>
         <div className="mx-auto w-full max-w-52 rounded-xl border bg-white p-1.5 shadow-xs">
-          <img src={session.qr_code} alt={session.url} className="block aspect-square w-full [image-rendering:pixelated]" />
+          <img src={session.qr_code} alt={t("qrAlt")} className="block aspect-square w-full [image-rendering:pixelated]" />
         </div>
         <div className="min-w-0 space-y-3">
           <PhoneStatus connected={session.phone_connected} />
@@ -110,7 +110,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
             <ol className="space-y-2.5 text-sm">
               {(["stepWifi", "stepScan", "stepWarning", "stepShoot"] as const).map((key, i) => (
                 <li key={key} className="flex gap-2.5">
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary tabular-nums">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[0.6875rem] font-semibold text-primary tabular-nums">
                     {i + 1}
                   </span>
                   <span className={cn(key === "stepWarning" && "text-muted-foreground")}>{t(key)}</span>
@@ -120,12 +120,16 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
           ) : (
             <p className="text-sm text-muted-foreground">{t("stepShoot")}</p>
           )}
-          <p className="truncate font-mono text-[11px] text-muted-foreground select-all" title={session.url}>
+          <p className="truncate font-mono text-[0.6875rem] text-muted-foreground select-all" title={session.url}>
             {session.url.split("/?")[0]}
           </p>
         </div>
       </div>
 
+      {/* Pages arrive from the phone: say so, not only show them. */}
+      <p role="status" className="sr-only">
+        {pageCount > 0 ? t("pages", { count: pageCount }) : ""}
+      </p>
       {pageCount > 0 && (
         <div className="space-y-4">
           {documents.map((pages, d) => (
@@ -144,7 +148,13 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
                     title={page.detected ? undefined : t("noOutline")}
                   >
                     <img src={scanThumbUrl(page.id)} alt="" className="h-full w-full object-cover object-top" />
-                    <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white tabular-nums">
+                    {!page.detected && (
+                      <>
+                        <WarningIcon weight="fill" className="absolute top-1 left-1 size-3.5 text-amber-500 drop-shadow-sm" />
+                        <span className="sr-only">{t("noOutline")}</span>
+                      </>
+                    )}
+                    <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[0.625rem] font-semibold text-white tabular-nums">
                       {i + 1}
                     </span>
                     <button

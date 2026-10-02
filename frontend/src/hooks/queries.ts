@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, type BulkPatch, type Category, type DocPatch, type DocumentStatus } from "@/lib/api"
 
@@ -9,7 +10,6 @@ export const keys = {
   deadlines: (p: object) => ["deadlines", p] as const,
   trash: ["trash"] as const,
   expirations: ["expirations"] as const,
-  retention: ["retention"] as const,
   activity: (p: object) => ["activity", p] as const,
 }
 
@@ -43,6 +43,22 @@ export function useDeadlines(p: { start?: string; end?: string; include_done?: b
   return useQuery({ queryKey: keys.deadlines(p), queryFn: () => api.deadlines(p) })
 }
 
+/** Refreshes every view when Binder changed something on its own (a file dropped in the
+ * watched folder, an email, an analysis that waited for the model). */
+export function useLiveChanges() {
+  const qc = useQueryClient()
+  const seen = useRef<number | null>(null)
+  const changes = useQuery({ queryKey: ["changes"], queryFn: api.changes, refetchInterval: 3000 })
+  const revision = changes.data?.revision
+  useEffect(() => {
+    if (revision === undefined) return
+    if (seen.current !== null && revision !== seen.current) {
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "changes" })
+    }
+    seen.current = revision
+  }, [revision, qc])
+}
+
 export function useInvalidateAll() {
   const qc = useQueryClient()
   return () => qc.invalidateQueries()
@@ -70,6 +86,8 @@ export function useBulkDocuments() {
     }),
     reanalyze: useMutation({ mutationFn: api.bulkReanalyze, ...options }),
     restore: useMutation({ mutationFn: api.bulkRestore, ...options }),
+    archive: useMutation({ mutationFn: api.bulkArchive, ...options }),
+    unarchive: useMutation({ mutationFn: api.bulkUnarchive, ...options }),
     purge: useMutation({ mutationFn: api.bulkPurge, ...options }),
   }
 }
@@ -108,8 +126,13 @@ export function useExpirations() {
   return useQuery({ queryKey: keys.expirations, queryFn: api.expirations })
 }
 
-export function useRetention() {
-  return useQuery({ queryKey: keys.retention, queryFn: api.retention })
+/** Archive or bring back one document (both offer "Undo"). */
+export function useArchiveDocument() {
+  const invalidate = useInvalidateAll()
+  return {
+    archive: useMutation({ mutationFn: api.archiveDocument, onSuccess: invalidate }),
+    unarchive: useMutation({ mutationFn: api.unarchiveDocument, onSuccess: invalidate }),
+  }
 }
 
 export const feedKey = ["feed"] as const
@@ -120,9 +143,19 @@ export function useFeed() {
     queryKey: feedKey,
     queryFn: api.feed,
     refetchInterval: (q) => {
-      const phase = q.state.data?.setup.phase
-      return phase && phase !== "ready" && phase !== "disabled" ? 2000 : 30_000
+      const setup = q.state.data?.setup
+      const installing = setup && setup.phase !== "ready" && setup.phase !== "disabled"
+      return installing || setup?.upgrade?.accepted ? 2000 : 30_000
     },
+  })
+}
+
+/** The local AI models; refreshed while an accepted upgrade downloads. */
+export function useModels() {
+  return useQuery({
+    queryKey: ["models"],
+    queryFn: api.models,
+    refetchInterval: (q) => (q.state.data?.upgrade?.accepted ? 2000 : false),
   })
 }
 

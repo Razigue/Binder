@@ -25,11 +25,13 @@ export const DOC_TYPES = [
 export type DocType = (typeof DOC_TYPES)[number]
 
 export type Theme = "system" | "light" | "dark"
+export type TextSize = "normal" | "large" | "larger"
 
 export interface Preferences {
   language: "auto" | "en" | "fr"
   country: string | null
   theme: Theme
+  text_size: TextSize
   effective_language: "en" | "fr"
   effective_country: string | null
   currency: string
@@ -37,7 +39,7 @@ export interface Preferences {
   system_country: string | null
 }
 
-export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme">>
+export type PreferencesUpdate = Partial<Pick<Preferences, "language" | "country" | "theme" | "text_size">>
 
 /** "waiting": a real document imported before the local AI was ready; read as soon as it is. */
 export type DocumentStatus = "processing" | "waiting" | "to_review" | "classified"
@@ -80,7 +82,11 @@ export interface Doc {
   keep_forever: boolean
   retention_rule: string | null
   keep_until: string | null
-  deletable_reason: string | null
+  /** Why it can go to the archives (retention period over, replaced), null when it stays. */
+  archivable_reason: string | null
+  /** In the archives: out of the active views, still readable and restorable. */
+  archived_at: string | null
+  archive_reason: "retention" | "replaced" | "user" | null
   renew_from: string | null
   person: string | null
   area: Area | null
@@ -128,6 +134,7 @@ export interface Stats {
   classified_this_week: number
   total_documents: number
   trashed: number
+  archived: number
   by_category: Record<string, number>
 }
 
@@ -160,12 +167,30 @@ export interface LocalModel {
   download: ModelDownload | null
 }
 
+/** A better model for this machine, offered because Binder chose the active one. */
+export interface ModelUpgrade {
+  name: string
+  label: string
+  /** Download size, in bytes. */
+  size: number
+  /** The user said yes: Binder switches to it once downloaded. */
+  accepted: boolean
+  download: ModelDownload | null
+}
+
 export interface ModelsOverview {
   enabled: boolean
   ollama: boolean
   ollama_url: string
   active: string
   active_installed: boolean
+  active_label: string
+  /** Best model for this machine, measured at this launch. */
+  recommended: string
+  recommended_label: string
+  /** The active model was picked by Binder (upgrades offered), not by the user. */
+  automatic: boolean
+  upgrade: ModelUpgrade | null
   models: LocalModel[]
 }
 
@@ -323,6 +348,22 @@ export interface Folder {
   pieces: FolderPiece[]
 }
 
+export const SITUATIONS = ["student", "employee", "self_employed", "job_seeker", "retired"] as const
+export type Situation = (typeof SITUATIONS)[number]
+export const HOUSINGS = ["tenant", "owner", "hosted"] as const
+export type Housing = (typeof HOUSINGS)[number]
+
+/** A paper the user should have, for their profile, and whether Binder holds it. */
+export interface EssentialPaper {
+  key: string
+  area: Area
+  title: string
+  why: string
+  keep: string
+  present: boolean
+  document_id: number | null
+}
+
 export interface Profile {
   name: string
   address: string
@@ -331,6 +372,10 @@ export interface Profile {
   phone: string
   /** What the agent must know about the user, in their own words. */
   notes: string
+  /** The three answers of the first launch ("" while unanswered). */
+  situation?: Situation | ""
+  housing?: Housing | ""
+  vehicle?: "yes" | "no" | ""
   /** Fields Binder filled from the documents (it keeps them up to date until the user edits). */
   auto: string[]
 }
@@ -404,6 +449,8 @@ export interface FeedItem {
   kind:
     | "report" | "briefing" | "question" | "deadline" | "expiry" | "anomaly"
     | "missing" | "letter" | "suggestion" | "household" | "journey" | "waiting"
+    // "N more questions, whenever you like": opens the sorting session.
+    | "questions"
   tone: Tone
   title: string
   detail: string
@@ -474,8 +521,10 @@ export interface SetupStatus {
   total: number
   model: string | null
   error: string | null
-  /** Works, but not as well as it should (an outdated Ollama). Localized. */
+  /** Works, but not as well as it should (an outdated Ollama, a model too heavy). Localized. */
   warning?: string | null
+  /** A better model for this machine, offered (never downloaded without a yes). */
+  upgrade?: ModelUpgrade | null
 }
 
 export interface Feed {
@@ -491,6 +540,8 @@ export interface ActResult {
 
 export interface ReportItem {
   document: Doc
+  /** "In short": what it is, whether to act and by when, how long it is kept. */
+  brief: string
   facts: string[]
   events: string[]
   question: { key: string; title: string; detail: string; choices: { id: string; label: string; primary: boolean }[] } | null
@@ -516,17 +567,17 @@ export interface AreaSummary {
   label: string
   documents: number
   attention: number
+  /** Its state in words ("Up to date", "Identity card: renew it"). */
+  state: string
+  tone: "urgent" | "soon" | "ok" | "empty"
 }
 
-export interface AreaDetail {
-  area: Area
-  label: string
-  documents: Doc[]
-  deadlines: Deadline[]
-  subscriptions: Subscription[]
-  items: FeedItem[]
-  members: Member[]
-  yearly_cost: number
+/** A month of the administrative year (what usually comes back). */
+export interface CalendarEntry {
+  month: number
+  key: string
+  text: string
+  concerns_you: boolean
 }
 
 export interface FieldSource {
@@ -664,11 +715,11 @@ export const api = {
   preferences: () => request<Preferences>("/preferences"),
   updatePreferences: async (patch: PreferencesUpdate) => {
     const current = await request<Preferences>("/preferences")
-    const body = { language: current.language, country: current.country, theme: current.theme, ...patch }
+    const body = { language: current.language, country: current.country, theme: current.theme, text_size: current.text_size, ...patch }
     return request<Preferences>("/preferences", json("PUT", body))
   },
   stats: () => request<Stats>("/stats"),
-  documents: (p: { q?: string; category?: Category; status?: DocumentStatus; limit?: number } = {}) =>
+  documents: (p: { q?: string; category?: Category; status?: DocumentStatus; archived?: boolean; limit?: number } = {}) =>
     request<Doc[]>(`/documents${query(p)}`),
   document: (id: number) => request<DocDetail>(`/documents/${id}`),
   upload: (file: File, batch?: string) => {
@@ -683,6 +734,10 @@ export const api = {
   bulkUpdate: (ids: number[], patch: BulkPatch) =>
     request<BulkResult>("/documents/bulk/update", json("POST", { ids, ...patch })),
   bulkReanalyze: (ids: number[]) => request<BulkResult>("/documents/bulk/reanalyze", json("POST", { ids })),
+  bulkArchive: (ids: number[]) => request<BulkResult>("/documents/bulk/archive", json("POST", { ids })),
+  bulkUnarchive: (ids: number[]) => request<BulkResult>("/archives/restore", json("POST", { ids })),
+  archiveDocument: (id: number) => request<DocDetail>(`/documents/${id}/archive`, { method: "POST" }),
+  unarchiveDocument: (id: number) => request<DocDetail>(`/documents/${id}/unarchive`, { method: "POST" }),
   bulkRestore: (ids: number[]) => request<BulkResult>("/trash/restore", json("POST", { ids })),
   bulkPurge: (ids: number[]) => request<BulkResult>("/trash/purge", json("POST", { ids, confirm: true })),
   explanation: (id: number, refresh = false) =>
@@ -699,6 +754,9 @@ export const api = {
   deleteLetter: (id: number) => request<void>(`/letters/${id}`, { method: "DELETE" }),
   letters: () => request<Letter[]>("/letters"),
   feed: () => request<Feed>("/feed"),
+  /** Every question worth asking (grouped), or one per document of `documents`. */
+  questions: (documents?: number[]) =>
+    request<FeedItem[]>(`/questions${documents?.length ? `?${documents.map((id) => `documents=${id}`).join("&")}` : ""}`),
   act: (action: Pick<FeedAction, "type" | "params">) =>
     request<ActResult>("/actions", json("POST", { type: action.type, params: action.params })),
   undo: (token: string) => request<void>(`/undo/${encodeURIComponent(token)}`, { method: "POST" }),
@@ -707,7 +765,8 @@ export const api = {
   report: (batch: string) => request<ImportReport>(`/reports/${encodeURIComponent(batch)}`),
   reportSeen: (batch: string) => request<void>(`/reports/${encodeURIComponent(batch)}/seen`, { method: "POST" }),
   areas: () => request<AreaSummary[]>("/areas"),
-  area: (area: Area) => request<AreaDetail>(`/areas/${area}`),
+  calendar: () => request<CalendarEntry[]>("/calendar"),
+  essentials: () => request<EssentialPaper[]>("/essentials"),
   household: () => request<Member[]>("/household"),
   sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
   prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),
@@ -737,13 +796,15 @@ export const api = {
   restoreDocument: (id: number) => request<DocDetail>(`/documents/${id}/restore`, { method: "POST" }),
   purgeDocument: (id: number) => request<void>(`/documents/${id}/purge?confirm=true`, { method: "DELETE" }),
   expirations: () => request<Expiration[]>("/expirations"),
-  retention: () => request<Doc[]>("/retention"),
-  trashDeletable: (ids: number[]) => request<{ trashed: number }>("/retention/trash", json("POST", { ids })),
   importSettings: () => request<ImportSettings>("/import/settings"),
   saveImportSettings: (body: ImportSettingsIn) => request<ImportSettings>("/import/settings", json("PUT", body)),
   runImports: () => request<{ folder: ImportRun; mail: ImportRun }>("/import/run", { method: "POST" }),
+  chooseImportFolder: () => request<{ path: string | null }>("/import/folder/choose", { method: "POST" }),
+  changes: () => request<{ revision: number }>("/changes"),
   models: () => request<ModelsOverview>("/llm"),
   chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
+  acceptUpgrade: () => request<ModelsOverview>("/llm/upgrade", { method: "POST" }),
+  declineUpgrade: () => request<ModelsOverview>("/llm/upgrade/decline", { method: "POST" }),
   downloadModel: (name: string) =>
     request<ModelsOverview>(`/llm/models/${encodeURIComponent(name)}/download`, { method: "POST" }),
   cancelDownload: (name: string) =>

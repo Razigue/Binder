@@ -64,7 +64,7 @@ export function useSelection(order: number[]): Selection {
 }
 
 const editable = (el: EventTarget | null) =>
-  el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXIconTAREA|SELECT)$/.test(el.tagName))
+  el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
 
 /** Ctrl+A selects every row, Escape clears, Delete runs `onDelete`; not while typing or in a dialog. */
 export function useSelectionKeys(selection: Selection, onDelete?: () => void) {

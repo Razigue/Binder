@@ -28,6 +28,12 @@ T = i18n.catalog(
 
 KEY = "profile"
 FIELDS = ("name", "address", "city", "email", "phone")
+# "Tell me about yourself", three taps at first launch: the papers to have follow from them.
+CHOICES: dict[str, tuple[str, ...]] = {
+    "situation": ("student", "employee", "self_employed", "job_seeker", "retired"),
+    "housing": ("tenant", "owner", "hosted"),
+    "vehicle": ("yes", "no"),
+}
 # A detail is trusted when it appears on at least this many documents.
 CONFIRMED = 2
 
@@ -41,6 +47,10 @@ class Profile(BaseModel):
     # What the agent must know about the user (situation, household, constraints), in their
     # own words: given to the model with every question.
     notes: str = Field(default="", max_length=2000)
+    # The three answers of the first launch (CHOICES), "" while unanswered.
+    situation: str = ""
+    housing: str = ""
+    vehicle: str = ""
     # Fields Binder filled from the documents (it keeps them up to date until the user edits).
     auto: list[str] = []
 
@@ -96,9 +106,11 @@ def update(session: Session, values: dict[str, str], *, actor: str = "user") -> 
     profile = load(session)
     before = profile.model_copy(deep=True)
     for field, value in values.items():
-        if field not in (*FIELDS, "notes"):
+        if field not in (*FIELDS, "notes", *CHOICES):
             continue
         value = value.strip()
+        if field in CHOICES and value not in ("", *CHOICES[field]):
+            continue
         if field != "notes" and getattr(profile, field) != value and field in profile.auto:
             profile.auto.remove(field)
         setattr(profile, field, value)

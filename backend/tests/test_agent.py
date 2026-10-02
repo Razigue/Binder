@@ -502,6 +502,21 @@ def test_semantic_search_finds_documents_without_shared_words(
     assert library["note-garage.pdf"] not in rows
 
 
+def test_words_found_still_name_documents_close_in_meaning(
+    library: dict[str, int], session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(embeddings, "is_available", lambda: True)
+    monkeypatch.setattr(embeddings, "embed", fake_embed)
+    found = tools.search_documents(session, "quittance")
+    # The results and their sum stay those of the words; the bill is named apart.
+    assert [d["id"] for d in found.payload["results"]] == [library["quittance-loyer.pdf"]]
+    assert found.payload["total"] == 1
+    related = {d["id"] for d in found.payload["related"]}
+    assert library["facture-edf.pdf"] in related and library["quittance-loyer.pdf"] not in related
+    assert len(related) <= tools.RELATED
+    assert {d.id for d in found.related} == related
+
+
 def test_without_embedding_model_search_stays_full_text(
     library: dict[str, int], session: Session
 ) -> None:
@@ -535,7 +550,7 @@ def test_scans_are_shown_to_a_model_with_vision(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def extract(text: str, images: list[bytes] | None = None) -> None:
+    def extract(text: str, images: list[bytes] | None = None, **_: Any) -> None:
         seen["images"] = images
         return None
 
@@ -557,7 +572,7 @@ def test_unreadable_scan_is_transcribed_by_the_model(
 
     monkeypatch.setattr(llm, "is_available", lambda: True)
     monkeypatch.setattr(llm, "has_vision", lambda: True)
-    monkeypatch.setattr(llm, "extract", lambda text, images=None: None)
+    monkeypatch.setattr(llm, "extract", lambda text, images=None, **_: None)
     monkeypatch.setattr(
         llm, "transcribe", lambda images: "Facture Orange\nMontant total à payer 39,99 €"
     )

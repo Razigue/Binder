@@ -16,6 +16,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   destructive = true,
   typeToConfirm,
   onConfirm,
@@ -25,6 +26,8 @@ export function ConfirmDialog({
   title: string
   description: React.ReactNode
   confirmLabel: string
+  /** Instead of "Cancel", when the action itself is a cancellation. */
+  cancelLabel?: string
   destructive?: boolean
   typeToConfirm?: string
   onConfirm: () => Promise<unknown> | void
@@ -59,7 +62,7 @@ export function ConfirmDialog({
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => changeOpen(false)} disabled={busy}>
-            {t("action.cancel")}
+            {cancelLabel ?? t("action.cancel")}
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}

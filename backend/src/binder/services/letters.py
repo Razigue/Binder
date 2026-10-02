@@ -864,7 +864,10 @@ def _compose_llm(
         blank=blank,
     )
     try:
-        message = llm.chat([{"role": "user", "content": prompt}], fmt=COMPOSE_SCHEMA)
+        # A letter is rare and must hold up: a large model reasons before writing it.
+        message = llm.chat(
+            [{"role": "user", "content": prompt}], fmt=COMPOSE_SCHEMA, think=llm.think_hard()
+        )
         composed = _Composed.model_validate(json.loads(message.get("content") or "{}"))
     except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
         log.exception("Letter by the model failed, falling back to a template")

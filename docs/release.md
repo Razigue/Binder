@@ -52,12 +52,18 @@ and Gatekeeper warn at first launch.
 CI (`.github/workflows/ci.yml`) runs on every push and every pull request: lint, type checking,
 tests on Linux, Windows and macOS, evaluation, interface build.
 
-To publish, push a tag: `git tag v1.2.0 && git push origin v1.2.0`. The "Release" workflow reruns
-the whole CI, then on each system downloads the previous installer release (for delta packages),
-builds the application and its installer with the tag's version, and creates the GitHub release:
-installers, update packages and feeds (`releases.<channel>.json`), `SHA256SUMS.txt`, generated
-notes. A tag with a suffix (`v1.3.0-beta.1`) gives a pre-release.
-Run manually, the workflow builds everything (version `0.0.0-dev.<run>`) without publishing.
+Merging a pull request into `main` publishes: the "Tag" workflow (`tag.yml`) tags the merge commit
+with the next version and starts "Release" on that tag. Bump from the PR labels: `major`, `minor`,
+otherwise patch (`v0.4.1` → `v0.4.2`); `no-release` merges without publishing. The version comes
+from the latest stable tag, not from `pyproject.toml`. A tag pushed by hand
+(`git tag v1.3.0-beta.1 && git push origin v1.3.0-beta.1`) still publishes.
+
+The "Release" workflow reruns the whole CI, then on each system downloads the previous installer
+release (for delta packages), builds the application and its installer with the tag's version, and
+creates the GitHub release: installers, update packages and feeds (`releases.<channel>.json`),
+`SHA256SUMS.txt`, generated notes. A tag with a suffix (`v1.3.0-beta.1`) gives a pre-release.
+Run manually on a branch, the workflow builds everything (version `0.0.0-dev.<run>`) without
+publishing.
 
 ## Automatic update
 

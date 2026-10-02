@@ -83,6 +83,63 @@ def test_folder_must_exist_to_be_enabled(client: TestClient, tmp_path: Path) -> 
     assert r.status_code == 400
 
 
+def wait_for(check: Any, timeout: float = 15.0) -> Any:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if value := check():
+            return value
+        time.sleep(0.1)
+    raise AssertionError("timed out")
+
+
+def test_chosen_folder_is_imported_then_watched_live(
+    client: TestClient, samples: list[Sample], tmp_path: Path
+) -> None:
+    inbox = tmp_path / "scans"
+    drop(inbox, "taxe.pdf", by_name(samples, "avis-imposition.pdf").pdf())
+    watcher = importers.FolderWatcher(lambda: Session(get_engine()))
+    watcher.start()
+    try:
+        time.sleep(0.3)  # watcher idle, no folder yet
+        r = client.put(
+            "/api/import/settings", json={"folder": {"enabled": True, "path": str(inbox)}}
+        )
+        assert r.status_code == 200
+        # Choosing the folder imports what it already holds, without "Check now".
+        wait_for(lambda: len(client.get("/api/documents").json()) == 1)
+        before = client.get("/api/changes").json()["revision"]
+
+        (inbox / "orange.pdf").write_bytes(by_name(samples, "facture-orange.pdf").pdf())
+
+        def analysed() -> list[dict[str, Any]] | None:
+            docs = client.get("/api/documents").json()
+            done = len(docs) == 2 and all(d["status"] != "processing" for d in docs)
+            return docs if done else None
+
+        docs = wait_for(analysed)
+        assert {d["category"] for d in docs} == {"taxes", "telecom"}
+        assert client.get("/api/changes").json()["revision"] > before
+    finally:
+        watcher.stop()
+
+
+def test_changes_ignore_the_users_own_actions(client: TestClient, tmp_path: Path) -> None:
+    before = client.get("/api/changes").json()["revision"]
+    client.put("/api/import/settings", json={"folder": {"enabled": True, "path": str(tmp_path)}})
+    assert client.get("/api/changes").json()["revision"] == before
+
+
+def test_folder_dialog(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(importers, "choose_folder", lambda initial: "C:/Scans")
+    assert client.post("/api/import/folder/choose").json() == {"path": "C:/Scans"}
+
+    def unavailable(initial: str) -> str | None:
+        raise importers.NoFolderPicker
+
+    monkeypatch.setattr(importers, "choose_folder", unavailable)
+    assert client.post("/api/import/folder/choose").status_code == 501
+
+
 def mail_with(pdf: bytes, *, logo: bytes = b"\x89PNG small") -> bytes:
     msg = EmailMessage()
     msg["From"] = "EDF <facture@edf.fr>"

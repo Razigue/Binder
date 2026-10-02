@@ -5,11 +5,11 @@ from collections.abc import Iterator
 from typing import Any
 
 import sqlcipher3
-from sqlalchemy import Column, Engine, MetaData, text
+from sqlalchemy import Column, ColumnElement, Engine, MetaData, and_, text
 from sqlalchemy.orm import defer
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.schema import CreateTable
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from binder import i18n, security
 from binder.config import get_settings
@@ -20,6 +20,11 @@ _engine_lock = threading.Lock()
 
 # Large columns that lists never read: loaded only when accessed.
 WITHOUT_TEXT = (defer(Document.text), defer(Document.explanation))  # type: ignore[arg-type]
+
+
+def in_use() -> ColumnElement[bool]:
+    """Documents of the active views: neither in the trash nor in the archives."""
+    return and_(col(Document.deleted_at).is_(None), col(Document.archived_at).is_(None))
 
 
 def _connect() -> Any:

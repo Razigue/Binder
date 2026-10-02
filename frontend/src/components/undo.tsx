@@ -14,7 +14,7 @@ export function UndoToasts() {
       const message =
         body && typeof body === "object" && "message" in body && typeof body.message === "string" ? body.message : t("done")
       toast.success(message, {
-        duration: 8000,
+        duration: 15000,
         action: {
           label: t("undo"),
           onClick: () =>

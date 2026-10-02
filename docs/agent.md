@@ -1,8 +1,8 @@
 # Agent
 
-The agent answers and acts on the user's paperwork with a local model (Ollama, Qwen 3.5) and
-tools; a fallback intent router keeps demos and tests running without a model. Code: `agent/loop.py`
-(harness and router), `agent/tools.py` (tools).
+The agent answers and acts on the user's paperwork with a local model (Ollama, Qwen 3.5 or 3.6:
+see `models.md`) and tools; a fallback intent router keeps demos and tests running without a
+model. Code: `agent/loop.py` (harness and router), `agent/tools.py` (tools).
 
 ## Harness
 
@@ -11,8 +11,18 @@ Each request is a loop of at most `MAX_STEPS` model turns (`_run_llm`):
 - **Context.** The system prompt gives today's date, the user's country, currency and language,
   and an overview of the library (documents per category, deadlines in the next 30 days, overdue
   ones, documents to review), so the model knows what exists before its first call. Ollama is
-  asked for a `BINDER_LLM_CONTEXT` window (16k): its own default (4096 tokens) silently drops the
-  start of the conversation, system prompt included.
+  asked for the model's context window (`llm.context_window()`: 16k, 32k for the large models,
+  or `BINDER_LLM_CONTEXT`): its own default (4096 tokens) silently drops the start of the
+  conversation, system prompt included.
+- **Tools.** A small model gets at most `tools.MAX_TOOLS` (10) per request: search, read and
+  list always, web search when on, the tools the request calls for (the router's patterns),
+  then the most useful others. A large model (`Profile.all_tools`) gets every tool, those the
+  request calls for first, so a request the patterns miss still finds its tool.
+- **Sampling.** Greedy with a fixed seed (`llm.EXACT`). Qwen's recommended non-reasoning
+  sampling (temperature 0.7, top_p 0.8, presence_penalty 1.5) was measured worse on the
+  evaluation below: 28 and 27 of 36 scenarios against 31 with `qwen3.5:9b` (2 October 2026,
+  web search off), the model more often asking `app_help` instead of using the right tool.
+  Reasoning uses Qwen's reasoning sampling (`llm.THINKING`): greedy, it loops in its thoughts.
 - **History.** The last turns are sent with the ids and titles of the documents each answer
   showed, so "and when is it debited?" refers to a known id; those documents stay citable.
 - **Guards.**
@@ -52,9 +62,10 @@ Each request is a loop of at most `MAX_STEPS` model turns (`_run_llm`):
 | `list_subscriptions` | recurring bills, yearly cost, price increases |
 | `prepare_folder` | file for any purpose: the rental / mortgage / CAF packs, or pieces picked by the model |
 | `list_alerts` | anomalies (billed twice, catch-up bill, overpayment, price rise, lower pay) and missing documents |
-| `documents_to_review`, `documents_to_sort_out` | documents Binder has a question about, documents that can go |
+| `documents_to_review`, `documents_to_archive` | documents Binder has a question about, old documents that can go to the archives |
 | `create_reminder`, `mark_deadline_paid` | deadlines |
 | `update_document`, `validate_document`, `trash_document` | changes asked by the user |
+| `archive_documents`, `unarchive_documents` | move old documents to the archives (nothing deleted) or bring them back |
 | `write_letter` | complete letter for any purpose, saved with its PDF and follow-up; `kind` (payment plan, appeal, formal notice, change of address…) adds the legal points of that letter |
 | `start_journey` | checklist of a life event (moving, birth, death, tax return) built from the documents |
 | `list_journeys`, `mark_journey_step` | journeys under way and their steps; tick a step the user did |
@@ -117,7 +128,10 @@ key. Only the query leaves the machine, and it never carries anything personal:
 
 `search_documents` first requires every word (FTS5, the most precise). When no document has them
 all, documents close in meaning (`services/embeddings.py`) are merged with those having some of
-the words, by reciprocal rank fusion. Vectors come from a small multilingual model
+the words, by reciprocal rank fusion. When the words match, up to `RELATED` (3) other documents
+close in meaning are named apart under `related` ("justificatif de domicile" finds a certificate
+by its words, and names the electricity bill): outside the results and their sum, citable, shown
+only if cited. Vectors come from a small multilingual model
 (`BINDER_EMBED_MODEL`, Qwen3 Embedding 0.6B, offered in Settings), computed at import, after a
 correction, and for existing documents on first search; they live in the encrypted database
 (`Embedding` table). A document counts as related above a cosine similarity of 0.42 and within
@@ -148,7 +162,7 @@ Results on 1 October 2026 (RTX 4080 SUPER, `qwen3.5:9b`):
 | Model, current harness (two consecutive runs) | 34/34, 34/34 | 10.3 s |
 | Model, current harness, `BINDER_LLM_THINK=true` | 31/34 | 12.6 s |
 
-The model is not fully deterministic even at temperature 0: earlier runs of nearly the same
+The model is not fully deterministic even with a fixed seed: earlier runs of nearly the same
 harness scored 32 to 34. Most early failures were not wrong facts but uncited ones, answers
 given without looking, and actions announced but not done: the guards above address them.
 

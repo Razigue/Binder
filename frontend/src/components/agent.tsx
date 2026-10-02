@@ -280,6 +280,15 @@ function AgentConversation({
     if (el && pinned.current) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [turns, pending])
 
+  const lastTurn = turns.at(-1)
+  const announcement = pending
+    ? t("thinking")
+    : lastTurn?.stopped
+      ? t("stopped")
+      : lastTurn?.response && !lastTurn.error
+        ? plainText(lastTurn.response.answer)
+        : ""
+
   const groups = (Object.keys(SUGGESTIONS) as (keyof typeof SUGGESTIONS)[]).filter(
     (group) => group !== "viewing" || viewing,
   )
@@ -370,7 +379,7 @@ function AgentConversation({
               )}
               <div className="group/answer">
                 {turn.error ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                     <span className="flex-1">{turn.error}</span>
                     {!pending && (
                       <Button variant="outline" size="xs" onClick={() => onAsk(turn.question, turn.attachments, i)}>
@@ -410,6 +419,10 @@ function AgentConversation({
           )
         })}
       </div>
+      {/* Screen readers hear the finished answer, not every streamed word. */}
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
 
       <Composer
         ref={composer}
@@ -520,6 +533,7 @@ function EditMessage({
         }}
         rows={1}
         autoComplete="off"
+        aria-label={t("edit")}
         className="field-sizing-content max-h-60 min-h-10 w-full resize-none bg-transparent px-1.5 py-1 text-sm outline-none"
       />
       <div className="flex justify-end gap-1.5">
@@ -706,7 +720,7 @@ function Composer({
                 onClick={onIgnoreViewing}
                 aria-label={t("ignoreViewing")}
                 title={t("ignoreViewing")}
-                className="flex size-5 shrink-0 items-center justify-center rounded-full hover:bg-muted hover:text-foreground"
+                className="relative flex size-5 shrink-0 items-center justify-center rounded-full after:absolute after:-inset-0.5 hover:bg-muted hover:text-foreground"
               >
                 <XIcon className="size-3" />
               </button>
@@ -741,7 +755,7 @@ function Composer({
                 <button
                   onClick={() => remove(d)}
                   aria-label={t("remove", { name: d.file.name })}
-                  className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full text-muted-foreground after:absolute after:-inset-1 hover:bg-muted hover:text-foreground"
                 >
                   <XIcon className="size-3" />
                 </button>
@@ -791,7 +805,7 @@ function Composer({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <span className="flex-1 truncate px-1 text-[11px] text-muted-foreground max-sm:hidden">
+          <span className="flex-1 truncate px-1 text-[0.6875rem] text-muted-foreground max-sm:hidden">
             {t("keyboardHint")}
           </span>
           {pending ? (
@@ -1025,7 +1039,7 @@ function StepDuration({ step }: { step: ToolCall }) {
       ? t("stats.ms", { value: formatNumber(ms) })
       : t("stats.seconds", { value: formatNumber(ms / 1000, { maximumFractionDigits: 1 }) })
   return (
-    <span className="shrink-0 tabular-nums opacity-70">
+    <span className="shrink-0 tabular-nums">
       {step.error ? `${t("toolFailed")} · ${value}` : value}
     </span>
   )
@@ -1044,7 +1058,7 @@ function seconds(value: number, t: Translate<(typeof messages)["en"]>) {
 function StatsLine({ stats }: { stats: ChatStats }) {
   const t = useT(messages)
   const parts = [stats.model, speed(stats, t), seconds(stats.seconds, t)].filter(Boolean)
-  return <p className="text-[11px] text-muted-foreground tabular-nums">{parts.join(" · ")}</p>
+  return <p className="text-[0.6875rem] text-muted-foreground tabular-nums">{parts.join(" · ")}</p>
 }
 
 /** Steps and model stats of a finished answer, folded under a single line. */
@@ -1079,7 +1093,7 @@ function Steps({ steps, stats }: { steps: ToolCall[]; stats?: ChatStats | null }
                     <span className="min-w-0 flex-1 truncate">{label(step)}</span>
                     <StepDuration step={step} />
                   </span>
-                  <code className="mt-0.5 block pl-5 font-mono text-[11px] break-all opacity-70">
+                  <code className="mt-0.5 block pl-5 font-mono text-[0.6875rem] break-all">
                     {step.name}({toolArguments(step.arguments)})
                   </code>
                 </li>
@@ -1157,7 +1171,8 @@ function RichText({ text, docs, onNavigate }: { text: string; docs: Doc[]; onNav
               to={`/documents/${id}`}
               onClick={onNavigate}
               title={doc ? t("sourceOf", { title: doc.title }) : t("source")}
-              className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 align-super text-[10px] font-semibold text-primary select-none hover:bg-primary/20"
+              aria-label={doc ? t("sourceOf", { title: doc.title }) : t("source")}
+              className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 align-super text-[0.625rem] font-semibold text-primary select-none hover:bg-primary/20 dark:text-foreground"
             >
               {order.indexOf(id) + 1}
             </Link>
@@ -1222,6 +1237,13 @@ function Confirmation({ action }: { action: PendingAction }) {
 function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavigate: () => void }) {
   const t = useT(messages)
   const [expanded, setExpanded] = useState(response.documents.length <= 3)
+  // Opening the list replaces its button: focus moves to the first document instead of being lost.
+  const docList = useRef<HTMLUListElement>(null)
+  const opened = useRef(expanded)
+  useEffect(() => {
+    if (expanded && !opened.current) docList.current?.querySelector("a")?.focus()
+    opened.current = expanded
+  }, [expanded])
   const docs = response.documents
   return (
     <div className="space-y-3">
@@ -1255,7 +1277,11 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
       {docs.length > 0 && (
         <div className="overflow-hidden rounded-lg border">
           {!expanded ? (
-            <button onClick={() => setExpanded(true)} className="flex w-full items-center gap-3 px-3 py-2.5 text-sm hover:bg-accent">
+            <button
+              onClick={() => setExpanded(true)}
+              aria-expanded={false}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-sm hover:bg-accent"
+            >
               <span className="flex size-7 items-center justify-center rounded-md bg-accent text-primary">
                 <FileTextIcon className="size-3.5" />
               </span>
@@ -1263,7 +1289,7 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
               <CaretRightIcon className="size-4 text-muted-foreground" />
             </button>
           ) : (
-            <ul className="divide-y">
+            <ul ref={docList} className="divide-y">
               {docs.map((d) => (
                 <li key={d.id}>
                   <Link to={`/documents/${d.id}`} onClick={onNavigate} className="flex items-center gap-3 px-3 py-2 hover:bg-accent">
@@ -1299,7 +1325,7 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
         </ul>
       )}
       {response.engine === "rules" && (
-        <p className="text-[11px] text-muted-foreground">{t("rulesEngine")}</p>
+        <p className="text-[0.6875rem] text-muted-foreground">{t("rulesEngine")}</p>
       )}
     </div>
   )

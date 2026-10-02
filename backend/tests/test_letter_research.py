@@ -162,3 +162,55 @@ def test_addresses_must_be_in_a_source() -> None:
     assert research.backed("TSA 30103\n69947 Lyon Cedex 20", [PAGE])
     assert not research.backed("75999 Paris", [PAGE])
     assert not research.backed("Service clients", [PAGE])
+
+
+class FreeWeb(Web):
+    """The organisation's own pages give a phone number only; a guide gives the address deep in
+    a long page, far from the passage about the request."""
+
+    OWN = ("https://assistance.free.fr/articles/287", "https://www.free.fr/resiliation")
+    GUIDE = "https://www.guide-conso.example/free/resiliation"
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "html.duckduckgo.com":
+            self.queries.append(parse_qs(request.content.decode())["q"][0])
+            items = "".join(
+                f'<div><a class="result__a" href="//duckduckgo.com/l/?uddg={quote(u)}">Free</a>'
+                f'<a class="result__snippet">Résiliation Freebox.</a></div>'
+                for u in [self.GUIDE, *self.OWN]
+            )
+            return httpx.Response(200, html=f"<html><body>{items}</body></html>")
+        url = str(request.url)
+        self.pages.append(url)
+        if url in self.OWN:
+            body = "<p>Résiliation Freebox : appelez le 3244 ou votre Espace Abonné.</p>"
+        else:
+            filler = "".join(f"<p>Conseil {i} sur les offres et les prix.</p>" for i in range(200))
+            body = (
+                "<p>Résilier sa Freebox : délai de résiliation de 10 jours.</p>"
+                f"{filler}<p>Publidispatch, Free Résiliation, BP 40090, 91003 Évry Cedex</p>"
+            )
+        return httpx.Response(200, html=f"<html><body>{body}</body></html>")
+
+
+def test_an_address_far_into_a_page_reaches_the_model(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BINDER_WEB_SEARCH", "true")
+    get_settings.cache_clear()
+    web = FreeWeb()
+    websearch.transport = httpx.MockTransport(web.handle)
+    plan = {"organisation": "Free", "queries": ["adresse résiliation Freebox"]}
+    found = "Publidispatch - Free Résiliation\nBP 40090\n91003 Évry Cedex"
+    model = use(monkeypatch, Model(plan, letter(recipient_address=found, sources=[3])))
+    written = letters.compose(session, "Résiliation box Free", kind="termination")
+    # Free's own pages are read first, then the guide for the address they lack.
+    assert web.pages[-1] == FreeWeb.GUIDE
+    assert "BP 40090, 91003 Évry Cedex" in model.writing()
+    assert written.recipient_address == found
+
+
+def test_addresses_are_the_passages_around_postcodes() -> None:
+    body = "Siège : 16 rue de la Ville l'Evêque\n75008 PARIS\nAppelez le 3244, prix 2024 €."
+    assert research.addresses(body, "Free siège") == [body.split("\nAppelez")[0]]
+    assert research.addresses("Appelez le 3244 en 2024.", "Free") == []

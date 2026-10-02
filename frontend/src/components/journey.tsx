@@ -29,11 +29,12 @@ function daysFromToday(iso: string): number {
 /** The checklist of a journey in a dialog, opened from anywhere (feed, Prepare, agent). */
 export function JourneyDialog({ id, onClose }: { id: number | null; onClose: () => void }) {
   const { data } = useJourney(id)
+  const t = useT(messages)
   return (
     <Dialog open={id !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="text-lg">{data?.title ?? ""}</DialogTitle>
+          <DialogTitle className="text-lg">{data?.title ?? t("group")}</DialogTitle>
           <DialogDescription>{data?.description ?? ""}</DialogDescription>
         </DialogHeader>
         {id !== null && <JourneyView id={id} onNavigate={onClose} />}
@@ -74,7 +75,10 @@ function JourneyView({ id, onNavigate }: { id: number; onNavigate: () => void })
     <div className="space-y-4">
       <EventDate journey={data} pending={edit.isPending} onSave={(event_date) => edit.mutate({ event_date })} />
       <div className="space-y-1.5">
-        <Progress value={data.total ? (data.done / data.total) * 100 : 0} />
+        <Progress
+          value={data.total ? (data.done / data.total) * 100 : 0}
+          aria-label={t("progress", { done: data.done, total: data.total })}
+        />
         <p className="text-xs text-muted-foreground">
           {data.done === data.total ? t("allDone") : t("progress", { done: data.done, total: data.total })}
         </p>
@@ -190,9 +194,11 @@ function StepRow({
       <button
         onClick={onToggle}
         disabled={pending || step.auto}
-        aria-label={step.done ? t("markUndone") : t("markDone")}
+        role="checkbox"
+        aria-checked={step.done}
+        aria-label={step.title}
         title={step.done ? t("markUndone") : t("markDone")}
-        className="mt-0.5 h-fit shrink-0 rounded-full text-muted-foreground transition-colors hover:text-primary disabled:cursor-default"
+        className="-mx-0.5 -mb-0.5 h-fit shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-primary disabled:cursor-default"
       >
         {step.done ? <CheckCircleIcon className="size-5 text-primary" /> : <CircleIcon className="size-5" />}
       </button>

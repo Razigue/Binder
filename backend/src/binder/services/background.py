@@ -51,14 +51,23 @@ class Scheduler:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="binder-background", daemon=True)
         self._last: dict[str, float] = {}
+        self._watcher = (
+            importers.FolderWatcher(lambda: Session(get_engine()))
+            if get_settings().auto_import
+            else None
+        )
         # Language of the user at start (the thread renders notifications and briefings).
         self._language = i18n.current_language()
 
     def start(self) -> None:
         self._thread.start()
+        if self._watcher:
+            self._watcher.start()
 
     def stop(self) -> None:
         self._stop.set()
+        if self._watcher:
+            self._watcher.stop()
         self._thread.join(timeout=5)
 
     def _due(self, name: str, every: float) -> bool:

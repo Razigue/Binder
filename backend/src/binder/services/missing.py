@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import DocType, Document
 from binder.services import areas, subscriptions
 from binder.services.areas import Area
@@ -268,7 +268,7 @@ def detect(session: Session, today: date | None = None) -> list[MissingDoc]:
         session.exec(
             select(Document)
             .options(*WITHOUT_TEXT)
-            .where(col(Document.deleted_at).is_(None), col(Document.duplicate_of).is_(None))
+            .where(in_use(), col(Document.duplicate_of).is_(None))
         )
     )
     return (

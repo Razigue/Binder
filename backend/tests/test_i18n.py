@@ -142,6 +142,8 @@ def test_preferences_api(client: TestClient) -> None:
     assert prefs["effective_country"] == "FR"
     assert prefs["currency"] == "EUR"
     assert client.get("/api/preferences").json()["theme"] == "dark"
+    # Saved without a text size: the default one.
+    assert prefs["text_size"] == "normal"
     assert i18n.current_language() == "fr"
 
     # HTTP errors follow the chosen language.
@@ -211,3 +213,11 @@ def test_migrates_legacy_identifiers() -> None:
 
     # Idempotent: nothing left to migrate.
     assert db.migrate_identifiers(engine) is False
+
+
+def test_text_size_preference(client: TestClient) -> None:
+    prefs = {"language": "auto", "country": None, "theme": "system"}
+    r = client.put("/api/preferences", json={**prefs, "text_size": "larger"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/preferences").json()["text_size"] == "larger"
+    assert client.put("/api/preferences", json={**prefs, "text_size": "huge"}).status_code == 422

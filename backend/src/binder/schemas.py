@@ -80,10 +80,13 @@ class DocumentOut(BaseModel):
     source_letter_id: int | None = None
     # Standard name used for downloads and exports ("2026-09-18 EDF invoice.pdf").
     standard_name: str = ""
-    # Retention: applicable rule, date until which to keep it, reason to sort it out.
+    # Retention: applicable rule, date until which to keep it, reason to archive it.
     retention_rule: str | None = None
     keep_until: date | None = None
-    deletable_reason: str | None = None
+    archivable_reason: str | None = None
+    # Archives (services/archive.py): when and why ("retention", "replaced", "user").
+    archived_at: datetime | None = None
+    archive_reason: str | None = None
     # Date from which an expiring document should be renewed.
     renew_from: date | None = None
     person: str | None = None
@@ -104,7 +107,7 @@ class DocumentOut(BaseModel):
             standard_name=organize.standard_name(doc),
             retention_rule=rule.label if rule else None,
             keep_until=retention.keep_until(doc),
-            deletable_reason=retention.deletion_reason(doc),
+            archivable_reason=retention.archivable_reason(doc),
             renew_from=deadlines.renew_from(doc),
         )
 
@@ -141,10 +144,6 @@ class ExpirationOut(BaseModel):
     days_left: int
     # "expired", "renew" (within the renewal period) or "valid".
     state: str
-
-
-class TrashRequest(BaseModel):
-    ids: list[int]
 
 
 class DocumentIds(BaseModel):
@@ -205,6 +204,7 @@ class Stats(BaseModel):
     classified_this_week: int
     total_documents: int
     trashed: int = 0
+    archived: int = 0
     by_category: dict[str, int]
 
 
@@ -362,6 +362,18 @@ class ModelOut(BaseModel):
     download: ModelDownload | None = None
 
 
+class ModelUpgrade(BaseModel):
+    """A better model for this machine, offered because Binder chose the active one."""
+
+    name: str
+    label: str
+    # Download size, in bytes.
+    size: int
+    # The user said yes: Binder switches to it once downloaded.
+    accepted: bool = False
+    download: ModelDownload | None = None
+
+
 class ModelsOverview(BaseModel):
     # False if BINDER_LLM_ENABLED=false.
     enabled: bool
@@ -370,6 +382,13 @@ class ModelsOverview(BaseModel):
     ollama_url: str
     active: str
     active_installed: bool
+    active_label: str = ""
+    # Best model for this machine, measured at this launch.
+    recommended: str = ""
+    recommended_label: str = ""
+    # The active model was picked by Binder (upgrades offered), not by the user.
+    automatic: bool = True
+    upgrade: ModelUpgrade | None = None
     models: list[ModelOut]
 
 
@@ -472,6 +491,7 @@ class PreferencesOut(BaseModel):
     language: str
     country: str | None
     theme: str
+    text_size: str
     effective_language: str
     effective_country: str | None
     currency: str

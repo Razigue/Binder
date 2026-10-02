@@ -9,12 +9,12 @@ import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const ACTORS: Record<Actor, { icon: typeof UserIcon; tone: string }> = {
-  user: { icon: UserIcon, tone: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300" },
+  user: { icon: UserIcon, tone: "bg-slate-100 text-slate-600 dark:bg-slate-400/12 dark:text-slate-300" },
   binder: { icon: VaultIcon, tone: "bg-primary/10 text-primary" },
   agent: { icon: RobotIcon, tone: "bg-primary/10 text-primary" },
-  watcher: { icon: TrayArrowDownIcon, tone: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
-  mail: { icon: EnvelopeIcon, tone: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
-  demo: { icon: FlaskIcon, tone: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-300" },
+  watcher: { icon: TrayArrowDownIcon, tone: "bg-sky-50 text-sky-600 dark:bg-sky-400/12 dark:text-sky-300" },
+  mail: { icon: EnvelopeIcon, tone: "bg-sky-50 text-sky-600 dark:bg-sky-400/12 dark:text-sky-300" },
+  demo: { icon: FlaskIcon, tone: "bg-slate-100 text-slate-500 dark:bg-slate-400/12 dark:text-slate-300" },
 }
 
 function dayLabel(iso: string, t: Translate<(typeof activity)["en"]>): string {

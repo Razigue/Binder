@@ -20,12 +20,13 @@ from sqlalchemy import func, text
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, Deadline, DocType, Document, DocumentStatus, UndoEntry
 from binder.schemas import Letter
 from binder.services import (
     activity,
     anomalies,
+    archive,
     deadlines,
     editing,
     embeddings,
@@ -101,6 +102,8 @@ class ToolResult:
     # JPEG pages shown to the model with the result (vision).
     images: list[bytes] = field(default_factory=list)
     letters: list[Letter] = field(default_factory=list)
+    # Documents mentioned without being results (close in meaning): citable, shown if cited.
+    related: list[Document] = field(default_factory=list)
     packs: list[folders.FolderStatus] = field(default_factory=list)
     journeys: list[JourneyOut] = field(default_factory=list)
     # Something was written (document, deadline…): the interface refreshes its data.
@@ -130,6 +133,8 @@ def doc_summary(d: Document) -> dict[str, Any]:
         and d.period_end
         and f"{d.period_start.isoformat()}/{d.period_end.isoformat()}",
         "reference": d.reference,
+        # Old document kept in the archives (out of the to-do list, alerts and files).
+        "archived": True if d.archived_at is not None else None,
     }
 
 
@@ -271,20 +276,29 @@ def search_documents(
     until: str | None = None,
     doc_type: str | None = None,
     limit: int = 10,
+    archived: bool = False,
 ) -> ToolResult:
     """Full-text search (all words, otherwise at least one), filterable by category, type and
-    issue date. The total amount of every match helps answer "how much did I pay for…"."""
+    issue date. The total amount of every match helps answer "how much did I pay for…".
+    `archived`: in the archives (old documents) instead of the active ones."""
     terms = keywords(query)
-    stmt = select(Document).where(col(Document.deleted_at).is_(None))
+    stmt = select(Document).where(
+        col(Document.deleted_at).is_(None),
+        col(Document.archived_at).is_not(None) if archived else col(Document.archived_at).is_(None),
+    )
     ranking: list[int] | None = None
+    related: list[int] = []
     if terms:
         ids = _fts(session, terms, "AND", 200)
-        if not ids:
+        close = [doc_id for doc_id, _ in embeddings.search(session, query)]
+        if ids:
+            matched = set(ids)
+            related = [doc_id for doc_id in close if doc_id not in matched]
+        else:
             # No document has every word: documents close in meaning ("proof of address" →
             # EDF bill, rent receipt), merged with those that have some of the words.
-            related = [doc_id for doc_id, _ in embeddings.search(session, query)]
             some_words = _fts(session, terms, "OR", 200)
-            ids = ranking = _fuse(related, some_words) if related else some_words
+            ids = ranking = _fuse(close, some_words) if close else some_words
         if not ids:
             return ToolResult(payload={"results": [], "total": 0, "hint": NO_MATCH_HINT})
         stmt = stmt.where(col(Document.id).in_(ids))
@@ -318,7 +332,41 @@ def search_documents(
         payload["sum_amount"] = _sum_amount(session, stmt)
     else:
         payload["hint"] = NO_MATCH_HINT
-    return ToolResult(payload=payload, documents=shown)
+    # The words matched, but other documents mean the same ("justificatif de domicile" also
+    # finds the electricity bill): named apart, outside the results and their sum.
+    nearby = _close_in_meaning(session, related, archived)
+    if nearby:
+        payload["related"] = [_brief(d) for d in nearby]
+    return ToolResult(payload=payload, documents=shown, related=nearby)
+
+
+# Documents close in meaning listed next to the results of a search, at most.
+RELATED = 3
+
+
+def _close_in_meaning(session: Session, ranked: list[int], archived: bool) -> list[Document]:
+    """The best `ranked` documents still in view (not in the trash; archived or not, as the
+    search)."""
+    wanted = ranked[: RELATED * 2]
+    if not wanted:
+        return []
+    docs = session.exec(
+        select(Document)
+        .options(*WITHOUT_TEXT)
+        .where(
+            col(Document.id).in_(wanted),
+            col(Document.deleted_at).is_(None),
+            col(Document.archived_at).is_not(None)
+            if archived
+            else col(Document.archived_at).is_(None),
+        )
+    ).all()
+    by_id = {d.id: d for d in docs}
+    return [by_id[i] for i in wanted if i in by_id][:RELATED]
+
+
+def _brief(d: Document) -> dict[str, Any]:
+    return {"id": d.id, "title": d.title, "category": d.category, "issuer": d.issuer}
 
 
 NO_MATCH_HINT = (
@@ -601,7 +649,7 @@ def documents_to_review(session: Session) -> ToolResult:
             select(Document)
             .options(*WITHOUT_TEXT)
             .where(Document.status == DocumentStatus.TO_REVIEW)
-            .where(col(Document.deleted_at).is_(None))
+            .where(in_use())
             .order_by(col(Document.created_at).desc())
         )
     )
@@ -696,7 +744,7 @@ def list_expirations(session: Session) -> ToolResult:
         session.exec(
             select(Document)
             .options(*WITHOUT_TEXT)
-            .where(col(Document.deleted_at).is_(None), col(Document.expiry_date).is_not(None))
+            .where(in_use(), col(Document.expiry_date).is_not(None))
             .where(col(Document.superseded_by).is_(None), col(Document.duplicate_of).is_(None))
             .order_by(col(Document.expiry_date))
         )
@@ -724,20 +772,44 @@ def list_expirations(session: Session) -> ToolResult:
     )
 
 
-def documents_to_sort_out(session: Session) -> ToolResult:
-    """Documents that can be thrown away: retention period over, or replaced by a newer one."""
-    docs = list(
-        session.exec(
-            select(Document)
-            .options(*WITHOUT_TEXT)
-            .where(col(Document.deleted_at).is_(None))
-            .order_by(col(Document.issue_date))
-        )
-    )
-    found = [(d, reason) for d in docs if (reason := retention.deletion_reason(d))]
+def documents_to_archive(session: Session) -> ToolResult:
+    """Old documents that can go to the archives: retention period over, or replaced by a newer
+    version. Nothing is deleted."""
+    found = [(d, retention.archivable_reason(d)) for d, _ in archive.suggestions(session)]
     return ToolResult(
-        payload={"can_be_thrown_away": [{**doc_summary(d), "why": r} for d, r in found]},
+        payload={"can_be_archived": [{**doc_summary(d), "why": r} for d, r in found]},
         documents=[d for d, _ in found],
+    )
+
+
+def archive_documents(session: Session, document_ids: list[int]) -> ToolResult:
+    """Moves documents to the archives: out of the to-do list, alerts and files, still
+    readable, searchable and restorable."""
+    done, unknown = [], []
+    for document_id in document_ids[:200]:
+        doc = _document(session, document_id)
+        if doc is None:
+            unknown.append(document_id)
+        elif archive.archive(session, doc, actor="agent"):
+            done.append(doc)
+    session.flush()
+    payload: dict[str, Any] = {"archived": [{"id": d.id, "title": d.title} for d in done]}
+    if unknown:
+        payload["not_found"] = unknown
+    return ToolResult(payload=payload, changed=bool(done))
+
+
+def unarchive_documents(session: Session, document_ids: list[int]) -> ToolResult:
+    """Brings documents back from the archives into the active views."""
+    done = []
+    for document_id in document_ids[:200]:
+        doc = _document(session, document_id)
+        if doc is not None and archive.unarchive(session, doc, actor="agent"):
+            done.append(doc)
+    session.flush()
+    return ToolResult(
+        payload={"restored": [{"id": d.id, "title": d.title} for d in done]},
+        changed=bool(done),
     )
 
 
@@ -772,6 +844,7 @@ def _profile_payload(p: profile.Profile) -> dict[str, Any]:
     fields = {f: getattr(p, f) for f in profile.FIELDS}
     return {
         **{k: v for k, v in fields.items() if v},
+        **{k: v for k in profile.CHOICES if (v := getattr(p, k))},
         "about": p.notes.strip() or None,
         "unknown": [k for k, v in fields.items() if not v] or None,
     }
@@ -797,6 +870,14 @@ def write_letter(
         "registered_mail_advised": letter.registered,
         "shown_to_user": True,
     }
+    if letter.recipient_address:
+        payload["recipient_address"] = letter.recipient_address
+    elif websearch.enabled():
+        # Looked up by the agent rather than left to the user.
+        payload["recipient_address_missing"] = (
+            "find the postal address this organisation gives for this request with "
+            "web_search and read_web_page, and give it with its site"
+        )
     if letter.blanks:
         payload["note"] = f"{letter.blanks} detail(s) left in [brackets] for the user to fill in."
     if letter.sources:
@@ -1047,7 +1128,7 @@ def calculate(session: Session, expression: str) -> ToolResult:
 def overview(session: Session) -> dict[str, Any]:
     """What Binder holds, in a few figures: given to the model before the first question."""
     today = date.today()
-    active = col(Document.deleted_at).is_(None)
+    active = in_use()
     by_category = dict(
         session.exec(
             select(Document.category, func.count()).where(active).group_by(Document.category)
@@ -1089,7 +1170,7 @@ LIST_KINDS = {
     "subscriptions": "list_subscriptions",
     "alerts": "list_alerts",
     "to_review": "documents_to_review",
-    "to_sort_out": "documents_to_sort_out",
+    "to_archive": "documents_to_archive",
     "journeys": "list_journeys",
 }
 
@@ -1120,7 +1201,9 @@ TOOLS: dict[str, Any] = {
     "prepare_folder": prepare_folder,
     "list_alerts": list_alerts,
     "documents_to_review": documents_to_review,
-    "documents_to_sort_out": documents_to_sort_out,
+    "documents_to_archive": documents_to_archive,
+    "archive_documents": archive_documents,
+    "unarchive_documents": unarchive_documents,
     "create_reminder": create_reminder,
     "mark_deadline_paid": mark_deadline_paid,
     "update_document": update_document,
@@ -1145,6 +1228,8 @@ WRITE_TOOLS = {
     "update_document",
     "validate_document",
     "trash_document",
+    "archive_documents",
+    "unarchive_documents",
     "write_letter",
     "start_journey",
     "mark_journey_step",
@@ -1225,6 +1310,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "since": _DATE,
             "until": _DATE,
             "limit": {"type": "integer"},
+            "archived": {"type": "boolean", "description": "search the archives (old papers)"},
         },
     ),
     _tool(
@@ -1253,8 +1339,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "days with overdue ones, or between start and end, with their total); expirations "
         "(documents with an end of validity and their state); subscriptions (recurring bills, "
         "yearly cost, price rises); alerts (billed twice, overpayment, price rise, lower pay, "
-        "missing documents); to_review (uncertain readings); to_sort_out (can be thrown "
-        "away); journeys (life events under way and their steps).",
+        "missing documents); to_review (uncertain readings); to_archive (old papers that can "
+        "go to the archives); journeys (life events under way and their steps).",
         {
             "kind": {"type": "string", "enum": list(LIST_KINDS)},
             "days": {"type": "integer"},
@@ -1321,6 +1407,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         ["document_id"],
     ),
     _tool(
+        "archive_documents",
+        "Move old documents to the archives (nothing deleted: still readable, restorable), "
+        "when the user asks to sort out, archive or get rid of old papers.",
+        {"document_ids": {"type": "array", "items": {"type": "integer"}}},
+        ["document_ids"],
+    ),
+    _tool(
+        "unarchive_documents",
+        "Bring documents back from the archives, when the user asks.",
+        {"document_ids": {"type": "array", "items": {"type": "integer"}}},
+        ["document_ids"],
+    ),
+    _tool(
         "write_letter",
         "Write a complete letter for any purpose (cancel, dispute, ask for a refund, a "
         "document, instalments, a follow-up…), shown to the user with its PDF. It looks up the "
@@ -1381,7 +1480,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     _tool(
         "app_help",
         "How to use Binder: add documents, mailbox (IMAP, app password), phone scan, areas, "
-        "corrections, letters, files, undo, trash, backups, privacy.",
+        "corrections, letters, files, undo, archives, trash, backups, privacy.",
         {"question": {"type": "string", "description": "the user's question"}},
         ["question"],
     ),
@@ -1416,6 +1515,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+NAMES = [t["function"]["name"] for t in TOOL_SCHEMAS]
 WEB_TOOLS = {"web_search", "read_web_page"}
 # Tools sent with one model call, at most: a small model picks worse among more.
 MAX_TOOLS = 10

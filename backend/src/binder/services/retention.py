@@ -1,8 +1,8 @@
 """Recommended retention periods (individuals, France), with sorting suggestions.
 
 Based on the service-public.fr page « Combien de temps conserver ses papiers ? »; when in
-doubt, the longest period is used. Binder never deletes anything by itself: it suggests, the
-user moves to the trash.
+doubt, the longest period is used. Binder never deletes anything: a document past its period
+goes to the archives (services/archive.py), still readable and restorable.
 """
 
 from dataclasses import dataclass
@@ -172,29 +172,41 @@ def keep_until(doc: Document) -> date | None:
     return _add_years(base, rule.years)
 
 
-def deletion_msg(
-    doc: Document, today: date | None = None, *, inline: bool = False
-) -> i18n.Msg | None:
-    """Why this document can be sorted out, or None if it must be kept.
-
-    `inline`: lowercase variant, to be embedded in a sentence (activity log of the trash).
-    """
+def archive_kind(doc: Document, today: date | None = None) -> str | None:
+    """ "replaced" or "retention" when the document can go to the archives, else None."""
     rule = rule_for(doc)
     if rule is None or doc.keep_forever or doc.deleted_at is not None:
         return None
-    today = today or date.today()
-    suffix = "_inline" if inline else ""
+    if doc.archived_at is not None:
+        return None
     if rule.until_replaced and doc.superseded_by is not None:
-        return T.msg("replaced" + suffix)
+        return "replaced"
     end = keep_until(doc)
-    if end is not None and end < today:
+    if end is not None and end < (today or date.today()):
+        return "retention"
+    return None
+
+
+def archivable_msg(
+    doc: Document, today: date | None = None, *, inline: bool = False
+) -> i18n.Msg | None:
+    """Why this document can go to the archives, or None if it stays in the active views.
+
+    `inline`: lowercase variant, to be embedded in a sentence.
+    """
+    kind = archive_kind(doc, today)
+    suffix = "_inline" if inline else ""
+    if kind == "replaced":
+        return T.msg("replaced" + suffix)
+    rule = rule_for(doc)
+    if kind == "retention" and rule is not None:
         return T.msg("expired" + suffix, retention_rule=rule.msg)
     return None
 
 
-def deletion_reason(doc: Document, today: date | None = None) -> str | None:
-    """Why this document can be sorted out, in the current language (None: keep it)."""
-    msg = deletion_msg(doc, today)
+def archivable_reason(doc: Document, today: date | None = None) -> str | None:
+    """Why this document can go to the archives, in the current language (None: it stays)."""
+    msg = archivable_msg(doc, today)
     return msg.render() if msg else None
 
 

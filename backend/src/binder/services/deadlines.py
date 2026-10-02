@@ -58,12 +58,14 @@ def _upsert(session: Session, doc: Document, source: str, when: date | None, tit
 def sync(session: Session, doc: Document) -> None:
     """Aligns the deduced deadlines with the document.
 
-    A duplicate, a former version or a document in the trash has none: they would be counted
-    twice, or for a document that is no longer in force.
+    A duplicate, a former version or a document in the trash or the archives has none: they
+    would be counted twice, or for a document that is no longer in force.
 
     The title is stored as text, in the language current when the document was last synced.
     """
-    inactive = doc.duplicate_of is not None or doc.deleted_at is not None
+    inactive = (
+        doc.duplicate_of is not None or doc.deleted_at is not None or doc.archived_at is not None
+    )
     _upsert(session, doc, "extracted", None if inactive else doc.due_date, doc.title)
     expiring = not inactive and doc.superseded_by is None
     _upsert(

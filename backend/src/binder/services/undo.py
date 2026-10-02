@@ -137,6 +137,18 @@ def _apply(session: Session, step: dict[str, Any], actor: str) -> None:
         doc = session.get(Document, step["id"])
         if doc is not None and doc.deleted_at is None:
             ingest.trash(session, doc, actor=actor)
+    elif kind == "archive":
+        from binder.services import archive
+
+        doc = session.get(Document, step["id"])
+        if doc is not None:
+            archive.unarchive(session, doc, actor=actor)
+    elif kind == "unarchive":
+        from binder.services import archive
+
+        doc = session.get(Document, step["id"])
+        if doc is not None:
+            archive.archive(session, doc, step.get("reason"), actor=actor)
     elif kind == "deadline":
         deadline = session.get(Deadline, step["id"])
         if deadline is not None:

@@ -38,9 +38,12 @@ from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel
+from sqlmodel import Session
 
 from binder import __version__, i18n
 from binder.config import get_settings
+from binder.db import get_engine
+from binder.schemas import ModelUpgrade
 from binder.services import llm, llm_models
 
 log = logging.getLogger(__name__)
@@ -73,6 +76,12 @@ T = i18n.catalog(
         "not_starting": {
             "en": "The local AI did not start.",
             "fr": "L'IA locale n'a pas démarré.",
+        },
+        "too_large": {
+            "en": "{label} is heavier than this computer now runs comfortably: Binder keeps it, "
+            "but reading may be slow.",
+            "fr": "{label} est plus lourd que ce que cet ordinateur fait tourner confortablement "
+            "aujourd'hui : Binder le garde, mais la lecture peut être lente.",
         },
     },
 )
@@ -120,6 +129,29 @@ KNOWN_PATHS = [
     "~/AppData/Local/Programs/Ollama/ollama.exe",
 ]
 START_TIMEOUT = 60.0
+# Given to the Ollama Binder starts, unless already set: flash attention and an 8-bit KV cache
+# halve the cache's memory at no visible cost, which leaves more of the graphics card to the
+# model's layers.
+SERVE_ENV = {"OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}
+
+# Memory ladder of pick_model (decimal GB, as measured). Each threshold leaves room for the
+# context cache and for the system.
+# Qwen 3.6 27B (17.8 GB) is dense: fast only when it fits the graphics card entirely, i.e. a
+# 24 GB card (20 GB ones included), or a Mac whose GPU gets ~3/4 of 48 GB of unified memory.
+DENSE_VRAM = 20 * GB
+DENSE_APPLE_RAM = 48 * GB
+# Qwen 3.6 35B-A3B (22.6 GB) is a mixture of experts: ~3B parameters work per token, so the
+# layers Ollama keeps in RAM cost little speed. RAM and graphics memory add up (a Mac's memory is
+# shared: RAM alone); on the CPU alone it is faster than the dense 9B.
+MOE_BUDGET = 32 * GB
+# Qwen 3.5 9B (6.6 GB): on an 8 GB card, or in RAM on a "16 GB" machine (which reports a little
+# less once the firmware and integrated graphics have taken their share).
+MID_VRAM = 8 * GB
+MID_RAM = 15 * GB
+# Qwen 3.5 4B (3.4 GB) needs ~10 GB of RAM next to the system; below, the 2B.
+SMALL_RAM = 10 * GB
+# Free disk needed per byte of model: Ollama writes partial files before the final blobs.
+DISK_MARGIN = 1.2
 
 
 class SetupStatus(BaseModel):
@@ -130,8 +162,10 @@ class SetupStatus(BaseModel):
     # Model being installed or in use.
     model: str | None = None
     error: str | None = None
-    # Works, but not as well as it should (an outdated Ollama).
+    # Works, but not as well as it should (an outdated Ollama, a model too heavy for the machine).
     warning: str | None = None
+    # A better model for this machine, offered (never downloaded without the user's yes).
+    upgrade: ModelUpgrade | None = None
 
 
 @dataclass
@@ -170,6 +204,7 @@ def status() -> SetupStatus:
             model=state.model or llm.model(),
             error=state.error,
             warning=state.warning,
+            upgrade=llm_models.upgrade_offer(),
         )
 
 
@@ -229,8 +264,14 @@ def _run() -> None:
             _serve(binary)
             served = True
         check_version()
-        _ensure_models()
+        # Measured at each launch: memory, a graphics card or free space may have changed.
+        machine = measure()
+        # A graphics card (or Apple silicon) runs a large model fast enough to reason.
+        llm.set_accelerated(machine.vram >= MID_VRAM or machine.apple)
+        _ensure_models(machine)
+        _advise(machine)
         _set(phase="ready", completed=0, total=0)
+        llm.warm()
     except Exception as e:
         log.warning("Local AI setup failed: %s", e)
         _set(phase="error", error=str(e) or T("download_failed"))
@@ -240,7 +281,7 @@ def _run() -> None:
 
 
 def check_version() -> None:
-    """Warns, without blocking, when Ollama predates the Qwen 3.5 support Binder relies on."""
+    """Warns, without blocking, when Ollama predates the model support Binder relies on."""
     version = llm.ollama_version()
     warning = None
     if llm.outdated_ollama(version):
@@ -316,22 +357,62 @@ def gpu_memory_bytes() -> int:
         return 0
 
 
-def pick_model(ram: int, vram: int, free_disk: int, apple: bool = False) -> str | None:
-    """The best chat model of the catalogue this machine runs comfortably and can store."""
-    if vram >= 20 * GB or (apple and ram >= 48 * GB):
-        wanted = "qwen3.5:27b"
-    elif vram >= 8 * GB or ram >= 15 * GB:
-        wanted = "qwen3.5:9b"
-    elif ram >= 10 * GB or ram == 0:
-        wanted = "qwen3.5:4b"
-    else:
-        wanted = "qwen3.5:2b"
-    chat = [e for e in llm_models.CATALOG if e.kind == "chat"]
-    names = [e.name for e in chat]
-    for entry in chat[names.index(wanted) :: -1]:
-        if entry.size * 1.2 < free_disk:
+def memory_tier(ram: int, vram: int, apple: bool = False) -> str:
+    """The best chat model this memory runs comfortably, disk aside.
+
+    `apple`: Apple silicon, whose memory is shared by the processor and the GPU (`ram` alone).
+    """
+    budget = ram if apple else ram + vram
+    if vram >= DENSE_VRAM or (apple and ram >= DENSE_APPLE_RAM):
+        return "qwen3.6:27b"
+    if budget >= MOE_BUDGET:
+        return "qwen3.6:35b-a3b"
+    if vram >= MID_VRAM or ram >= MID_RAM:
+        return "qwen3.5:9b"
+    # Memory unknown (0): the middle of the ladder rather than its bottom.
+    if ram >= SMALL_RAM or ram == 0:
+        return "qwen3.5:4b"
+    return "qwen3.5:2b"
+
+
+def pick_model(
+    ram: int, vram: int, free_disk: int, apple: bool = False, ollama: str | None = None
+) -> str | None:
+    """The best chat model of the catalogue this machine runs comfortably and can store.
+
+    Steps down the ranks while the disk lacks room, or the running Ollama (`ollama`, its
+    version when known) is too old for a model.
+    """
+    wanted = llm_models.rank(memory_tier(ram, vram, apple))
+    for entry in reversed(llm_models.CHAT):
+        if entry.rank > wanted or llm.outdated_ollama(ollama, entry.min_ollama):
+            continue
+        if entry.size * DISK_MARGIN < free_disk:
             return entry.name
     return None
+
+
+@dataclass(frozen=True)
+class Machine:
+    ram: int
+    vram: int
+    free_disk: int
+    apple: bool
+    ollama: str | None
+
+    def pick(self) -> str | None:
+        return pick_model(self.ram, self.vram, self.free_disk, self.apple, self.ollama)
+
+
+def measure() -> Machine:
+    """This machine as it is now (never cached: it may change between launches)."""
+    return Machine(
+        ram=memory_bytes(),
+        vram=gpu_memory_bytes(),
+        free_disk=_free_disk(),
+        apple=sys.platform == "darwin" and _machine() == "aarch64",
+        ollama=llm.ollama_version(),
+    )
 
 
 def _user_models_dir() -> Path:
@@ -662,7 +743,7 @@ def _tie(process: subprocess.Popen[bytes]) -> None:
 def _serve(binary: Path) -> None:
     """Starts `ollama serve` for this session and waits until it answers."""
     url = urlparse(get_settings().ollama_url)
-    env = {**os.environ, "OLLAMA_HOST": f"{url.hostname}:{url.port or 11434}"}
+    env = {**SERVE_ENV, **os.environ, "OLLAMA_HOST": f"{url.hostname}:{url.port or 11434}"}
     if _owned():
         adopt_models(_user_models_dir(), get_settings().data_dir / "models")
         env["OLLAMA_MODELS"] = str(_models_dir())
@@ -694,22 +775,32 @@ def _serve(binary: Path) -> None:
     raise RuntimeError(T("not_starting"))
 
 
-def _ensure_models() -> None:
+def _ensure_models(machine: Machine) -> None:
     installed = llm.installed_models() or {}
     chat_ready = any(
-        llm.is_installed(e.name, installed) for e in llm_models.CATALOG if e.kind == "chat"
+        llm.is_installed(e.name, installed) for e in llm_models.CHAT
     ) or llm.is_installed(llm.model(), installed)
     if not chat_ready:
-        apple = sys.platform == "darwin" and _machine() == "aarch64"
-        name = pick_model(memory_bytes(), gpu_memory_bytes(), _free_disk(), apple)
+        name = machine.pick()
         if name is None:
-            smallest = min(e.size for e in llm_models.CATALOG if e.kind == "chat")
-            raise RuntimeError(T("no_space", size=round(smallest * 1.2 / GB, 1)))
+            smallest = min(e.size for e in llm_models.CHAT)
+            raise RuntimeError(T("no_space", size=round(smallest * DISK_MARGIN / GB, 1)))
         _download(name)
     embed = get_settings().embed_model
     if not llm.is_installed(embed, llm.installed_models() or {}):
         with contextlib.suppress(Exception):  # search by meaning is a bonus
             _download(embed)
+
+
+def _advise(machine: Machine) -> None:
+    """Offers a better model when one now suits the machine; warns when the active one is too
+    heavy for it (never a silent download, never a downgrade)."""
+    fits = memory_tier(machine.ram, machine.vram, machine.apple) if machine.ram else None
+    with Session(get_engine()) as session:
+        too_large = llm_models.advise(session, machine.pick(), fits)
+    if too_large:
+        heavy = T("too_large", label=llm_models.label(llm.model()))
+        _set(warning=" ".join(w for w in (_state.warning, heavy) if w))
 
 
 def _download(name: str) -> None:

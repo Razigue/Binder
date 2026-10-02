@@ -8,10 +8,10 @@ Through environment variables, or in a `backend/.env` file:
 | `BINDER_DB_KEY` | generated in `DATA_DIR/key` | encryption master secret |
 | `BINDER_LLM_MODEL` | `qwen3.5:9b` | default Ollama model (the choice made in Settings wins) |
 | `BINDER_LLM_ENABLED` | `true` | `false`: no model at all, the rules read every document (tests, demo on a modest machine; they are tuned on the demo documents only). With `true`, real documents imported before the model is ready wait for it |
-| `BINDER_LLM_CONTEXT` | `16384` | context window asked of Ollama (its own default, 4096, cuts agent conversations) |
+| `BINDER_LLM_CONTEXT` | the model's profile (16384, 32768 for the large models) | context window asked of Ollama (its own default, 4096, cuts agent conversations); see [models.md](models.md#what-each-model-is-given) |
 | `BINDER_LLM_KEEP_ALIVE` | `30m` | how long Ollama keeps the model loaded after a request |
 | `BINDER_LLM_VISION` | `true` | show scans, photos and pages to the model when it reads images |
-| `BINDER_LLM_THINK` | `false` | let the agent reason before each step (slower) |
+| `BINDER_LLM_THINK` | `false` | let the agent reason before each step (slower); also makes letters and second readings reason on any model |
 | `BINDER_WEB_SEARCH` | `true` | let the agent search the web for general facts (queries with personal data are refused) |
 | `BINDER_WEB_SEARCH_URL` | `https://html.duckduckgo.com/html/` | search page queried |
 | `BINDER_EMBED_MODEL` | `qwen3-embedding:0.6b` | embedding model for semantic search (used when installed) |
@@ -37,8 +37,8 @@ Default data folder: `~/.local/share/binder` (Linux, or `$XDG_DATA_HOME/binder`)
 PDFs with text are read directly. Photos and scans go through RapidOCR (PP-OCRv6 on ONNX
 Runtime), a regular dependency: its models ship inside the wheel and the desktop build, nothing
 is downloaded at runtime. docTR or Tesseract are used instead only if RapidOCR cannot be
-imported. With a vision model (Qwen 3.5), the pages of a scan are also shown to the model, which
-reads what OCR misses; a page OCR cannot read at all is transcribed by the model.
+imported. With a vision model (every Qwen Binder offers), the pages of a scan are also shown to
+the model, which reads what OCR misses; a page OCR cannot read at all is transcribed by it.
 
 ## Local AI setup
 
@@ -63,11 +63,16 @@ which the user never has to know about:
   over at the next launch. Upgrading Ollama: change `OLLAMA_VERSION` and the checksums (from the
   release's `sha256sum.txt`).
 
+- **Tuned for memory**: the Ollama Binder starts gets `OLLAMA_FLASH_ATTENTION=1` and
+  `OLLAMA_KV_CACHE_TYPE=q8_0` (an 8-bit context cache, half the memory), unless the environment
+  already sets them.
+
 With `BINDER_OLLAMA_URL` set, that server is used as it is (started if local and not answering,
 with the user's own models). Binder then downloads the chat model that fits the machine (memory,
-NVIDIA card through `nvidia-smi`, free disk) and the embedding model. `GET /api/setup` reports
-the progress shown on Today. These downloads and the update check are the only outbound traffic;
-nothing about the documents leaves the machine.
+NVIDIA card through `nvidia-smi`, free disk, Ollama version) and the embedding model. The machine
+is measured again at each launch: see [models.md](models.md) for the ladder and the upgrade
+offer. `GET /api/setup` reports the progress shown on Today. These downloads and the update check
+are the only outbound traffic; nothing about the documents leaves the machine.
 
 ## Backups
 

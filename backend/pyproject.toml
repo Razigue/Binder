@@ -23,6 +23,8 @@ dependencies = [
     "sqlcipher3-wheels>=0.5.7",
     "sqlmodel>=0.0.47",
     "uvicorn[standard]>=0.54.0",
+    # Watched folder: system change notifications (also pulled by uvicorn[standard]).
+    "watchfiles>=1.3.0",
     # Ollama for Linux ships as .tar.zst (installed automatically, services/setup.py).
     "zstandard>=0.23",
 ]

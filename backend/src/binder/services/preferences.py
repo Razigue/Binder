@@ -1,4 +1,4 @@
-"""User preferences: interface language, country and theme.
+"""User preferences: interface language, country, theme and text size.
 
 "auto" / None fall back to the operating system (binder.i18n.system_locale). The effective
 locale is cached per database engine and installed as the binder.i18n resolver, so every
@@ -18,6 +18,7 @@ KEY = "preferences"
 
 LanguageChoice = Literal["auto", "en", "fr"]
 ThemeChoice = Literal["system", "light", "dark"]
+TextSizeChoice = Literal["normal", "large", "larger"]
 
 
 class Preferences(BaseModel):
@@ -25,6 +26,8 @@ class Preferences(BaseModel):
     # ISO 3166-1 alpha-2 code; None: detected from the operating system.
     country: str | None = None
     theme: ThemeChoice = "system"
+    # Scales the whole interface, for people who find the default text small.
+    text_size: TextSizeChoice = "normal"
 
     @field_validator("country")
     @classmethod
