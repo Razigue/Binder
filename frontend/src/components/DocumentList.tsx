@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { CaretRightIcon, HourglassIcon, CircleNotchIcon } from "@phosphor-icons/react"
+import { CaretRightIcon, HourglassIcon, CircleNotchIcon, NotePencilIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/i18n"
@@ -10,6 +10,12 @@ import { CategoryIcon } from "./CategoryIcon"
 
 export function StatusBadge({ doc }: { doc: Doc }) {
   const t = useT(documentList)
+  if (doc.source_letter_id !== null)
+    return (
+      <Badge variant="secondary">
+        <NotePencilIcon /> {t("sentByYou")}
+      </Badge>
+    )
   if (doc.status === "processing")
     return (
       <Badge variant="secondary">
@@ -64,7 +70,9 @@ export function DocumentList({ docs, loading, empty }: { docs?: Doc[]; loading?:
             {/* Phone: the amount, and the status only when it asks for something. */}
             <span className="flex flex-col items-end gap-1 md:hidden">
               {d.amount !== null && <span className="text-sm font-medium tabular-nums">{formatAmount(d.amount)}</span>}
-              {(d.status !== "classified" || d.superseded_by !== null) && <StatusBadge doc={d} />}
+              {(d.status !== "classified" || d.superseded_by !== null || d.source_letter_id !== null) && (
+                <StatusBadge doc={d} />
+              )}
             </span>
             <span className="hidden truncate text-xs text-muted-foreground md:block">{d.filename}</span>
             <span className="hidden text-sm text-muted-foreground tabular-nums md:block">{formatDate(d.issue_date)}</span>

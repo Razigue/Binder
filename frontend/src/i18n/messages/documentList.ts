@@ -6,6 +6,7 @@ export const documentList = defineMessages({
     waiting: "Waiting for the AI",
     oldVersion: "Old version",
     classified: "Filed",
+    sentByYou: "Written by Binder",
     empty: "No documents.",
   },
   fr: {
@@ -13,6 +14,7 @@ export const documentList = defineMessages({
     waiting: "En attente de l'IA",
     oldVersion: "Ancienne version",
     classified: "Classé",
+    sentByYou: "Rédigé par Binder",
     empty: "Aucun document.",
   },
 })

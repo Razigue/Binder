@@ -312,6 +312,14 @@ def letter_pdf(letter_id: int, session: SessionDep) -> Response:
     )
 
 
+@router.delete("/letters/{letter_id}", status_code=204)
+def delete_letter(letter_id: int, session: SessionDep, response: Response) -> None:
+    row = _letter(session, letter_id)
+    with undoable(session, response):
+        letters.delete(session, row)
+    session.commit()
+
+
 @router.post("/letters/{letter_id}/sent")
 def letter_sent(letter_id: int, session: SessionDep, response: Response) -> Letter:
     row = _letter(session, letter_id)

@@ -143,6 +143,19 @@ export function useLetters() {
   return useQuery({ queryKey: ["letters"], queryFn: api.letters })
 }
 
+export function useDeleteLetter() {
+  const invalidate = useInvalidateAll()
+  return useMutation({ mutationFn: api.deleteLetter, onSuccess: invalidate })
+}
+
+export function useUpdateJourney() {
+  const invalidate = useInvalidateAll()
+  return useMutation({
+    mutationFn: ({ id, closed }: { id: number; closed: boolean }) => api.updateJourney(id, { closed }),
+    onSuccess: invalidate,
+  })
+}
+
 export function useProfile() {
   return useQuery({ queryKey: ["profile"], queryFn: api.profile, staleTime: 60_000 })
 }

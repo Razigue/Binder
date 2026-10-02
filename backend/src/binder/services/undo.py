@@ -36,6 +36,7 @@ DOCUMENT_STATE = (
     "title", "category", "issuer", "amount", "issue_date", "due_date", "expiry_date",
     "reference", "keep_forever", "confidence", "status", "missing_fields", "extractor",
     "doc_type", "duplicate_of", "duplicate_dismissed", "superseded_by", "person",
+    "source_letter_id",
 )  # fmt: skip
 DEADLINE_STATE = ("title", "category", "due_date", "amount", "done", "source", "document_id")
 
@@ -174,6 +175,13 @@ def _apply(session: Session, step: dict[str, Any], actor: str) -> None:
         row = session.get(table, step["id"])
         if row is not None:
             session.delete(row)
+    elif kind == "row_deleted":
+        from binder import models
+
+        table = getattr(models, step["model"])
+        if session.get(table, step["id"]) is None:
+            state = {k: _typed(table, k, v) for k, v in step["state"].items()}
+            session.add(table(**state))
 
 
 def undo(session: Session, token: str, *, actor: str = "user") -> bool:
@@ -194,6 +202,11 @@ def row_changed(row: Any) -> None:
     """Call before changing a row of a simple table (no side effects to replay)."""
     state = row.model_dump(exclude={"id"})
     push("row_state", model=type(row).__name__, id=row.id, state=state)
+
+
+def row_deleted(row: Any) -> None:
+    """Call before deleting a row of a simple table: undo recreates it as it was."""
+    push("row_deleted", model=type(row).__name__, id=row.id, state=row.model_dump())
 
 
 def setting_changed(session: Session, key: str) -> None:

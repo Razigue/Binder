@@ -328,6 +328,27 @@ def test_letter_in_words_pdf_and_follow_up(client: TestClient, demo: dict[str, A
     assert client.post("/api/letters", json={}).status_code == 400
 
 
+def test_reimported_letter_is_flagged_not_received(
+    client: TestClient, demo: dict[str, Any]
+) -> None:
+    letter = client.post("/api/letters", json={"purpose": "Ask for a duplicate certificate"}).json()
+    pdf = client.get(f"/api/letters/{letter['id']}/pdf").content
+    r = client.post("/api/documents", files={"file": ("lettre.pdf", pdf, "application/pdf")})
+    assert r.status_code == 201
+    doc = client.get(f"/api/documents/{r.json()['id']}").json()
+    assert doc["source_letter_id"] == letter["id"]
+
+
+def test_delete_letter_is_undoable(client: TestClient, demo: dict[str, Any]) -> None:
+    letter = client.post("/api/letters", json={"purpose": "Ask for a duplicate certificate"}).json()
+    r = client.delete(f"/api/letters/{letter['id']}")
+    assert r.status_code == 204 and r.headers["X-Undo"]
+    assert client.get(f"/api/letters/{letter['id']}").status_code == 404
+    assert client.post(f"/api/undo/{r.headers['X-Undo']}").status_code == 204
+    restored = client.get(f"/api/letters/{letter['id']}").json()
+    assert restored["subject"] == letter["subject"]
+
+
 def test_follow_up_and_reply_cards(
     client: TestClient, demo: dict[str, Any], session: Session
 ) -> None:

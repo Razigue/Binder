@@ -73,6 +73,9 @@ export interface Doc {
   doc_type: string | null
   duplicate_of: number | null
   superseded_by: number | null
+  // Set when this is a copy of a letter Binder itself wrote (re-downloaded, re-imported): not
+  // mail received from someone else.
+  source_letter_id: number | null
   standard_name: string
   keep_forever: boolean
   retention_rule: string | null
@@ -601,7 +604,7 @@ async function check(res: Response) {
 
 /** Agent answer as a stream of events (newline-delimited JSON); resolves with the response. */
 async function chatStream(
-  body: { message: string; history: ChatMessage[]; attachments: number[] },
+  body: { message: string; history: ChatMessage[]; attachments: number[]; viewing?: number },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<ChatResponse> {
@@ -693,6 +696,7 @@ export const api = {
   letterSent: (id: number) => request<Letter>(`/letters/${id}/sent`, { method: "POST" }),
   letterAnswered: (id: number) => request<Letter>(`/letters/${id}/answered`, { method: "POST" }),
   letterFollowUp: (id: number) => request<Letter>(`/letters/${id}/follow-up`, { method: "POST" }),
+  deleteLetter: (id: number) => request<void>(`/letters/${id}`, { method: "DELETE" }),
   letters: () => request<Letter[]>("/letters"),
   feed: () => request<Feed>("/feed"),
   act: (action: Pick<FeedAction, "type" | "params">) =>
@@ -769,7 +773,9 @@ export const api = {
     attachments: number[],
     onEvent: (event: ChatEvent) => void,
     signal?: AbortSignal,
-  ) => chatStream({ message, history, attachments }, onEvent, signal),
+    // Document open on screen: the question may be about it.
+    viewing?: number,
+  ) => chatStream({ message, history, attachments, viewing }, onEvent, signal),
 }
 
 export const fileUrl = (id: number) => `/api/documents/${id}/file`

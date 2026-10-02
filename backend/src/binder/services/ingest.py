@@ -36,6 +36,7 @@ from binder.services.text import (
     SUPPORTED_MIME,
     ReadResult,
     is_bare_a4_pdf,
+    letter_marker,
     page_image,
     read_document,
     several_documents,
@@ -441,12 +442,24 @@ def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadR
     return read, ext
 
 
+def _link_own_letter(session: Session, doc: Document, data: bytes) -> None:
+    """Flags a document that is a copy of a letter Binder itself wrote (downloaded, then
+    re-imported unmodified): it is not mail received from someone else."""
+    if doc.mime_type != "application/pdf":
+        return
+    letter_id = letter_marker(data)
+    if letter_id is not None and session.get(Correspondence, letter_id) is not None:
+        doc.source_letter_id = letter_id
+
+
 def analyze(session: Session, doc: Document) -> Document:
     if waits_for_ai(doc):
         return _wait(session, doc)
     previous_key = organize.series_key(doc)
     doc.duplicate_of = None
-    read, ext = extract(load_file(doc), doc.mime_type)
+    data = load_file(doc)
+    _link_own_letter(session, doc, data)
+    read, ext = extract(data, doc.mime_type)
     doc.text = read.text
     doc.page_count = read.page_count
     learned = learning.apply(session, read.text, ext)

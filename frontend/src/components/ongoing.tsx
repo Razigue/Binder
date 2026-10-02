@@ -1,12 +1,14 @@
+import { useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CaretRightIcon, CheckCircleIcon, NotePencilIcon, ListChecksIcon, EnvelopeIcon } from "@phosphor-icons/react"
+import { CaretRightIcon, CheckCircleIcon, NotePencilIcon, ListChecksIcon, EnvelopeIcon, XIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { usePanels } from "@/components/panels"
-import { useInvalidateAll, useJourneys, useLetters } from "@/hooks/queries"
+import { useDeleteLetter, useInvalidateAll, useJourneys, useLetters, useUpdateJourney } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { journey as journeyMessages } from "@/i18n/messages/journey"
 import { prepare as messages } from "@/i18n/messages/prepare"
@@ -60,11 +62,14 @@ export function Ongoing({ limit }: { limit?: number }) {
 }
 
 function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void }) {
+  const t = useT(messages)
   const tj = useT(journeyMessages)
+  const [confirming, setConfirming] = useState(false)
+  const close = useUpdateJourney()
   const next = journey.steps.find((s) => !s.done)
   return (
-    <li>
-      <button onClick={onOpen} className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-muted/40">
+    <li className="group/row relative">
+      <button onClick={onOpen} className="flex w-full items-center gap-3 px-5 py-3 pr-11 text-left transition-colors hover:bg-muted/40">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
           <ListChecksIcon className="size-4" />
         </span>
@@ -82,6 +87,30 @@ function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void 
         </span>
         <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
       </button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="absolute top-2.5 right-2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        aria-label={t("removeTask")}
+        title={t("removeTask")}
+        onClick={(e) => {
+          e.stopPropagation()
+          setConfirming(true)
+        }}
+      >
+        <XIcon />
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={t("removeJourney", { title: journey.title })}
+        description={t("removeJourneyHint")}
+        confirmLabel={t("removeTask")}
+        onConfirm={async () => {
+          await close.mutateAsync({ id: journey.id, closed: true })
+          toast.success(t("taskRemoved"))
+        }}
+      />
     </li>
   )
 }
@@ -90,6 +119,7 @@ function LetterRow({ letter }: { letter: Letter }) {
   const t = useT(messages)
   const panels = usePanels()
   const invalidate = useInvalidateAll()
+  const [confirming, setConfirming] = useState(false)
   const state = letterState(letter)
   const answered = useMutation({
     mutationFn: () => api.letterAnswered(letter.id!),
@@ -104,19 +134,20 @@ function LetterRow({ letter }: { letter: Letter }) {
     },
     onError: (e) => toast.error(e.message),
   })
+  const remove = useDeleteLetter()
   const detail =
     state === "draft"
       ? t("status.draft")
       : state === "noAnswer"
         ? t("status.noAnswer", { date: formatDate(letter.sent_on) })
         : t("status.sent", { date: formatDate(letter.sent_on), followUp: formatDate(letter.follow_up_on) })
-  const pending = answered.isPending || followUp.isPending
+  const pending = answered.isPending || followUp.isPending || remove.isPending
   return (
-    <li className="flex gap-3 px-5 py-3">
+    <li className="group/row relative flex gap-3 px-5 py-3">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
         <EnvelopeIcon className="size-4" />
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 pr-7">
         <button
           onClick={() => panels.showLetter(letter)}
           className="block max-w-full truncate text-left text-sm font-medium hover:underline"
@@ -149,6 +180,28 @@ function LetterRow({ letter }: { letter: Letter }) {
           )}
         </div>
       </div>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="absolute top-2.5 right-2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        disabled={pending}
+        aria-label={t("removeTask")}
+        title={t("removeTask")}
+        onClick={() => setConfirming(true)}
+      >
+        <XIcon />
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={t("removeLetter")}
+        description={t("removeLetterHint", { subject: letter.subject })}
+        confirmLabel={t("removeTask")}
+        onConfirm={async () => {
+          await remove.mutateAsync(letter.id!)
+          toast.success(t("taskRemoved"))
+        }}
+      />
     </li>
   )
 }

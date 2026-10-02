@@ -82,6 +82,7 @@ export function DocumentsByYear({ docs }: { docs: Doc[] }) {
                           d.issuer,
                           d.person,
                           d.superseded_by !== null ? t("oldVersion") : null,
+                          d.source_letter_id !== null ? t("sentByYou") : null,
                           d.status === "to_review" ? t("question") : null,
                         ]
                           .filter(Boolean)

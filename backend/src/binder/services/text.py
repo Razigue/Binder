@@ -259,6 +259,34 @@ def html_to_pdf(html: str, css: str, margin: float = 64) -> bytes:
     return buffer.getvalue()
 
 
+LETTER_MARKER = re.compile(r"binder-letter:(\d+)")
+
+
+def stamp_letter(data: bytes, letter_id: int) -> bytes:
+    """Tags a letter's PDF with the id Binder wrote it under (metadata only, nothing visible on
+    the page): re-importing the same file unmodified is recognised as the letter, not a new
+    document Binder knows nothing about."""
+    with pymupdf.open(stream=data, filetype="pdf") as pdf:
+        meta = {
+            k: v
+            for k, v in (pdf.metadata or {}).items()
+            if k in ("title", "author", "subject", "keywords", "creator", "producer")
+        }
+        pdf.set_metadata({**meta, "keywords": f"binder-letter:{letter_id}"})
+        return pdf.tobytes()
+
+
+def letter_marker(data: bytes) -> int | None:
+    """The Correspondence id a PDF carries from `stamp_letter`, when Binder wrote it itself."""
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as pdf:
+            keywords = (pdf.metadata or {}).get("keywords") or ""
+    except Exception:
+        return None
+    m = LETTER_MARKER.search(keywords)
+    return int(m[1]) if m else None
+
+
 def is_bare_a4_pdf(data: bytes) -> bool:
     """One A4 page and no metadata at all: how `samples.Sample.pdf` writes the demo documents in
     every version. Real PDFs always carry the name of the software that made them."""
