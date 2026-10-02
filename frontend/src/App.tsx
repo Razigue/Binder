@@ -11,7 +11,7 @@ import { UploadProvider } from "@/components/upload"
 import { HomePage } from "@/pages/Home"
 
 // To do ships with the app; the other pages load on first visit.
-const DocumentsPage = lazy(() => import("@/pages/Documents").then((m) => ({ default: m.DocumentsPage })))
+const PapersPage = lazy(() => import("@/pages/Papers").then((m) => ({ default: m.PapersPage })))
 const PreparePage = lazy(() => import("@/pages/Prepare").then((m) => ({ default: m.PreparePage })))
 const DocumentDetailPage = lazy(() => import("@/pages/DocumentDetail").then((m) => ({ default: m.DocumentDetailPage })))
 const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default: m.HistoryPage })))
@@ -39,7 +39,7 @@ export default function App() {
                 <Routes>
                   <Route element={<AppLayout />}>
                     <Route index element={<HomePage />} />
-                    <Route path="papers" element={<DocumentsPage />} />
+                    <Route path="papers" element={<PapersPage />} />
                     <Route path="procedures" element={<PreparePage />} />
                     {/* Former addresses (activity log, agent answers, bookmarks). */}
                     <Route path="area/:area" element={<AreaRedirect />} />

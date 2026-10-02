@@ -146,15 +146,19 @@ ticks itself once you mark the letter as sent), the time limits after a birth or
 donation and childcare receipts of the year with their total and the boxes to fill in. The next
 steps also appear in To do. You can ask for it in words too: "We're moving on 15 December".
 
-**Documents**: everything Binder has filed, in one list by year. The search reads the documents'
-content (a sender, a reference, a word on the page) and narrows by area; a search can also go
-to Binder as a question in one click.
+**My papers**: the seven areas (Housing, Money, Work & benefits, Family, Health, Identity,
+Vehicle) as tiles that say their state in words: "Up to date", "Identity card: renew it",
+"Tax notice 2026 · Due 7 Oct". Tap a tile to see only its documents, or filter by household
+member. The search reads the documents' content (a sender, a reference, a word on the page); a
+search can also go to Binder as a question in one click. Three tabs:
+- **Documents**: everything Binder has filed, by year;
+- **Calendar**: your deadlines on a timeline, then the **administrative year** (in France): what
+  comes back each month (the tax return in April, the property tax in October…), marked when your
+  papers show it concerns you;
+- **Archives**: old papers, still readable (see below).
 
-**Areas**: Housing, Money, Work & benefits, Family, Health, Identity and Vehicle each show what to do,
-what is coming up, recurring bills with their yearly cost, and the documents by year (filter by
-household member or by word). Open a document to see its preview: hover a field (amount, due
-date…) and Binder **highlights where it read it** on the page. **In short** explains the letter in
-plain language.
+Open a document to see its preview: hover a field (amount, due date…) and Binder **highlights
+where it read it** on the page. **In short** explains the letter in plain language.
 
 **Ask Binder**: ＋ Add, then **Ask a question**, on every page, or Ctrl K. Ask in your own words,
 it looks

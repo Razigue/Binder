@@ -168,20 +168,25 @@ T = i18n.catalog(
             "en notifications.",
         },
         "areas": {
-            "en": "Areas (Housing, Money, Work & benefits, Health, Identity, Vehicle) show what "
-            "to do, what is coming up, recurring bills with their yearly cost and documents by "
-            "year, filtered by household member or by word. Open a document to see its preview; "
-            "hovering a field highlights where Binder read it, and “In short” explains it "
-            "plainly. Something wrong? Correct the field, then “Save and validate”: Binder "
-            "applies the correction to the next documents from that sender. You can also ask me "
-            "to correct it.",
-            "fr": "Les espaces (Logement, Argent, Travail & aides, Santé, Identité, Véhicule) "
-            "montrent ce qu'il y a à faire, ce qui arrive, les factures récurrentes avec leur "
-            "coût annuel et les documents par année, filtrables par membre du foyer ou par mot. "
-            "Ouvrez un document pour voir son aperçu ; survolez un champ pour voir où Binder "
-            "l'a lu, et « En bref » l'explique simplement. Une erreur ? Corrigez le champ puis "
-            "« Enregistrer et valider » : Binder appliquera la correction aux prochains "
-            "documents du même expéditeur. Vous pouvez aussi me demander de la corriger.",
+            "en": "My papers shows the seven areas (Housing, Money, Work & benefits, Family, "
+            "Health, Identity, Vehicle) as tiles that say their state in words (“Up to date”, "
+            "“Identity card: renew it”); tap one to see only its documents, or filter by "
+            "household member or by a word (the search reads inside the documents). The "
+            "Calendar tab shows your deadlines and the administrative year; the Archives tab "
+            "keeps old papers. Open a document to see its preview; hovering a field highlights "
+            "where Binder read it, and “In short” explains it plainly. Something wrong? Correct "
+            "the field, then “Save and validate”: Binder applies the correction to the next "
+            "documents from that sender. You can also ask me to correct it.",
+            "fr": "Mes papiers montre les sept domaines (Logement, Argent, Travail & aides, "
+            "Famille, Santé, Identité, Véhicule) en tuiles qui disent leur état en mots (« À "
+            "jour », « Carte d'identité : à renouveler ») ; touchez-en une pour ne voir que ses "
+            "documents, ou filtrez par membre du foyer ou par mot (la recherche lit l'intérieur "
+            "des documents). L'onglet Calendrier montre vos échéances et l'année administrative "
+            "; l'onglet Archives garde les anciens papiers. Ouvrez un document pour voir son "
+            "aperçu ; survolez un champ pour voir où Binder l'a lu, et « En bref » l'explique "
+            "simplement. Une erreur ? Corrigez le champ puis « Enregistrer et valider » : "
+            "Binder appliquera la correction aux prochains documents du même expéditeur. Vous "
+            "pouvez aussi me demander de la corriger.",
         },
         "ask": {
             "en": "Ask Binder: ＋ Add, then “Ask a question” (or Ctrl K), on every page. Ask in "

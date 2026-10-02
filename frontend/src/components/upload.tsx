@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react"
-import { WarningCircleIcon, FileTextIcon, CircleNotchIcon, LockIcon, DeviceMobileIcon, UploadSimpleIcon } from "@phosphor-icons/react"
+import { WarningCircleIcon, FileTextIcon, CircleNotchIcon, LockIcon, DeviceMobileIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useInvalidateAll } from "@/hooks/queries"
@@ -196,15 +196,5 @@ function ErrorBox({ message }: { message: string }) {
     <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
       <WarningCircleIcon className="size-4" /> {message}
     </div>
-  )
-}
-
-export function ImportButton() {
-  const t = useT(upload)
-  const { open } = useUpload()
-  return (
-    <Button onClick={open}>
-      <UploadSimpleIcon /> {t("import")}
-    </Button>
   )
 }

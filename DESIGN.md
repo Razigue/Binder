@@ -180,6 +180,11 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
   (the urgency in words), amount right-aligned, then its actions as buttons: one primary,
   outline for the others, ghost for dismiss.
+- **Area tile** (My papers): card-like button, area icon tile + label, then its state in one
+  or two lines of 12px text (red/amber text when it calls for action, muted otherwise);
+  selected = 2px primary ring and a check. Grid: 2 columns on a phone, 3 from `sm`, 4 from `lg`.
+- **Tabs** (My papers): text tabs on a hairline, the active one with a 2px primary underline,
+  at least 44px high; the tab is kept in the address (`?tab=calendar`).
 - **Question panel** (`components/questions.tsx`): a large dialog, one question per screen:
   the document page (`DocumentPage`, the place Binder read highlighted) on the left, the
   progress, question and full-width answer buttons on the right; stacked on a phone (document

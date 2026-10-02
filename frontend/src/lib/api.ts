@@ -543,17 +543,17 @@ export interface AreaSummary {
   label: string
   documents: number
   attention: number
+  /** Its state in words ("Up to date", "Identity card: renew it"). */
+  state: string
+  tone: "urgent" | "soon" | "ok" | "empty"
 }
 
-export interface AreaDetail {
-  area: Area
-  label: string
-  documents: Doc[]
-  deadlines: Deadline[]
-  subscriptions: Subscription[]
-  items: FeedItem[]
-  members: Member[]
-  yearly_cost: number
+/** A month of the administrative year (what usually comes back). */
+export interface CalendarEntry {
+  month: number
+  key: string
+  text: string
+  concerns_you: boolean
 }
 
 export interface FieldSource {
@@ -741,7 +741,7 @@ export const api = {
   report: (batch: string) => request<ImportReport>(`/reports/${encodeURIComponent(batch)}`),
   reportSeen: (batch: string) => request<void>(`/reports/${encodeURIComponent(batch)}/seen`, { method: "POST" }),
   areas: () => request<AreaSummary[]>("/areas"),
-  area: (area: Area) => request<AreaDetail>(`/areas/${area}`),
+  calendar: () => request<CalendarEntry[]>("/calendar"),
   household: () => request<Member[]>("/household"),
   sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
   prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),

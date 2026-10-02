@@ -10,7 +10,7 @@ choice, and what is left. One commit per step.
 | 1 | Archives + Archives tab | done |
 | 2 | Questions (filter, grouping, cap, panel with the document) | done |
 | 3 | Navigation and To do | done |
-| 4 | My papers | to do |
+| 4 | My papers | done |
 | 5 | Life events (Démarches) | to do |
 | 6 | First launch | to do |
 | 7 | Glossary and accessibility | to do |
@@ -101,7 +101,27 @@ choice, and what is left. One commit per step.
 - **Your local changes**: `AppLayout.tsx` keeps your `useLiveChanges` import on its own line,
   so that your uncommitted change stays separate from these commits.
 
+### Step 4: My papers
+
+- **Tiles**: `GET /api/areas` now gives each area a `state` sentence and a `tone`: the most
+  pressing card of that area (a payment says its date, "+N more" when there are others), else
+  an end of validity within 180 days ("Passport expires in 4 months"), else "Up to date", or
+  "Nothing here yet". Questions never show on a tile (they belong to To do). A tile is the area
+  filter (tap again, or "All areas", to clear).
+- **Filters**: area (tiles), household member (chips, shown when the documents involve more than
+  one person), words (search, by content). `?area=` and `?tab=` are kept in the address.
+- **Calendar tab**: the timeline (two weeks back, four months ahead) and the list of upcoming
+  deadlines, then the administrative year (`services/calendar.py`, `GET /api/calendar`): a static
+  table of what comes back each month in France, marked "Concerns you" when a document of the
+  matching type is held. Countries other than France get no table (Binder does not know theirs).
+  The country follows Settings, then the system.
+- **Removed**: the area pages (`pages/Area.tsx`) and their messages, the Documents page (now
+  `pages/Papers.tsx`), "Coming up" (`components/upcoming.tsx`), the import button of the
+  former page headers (＋ replaces it). The backend `GET /api/areas/{area}` is kept (tested,
+  harmless) but the interface no longer calls it; the area's recurring bills are no longer shown
+  in the interface (the agent still lists them: "How much do my subscriptions cost?").
+
 ## Left to do
 
-- Steps 4 to 7.
+- Steps 5 to 7.
 - `DocumentDetail`'s preview to reuse `DocumentPage`.

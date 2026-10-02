@@ -10,7 +10,6 @@ export const upload = defineMessages({
     dropHint: "PDF, JPG, PNG · They stay on your computer.",
     browse: "Browse files",
     analysing: "Sending…",
-    import: "Add",
   },
   fr: {
     title: "Ajouter des documents",
@@ -21,6 +20,5 @@ export const upload = defineMessages({
     dropHint: "PDF, JPG, PNG · Ils restent sur votre ordinateur.",
     browse: "Parcourir les fichiers",
     analysing: "Envoi…",
-    import: "Ajouter",
   },
 })
