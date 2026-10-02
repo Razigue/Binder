@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentPage } from "@/components/DocumentPage"
+import { GlossaryText } from "@/components/glossary"
 import { useDocument, useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { questions as messages } from "@/i18n/messages/questions"
@@ -152,8 +153,12 @@ function QuestionScreen({
           {t("progress", { current: position.current, total: position.total })}
         </p>
         <div>
-          <DialogTitle className="text-lg leading-snug">{item.title}</DialogTitle>
-          <DialogDescription className="mt-1.5">{item.detail}</DialogDescription>
+          <DialogTitle className="text-lg leading-snug">
+            <GlossaryText text={item.title} />
+          </DialogTitle>
+          <DialogDescription className="mt-1.5">
+            <GlossaryText text={item.detail} />
+          </DialogDescription>
           {field && item.extra.question === "confirm" && (
             <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{t("readHere")}</p>
           )}

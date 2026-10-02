@@ -197,6 +197,14 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
   the document page (`DocumentPage`, the place Binder read highlighted) on the left, the
   progress, question and full-width answer buttons on the right; stacked on a phone (document
   on top, answers below). Ends on "All in order ✓".
+- **Glossary term** (`components/glossary.tsx`): a known paperwork word, dotted underline (solid
+  on hover), opens a 288px popover with the word and one sentence. Only the first occurrence of
+  each word in a text.
+- **Letter actions:** Print (primary) and Send by post (outline, unfolds four numbered steps
+  and "I sent it"), then Download (ghost). Printing uses a `.print-only` sheet (index.css):
+  the letter's text alone, black on white, serif 11pt.
+- **Text size:** a three-way radio group (Normal 100%, Large 112.5%, Larger 125%) under the
+  theme in Settings > Appearance; it sets the root font size, so every rem-based size follows.
 - **Undo:** every change ends with a Sonner toast carrying "Undo".
 - **Toasts:** Sonner. Destructive confirmations: `ConfirmDialog`.
 

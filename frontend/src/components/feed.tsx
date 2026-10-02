@@ -6,6 +6,7 @@ import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon,
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { CategoryIcon } from "@/components/CategoryIcon"
+import { GlossaryText } from "@/components/glossary"
 import { useAgent } from "@/components/agent"
 import { usePanels } from "@/components/panels"
 import { useUpload } from "@/components/upload"
@@ -124,7 +125,9 @@ export function FeedCard({ item }: { item: FeedItem }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium">{item.title}</p>
+          <p className="text-sm font-medium">
+            <GlossaryText text={item.title} />
+          </p>
           {item.amount !== null && item.kind !== "briefing" && (
             <span className="shrink-0 text-sm font-medium tabular-nums">{formatAmount(item.amount)}</span>
           )}
@@ -134,7 +137,7 @@ export function FeedCard({ item }: { item: FeedItem }) {
             {item.tone === "urgent" && item.kind !== "deadline" && (
               <span className={cn("font-medium", tone.label)}>{t("tone.urgent")} · </span>
             )}
-            {item.detail}
+            <GlossaryText text={item.detail} />
           </p>
         )}
         {(previewable || item.actions.length > 0) && (

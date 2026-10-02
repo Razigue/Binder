@@ -37,6 +37,12 @@ T = i18n.catalog(
         "question": {"en": "One question for you", "fr": "Une question pour vous"},
         "summary_filed_one": {"en": "{n} document filed", "fr": "{n} document rangé"},
         "summary_filed_other": {"en": "{n} documents filed", "fr": "{n} documents rangés"},
+        "brief_nothing": {"en": "Nothing to do", "fr": "Rien à faire"},
+        "brief_archived": {
+            "en": "Old paper, kept in the archives",
+            "fr": "Ancien papier, gardé aux archives",
+        },
+        "brief_keep": {"en": "kept: {keep}", "fr": "gardé : {keep}"},
         "summary_archived_one": {
             "en": "{n} old document archived",
             "fr": "{n} ancien document archivé",
@@ -76,6 +82,8 @@ EVENTS = {"supersede", "increase", "anomaly", "learned", "duplicate"}
 
 class ReportItem(BaseModel):
     document: DocumentOut
+    # "In short", right away: what it is, whether to act and by when, how long it is kept.
+    brief: str = ""
     facts: list[str]
     events: list[str]
     question: questions.Question | None = None
@@ -99,6 +107,8 @@ def source_of(batch: str) -> str:
 
 
 def _facts(doc: Document) -> list[str]:
+    """Details under the brief line: what it does not say already (the payment and the renewal
+    are in it)."""
     if doc.archived_at is not None:
         from binder.services import archive
 
@@ -107,23 +117,52 @@ def _facts(doc: Document) -> list[str]:
     area = doc.area or areas.area_of(doc)
     if area and doc.status not in (DocumentStatus.PROCESSING, DocumentStatus.WAITING):
         facts.append(T("filed", area=areas.label(area)))
-    if doc.due_date and doc.due_date >= date.today():
-        if doc.amount is not None:
-            facts.append(T("to_pay", amount=doc.amount, date=doc.due_date))
-        else:
-            facts.append(T("pay_by", date=doc.due_date))
-    elif doc.amount is not None:
+    due = doc.due_date is not None and doc.due_date >= date.today()
+    if not due and doc.amount is not None:
         facts.append(T("amount", amount=doc.amount))
-    if doc.expiry_date and doc.superseded_by is None:
-        facts.append(T("valid_until", date=doc.expiry_date))
+    if doc.expiry_date and doc.superseded_by is None and doc.expiry_date >= date.today():
         from binder.services import deadlines
 
         renew = deadlines.renew_from(doc)
         if renew and renew > date.today():
-            facts.append(T("renew_from", date=renew))
+            facts.append(T("valid_until", date=doc.expiry_date))
     if doc.person:
         facts.append(T("for_person", person=doc.person))
     return facts
+
+
+def brief(doc: Document, today: date | None = None) -> str:
+    """One line on a document just added: "Tax notice · $1,240 to pay by 7 Oct · kept: 3 years
+    after the tax year"."""
+    from binder.services import deadlines, retention
+
+    if doc.status in (DocumentStatus.PROCESSING, DocumentStatus.WAITING):
+        return ""
+    today = today or date.today()
+    what = i18n.doc_type_label(doc.doc_type) if doc.doc_type else i18n.category_label(doc.category)
+    if doc.archived_at is not None:
+        action = T("brief_archived")
+    elif doc.due_date and doc.due_date >= today:
+        action = (
+            T("to_pay", amount=doc.amount, date=doc.due_date)
+            if doc.amount is not None
+            else T("pay_by", date=doc.due_date)
+        )
+    elif doc.expiry_date and doc.expiry_date >= today and doc.superseded_by is None:
+        renew = deadlines.renew_from(doc)
+        action = (
+            T("renew_from", date=renew)
+            if renew and renew > today
+            else T("valid_until", date=doc.expiry_date)
+        )
+    else:
+        action = T("brief_nothing")
+    parts = [what, action[:1].lower() + action[1:]]
+    rule = retention.rule_for(doc)
+    if rule is not None:
+        label = rule.label
+        parts.append(T("brief_keep", keep=label[:1].lower() + label[1:]))
+    return T("separator").join(parts)
 
 
 def build(session: Session, batch: str) -> ImportReport | None:
@@ -154,6 +193,7 @@ def build(session: Session, batch: str) -> ImportReport | None:
         items.append(
             ReportItem(
                 document=DocumentOut.from_model(doc),
+                brief=brief(doc),
                 facts=_facts(doc),
                 events=events.get(doc.id, []),
                 question=questions.question_for(session, doc),

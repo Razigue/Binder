@@ -22,6 +22,7 @@ import { countryName, countryOptions } from "@/lib/countries"
 import { currentLocale, formatDateTime } from "@/lib/format"
 import { imapHost } from "@/lib/mail"
 import { cn } from "@/lib/utils"
+import { TextSizeSetting } from "@/components/textSize"
 
 // Language names are written in their own language, so that anyone can find theirs.
 const LANGUAGE_NAMES = { en: "English", fr: "Français" } as const
@@ -361,6 +362,7 @@ function AppearanceCard() {
           ))}
         </div>
       </div>
+      <TextSizeSetting />
     </Card>
   )
 }

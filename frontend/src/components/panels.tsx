@@ -2,11 +2,13 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { PrinterIcon, EnvelopeSimpleIcon } from "@phosphor-icons/react"
 import { WarningCircleIcon, CheckCircleIcon, CopyIcon, DownloadSimpleIcon, FileTextIcon, FolderOpenIcon, InfoIcon, CircleNotchIcon, EnvelopeIcon, PencilSimpleIcon, ScalesIcon, PaperPlaneTiltIcon, GlobeIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { CategoryIcon } from "@/components/CategoryIcon"
+import { GlossaryText } from "@/components/glossary"
 import { JourneyDialog } from "@/components/journey"
 import { QuestionsDialog, type QuestionsRequest } from "@/components/questions"
 import { useInvalidateAll } from "@/hooks/queries"
@@ -157,6 +159,20 @@ function LegalCheckNote({
   )
 }
 
+/** Prints the letter's text alone (the PDF cannot be printed from inside the app). */
+function printLetter(body: string) {
+  const sheet = document.createElement("div")
+  sheet.className = "print-only"
+  sheet.textContent = body
+  document.body.appendChild(sheet)
+  const done = () => {
+    sheet.remove()
+    window.removeEventListener("afterprint", done)
+  }
+  window.addEventListener("afterprint", done)
+  window.print()
+}
+
 export function LetterView({ letter: initial, compact = false }: { letter: Letter; compact?: boolean }) {
   const t = useT(feed)
   const [letter, setLetter] = useState(initial)
@@ -182,6 +198,7 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
     },
     onError: (e) => toast.error(e.message),
   })
+  const [posting, setPosting] = useState(false)
   const sent = useMutation({
     mutationFn: () => api.letterSent(letter.id!),
     onSuccess: (l) => {
@@ -252,14 +269,38 @@ export function LetterView({ letter: initial, compact = false }: { letter: Lette
         )}
         {letter.id !== null && (
           <div className="flex flex-wrap gap-2 pt-1">
-            <Button size="sm" render={<a href={letterPdfUrl(letter.id)} download />} nativeButton={false}>
-              <DownloadSimpleIcon /> {t("letterPdf")}
+            {/* Printing and posting first: most letters still go on paper. */}
+            <Button onClick={() => printLetter(body)}>
+              <PrinterIcon /> {t("letterPrint")}
             </Button>
             {!letter.sent_on && (
-              <Button size="sm" variant="outline" onClick={() => sent.mutate()} disabled={sent.isPending}>
-                <PaperPlaneTiltIcon /> {t("letterSent")}
+              <Button variant="outline" onClick={() => setPosting(!posting)} aria-expanded={posting}>
+                <EnvelopeSimpleIcon /> {t("letterPost")}
               </Button>
             )}
+            <Button variant="ghost" render={<a href={letterPdfUrl(letter.id)} download />} nativeButton={false}>
+              <DownloadSimpleIcon /> {t("letterPdf")}
+            </Button>
+          </div>
+        )}
+        {posting && !letter.sent_on && (
+          <div className="rounded-lg bg-muted/50 p-3 text-sm">
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>{t("postPrint")}</li>
+              <li>{t("postSign")}</li>
+              <li>
+                {letter.recipient_address ? t("postEnvelopeTo") : t("postEnvelope")}
+                {letter.recipient_address && (
+                  <span className="mt-1 block whitespace-pre-line text-muted-foreground">
+                    {`${letter.recipient}\n${letter.recipient_address}`}
+                  </span>
+                )}
+              </li>
+              <li>{letter.registered ? t("postRegistered") : t("postStamp")}</li>
+            </ol>
+            <Button size="sm" className="mt-3" onClick={() => sent.mutate()} disabled={sent.isPending}>
+              <PaperPlaneTiltIcon /> {t("letterSent")}
+            </Button>
           </div>
         )}
       </div>
@@ -344,7 +385,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
         )}
       </p>
       <ul className="divide-y rounded-lg border">
-        {data.items.map(({ document: d, facts, events, question }) => (
+        {data.items.map(({ document: d, brief, facts, events, question }) => (
           <li key={d.id} className="space-y-2 px-4 py-3">
             <div className="flex items-start gap-3">
               {d.area ? <AreaIcon area={d.area} size="sm" /> : <CategoryIcon category={d.category} size="sm" />}
@@ -357,6 +398,12 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
                     <CircleNotchIcon className="size-3 animate-spin" /> {t("reportAnalysing", { count: 1 })}
                   </p>
                 ) : (
+                  <>
+                  {brief && (
+                    <p className="mt-0.5 text-sm">
+                      <GlossaryText text={brief} />
+                    </p>
+                  )}
                   <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
                     {facts.map((f) => (
                       <li key={f}>{f}</li>
@@ -367,6 +414,7 @@ export function ReportView({ batch, onNavigate }: { batch: string; onNavigate?: 
                       </li>
                     ))}
                   </ul>
+                  </>
                 )}
               </div>
               <FileTextIcon className="hidden size-4 text-muted-foreground sm:block" />

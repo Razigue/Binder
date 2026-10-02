@@ -168,7 +168,17 @@ search can also go to Binder as a question in one click. Three tabs:
 - **Archives**: old papers, still readable (see below).
 
 Open a document to see its preview: hover a field (amount, due date…) and Binder **highlights
-where it read it** on the page. **In short** explains the letter in plain language.
+where it read it** on the page. **In short** explains the letter in plain language. Right after
+an import, each new paper gets one line saying what it is, whether to act and by when, and how
+long it is kept.
+
+**Words of paperwork** (RIB, rent receipt, tax notice, overpayment, formal notice…) are
+underlined with dots: tap one for a one-sentence explanation.
+
+**Letters**: **Print** and **Send by post** come first (the steps: print, sign, envelope,
+stamp or registered mail, then "I sent it"); **Download (PDF)** is there too.
+
+**Text size**: Settings > Appearance offers Normal, Large and Larger.
 
 **Ask Binder**: ＋ Add, then **Ask a question**, on every page, or Ctrl K. Ask in your own words,
 it looks

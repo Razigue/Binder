@@ -19,6 +19,7 @@ import {
 } from "@/hooks/queries"
 import { useAgent, useAgentViewing } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
+import { GlossaryText } from "@/components/glossary"
 import { useT } from "@/i18n"
 import { area as areaMessages } from "@/i18n/messages/area"
 import { common } from "@/i18n/messages/common"
@@ -664,7 +665,9 @@ function InShort({ doc }: { doc: DocDetail }) {
         <p className="text-muted-foreground">{t("explanationUnavailable")}</p>
       ) : (
         <>
-          <p className="leading-relaxed">{ex.data.summary}</p>
+          <p className="leading-relaxed">
+            <GlossaryText text={ex.data.summary} />
+          </p>
           {ex.data.actions.length > 0 && (
             <ul className="mt-2 space-y-1">
               {ex.data.actions.map((a) => (
@@ -683,7 +686,9 @@ function InShort({ doc }: { doc: DocDetail }) {
           {ex.data.key_points.length > 0 && (
             <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
               {ex.data.key_points.map((p) => (
-                <li key={p}>{p}</li>
+                <li key={p}>
+                  <GlossaryText text={p} />
+                </li>
               ))}
             </ul>
           )}

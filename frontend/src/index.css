@@ -159,3 +159,21 @@ button:not([data-slot]):focus-visible {
   top: var(--titlebar-height, 0px);
   height: auto;
 }
+
+/* Printing a letter: only its text, on white paper (components/panels.tsx, PrintLetter). */
+.print-only {
+  display: none;
+}
+@media print {
+  body:has(.print-only) > *:not(.print-only) {
+    display: none !important;
+  }
+  .print-only {
+    display: block;
+    color: #000;
+    background: #fff;
+    font: 11pt/1.5 Georgia, serif;
+    white-space: pre-wrap;
+    padding: 0;
+  }
+}

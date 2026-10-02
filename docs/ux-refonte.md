@@ -13,7 +13,7 @@ choice, and what is left. One commit per step.
 | 4 | My papers | done |
 | 5 | Life events (Démarches) | done |
 | 6 | First launch | done |
-| 7 | Glossary and accessibility | to do |
+| 7 | Glossary and accessibility | done |
 
 ## Decisions
 
@@ -147,9 +147,40 @@ choice, and what is left. One commit per step.
   here") opens the list, with "Change my answers". The answers are not in Settings (the
   Settings page holds uncommitted changes of yours): the list is the place to change them.
 
+### Step 7: in short, glossary, accessibility
+
+- **In short at import**: each import report line starts with one sentence from the document's
+  fields (`reports.brief`): what it is, the payment or renewal date or "nothing to do", how
+  long it is kept. Immediate and without the model (the model's own "In short" stays on the
+  document page, where it may take a few seconds). The details below no longer repeat it.
+- **Glossary**: 17 terms, EN+FR definitions in `i18n/messages/glossary.ts`, matched in French
+  and English wording (documents are French whatever the interface language). Applied to the
+  To do cards, the question panel, the import report and "In short".
+- **Print**: the app cannot print the PDF itself (every response carries `X-Frame-Options:
+  DENY`, which `guard.py` must keep), so Print prints the letter's text through a print-only
+  sheet; the PDF stays one click away.
+- **Send by post**: no online posting service (local only): the four steps, with the
+  recipient's address when Binder has it, then "I sent it", which starts the follow-up.
+- **Text size**: kept in the browser's local storage (a display preference of this screen,
+  like the theme of a window), applied before the first paint.
+- **Labelled buttons**: every icon-only button already had an `aria-label` (or a screen-reader
+  text); nothing to add.
+
+## Summary
+
+The seven steps are done, each in its own commit. Verified at every step: ruff, mypy, pytest,
+`scripts/evaluate.py` (97.9%, the same telecom → other mistake as before the overhaul: not
+touched), oxlint, frontend build, and the screens touched, on a desktop width and at 390 px
+(headless Chrome with device emulation once the Chrome extension disconnected). On the demo,
+an import shows 2 questions.
+
 ## Left to do
 
-- Step 7: glossary (tap a term for one sentence), "Print" / "Send by post" as main letter
-  actions, text size setting.
-- `DocumentDetail`'s preview to reuse `DocumentPage`.
+- `DocumentDetail`'s preview to reuse `DocumentPage` (the file holds uncommitted changes of
+  yours).
+- The first-launch answers can only be changed from the papers list, not in Settings (same
+  reason).
+- A test of the model's second reading (needs the fake Ollama of the tests).
+- `evaluate.py`: the demo telecom bill read as "other" (rules: 97.9%, not 100% as PRODUCT.md
+  says).
 - `DocumentDetail`'s preview to reuse `DocumentPage`.

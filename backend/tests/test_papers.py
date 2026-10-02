@@ -40,3 +40,15 @@ def test_administrative_year_for_france_only(client: TestClient) -> None:
     assert "property_tax_due" not in concerns
     client.put("/api/preferences", json={"language": "auto", "country": "US", "theme": "system"})
     assert client.get("/api/calendar").json() == []
+
+
+def test_import_report_says_in_short_what_each_paper_is(client: TestClient) -> None:
+    batch = client.post("/api/demo").json()["batch"]
+    items = {
+        i["document"]["filename"]: i for i in client.get(f"/api/reports/{batch}").json()["items"]
+    }
+    tax = items["avis-imposition.pdf"]["brief"]
+    assert tax.startswith("Tax notice · $1,240.00 to pay by ")
+    assert tax.endswith("kept: 3 years after the tax year")
+    receipt = items["recu-don.pdf"]["brief"]
+    assert " · nothing to do · " in receipt

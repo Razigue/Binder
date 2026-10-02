@@ -538,6 +538,8 @@ export interface ActResult {
 
 export interface ReportItem {
   document: Doc
+  /** "In short": what it is, whether to act and by when, how long it is kept. */
+  brief: string
   facts: string[]
   events: string[]
   question: { key: string; title: string; detail: string; choices: { id: string; label: string; primary: boolean }[] } | null

@@ -166,7 +166,7 @@ def test_import_report_groups_a_drop_of_files(client: TestClient, samples: list[
     assert len(report["items"]) == 3
     tax = report["items"][0]
     assert "Filed under Money" in tax["facts"]
-    assert any(f.startswith("$1,240.00 to pay by") for f in tax["facts"])
+    assert "$1,240.00 to pay by" in tax["brief"]
     assert "documents filed" in report["summary"] and "to pay" in report["summary"]
     assert client.get("/api/reports/nothing").status_code == 404
 
