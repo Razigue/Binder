@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { ChevronRight, FilePen, FolderPlus, ListChecks, Loader2, type LucideIcon } from "lucide-react"
+import { CaretRightIcon, NotePencilIcon, FolderPlusIcon, ListChecksIcon, CircleNotchIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -79,7 +79,7 @@ export function PrepareCard({ area }: { area: Area }) {
           {ongoing.map((j) => (
             <Row
               key={j.id}
-              icon={ListChecks}
+              icon={ListChecksIcon}
               title={j.title}
               hint={tj("progress", { done: j.done, total: j.total })}
               onClick={() => panels.showJourney(j.id)}
@@ -88,7 +88,7 @@ export function PrepareCard({ area }: { area: Area }) {
           {startable.map((info) => (
             <Row
               key={info.kind}
-              icon={ListChecks}
+              icon={ListChecksIcon}
               title={info.title}
               hint={tj(`kind.${info.kind}Hint`)}
               onClick={() => setTask({ type: "journey", info })}
@@ -100,19 +100,19 @@ export function PrepareCard({ area }: { area: Area }) {
         {folders.map((kind) => (
           <Row
             key={kind}
-            icon={FolderPlus}
+            icon={FolderPlusIcon}
             title={t(`folder.${kind}`)}
             hint={t(`folder.${kind}Hint`)}
             onClick={() => setTask({ type: "folder", kind })}
           />
         ))}
-        <Row icon={FolderPlus} title={t("folder.custom")} hint={t("folder.customHint")} onClick={() => setTask({ type: "folder", kind: null })} />
+        <Row icon={FolderPlusIcon} title={t("folder.custom")} hint={t("folder.customHint")} onClick={() => setTask({ type: "folder", kind: null })} />
       </Group>
       <Group label={t("letters")}>
         {letters.map((kind) => (
           <Row
             key={kind}
-            icon={FilePen}
+            icon={NotePencilIcon}
             title={t(`letter.${kind}`)}
             hint={t(`letter.${kind}Hint`)}
             onClick={() => setTask({ type: "letter", kind })}
@@ -133,7 +133,7 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function Row({ icon: Icon, title, hint, onClick }: { icon: LucideIcon; title: string; hint: string; onClick: () => void }) {
+function Row({ icon: Icon, title, hint, onClick }: { icon: Icon; title: string; hint: string; onClick: () => void }) {
   return (
     <li>
       <button onClick={onClick} className="flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-muted/40">
@@ -144,7 +144,7 @@ function Row({ icon: Icon, title, hint, onClick }: { icon: LucideIcon; title: st
           <span className="block truncate text-sm font-medium">{title}</span>
           <span className="block truncate text-xs text-muted-foreground">{hint}</span>
         </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />
       </button>
     </li>
   )
@@ -270,7 +270,7 @@ function Working() {
   const t = useT(messages)
   return (
     <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" /> {t("working")}
+      <CircleNotchIcon className="size-4 animate-spin" /> {t("working")}
     </p>
   )
 }

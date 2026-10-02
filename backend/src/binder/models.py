@@ -73,6 +73,8 @@ class DocType(StrEnum):
     FINE = "fine"
     # Purchase invoice whose warranty is tracked (expiry_date = end of warranty).
     PURCHASE_RECEIPT = "purchase_receipt"
+    # Reminder or formal notice about an unpaid bill (relance, mise en demeure).
+    PAYMENT_REMINDER = "payment_reminder"
 
 
 # Enum member names stored by versions before the English identifiers (SQLAlchemy stores
@@ -166,6 +168,17 @@ class Document(SQLModel, table=True):
     person: str | None = Field(default=None, index=True)
     # Life area shown in the navigation (services/areas.py), kept in step with the category.
     area: str | None = Field(default=None, index=True)
+    # Breakdown of the amounts (`amount` stays the main figure every feature uses).
+    amount_ht: float | None = None
+    amount_tva: float | None = None
+    amount_ttc: float | None = None
+    amount_due: float | None = None
+    period_start: date | None = None
+    period_end: date | None = None
+    iban: str | None = None
+    siret: str | None = None
+    # JSON list of the doubts the checks raised (services/verify.py), until validation.
+    doubts: str = "[]"
 
     created_at: datetime = Field(default_factory=_now, index=True)
     updated_at: datetime = Field(default_factory=_now)
@@ -269,6 +282,8 @@ class Correspondence(SQLModel, table=True):
     follows: int | None = None
     # Legal points checked online when it was written (schemas.LegalCheck, JSON).
     verification: str | None = None
+    # Web pages it was adapted from (list of schemas.LegalSource, JSON).
+    sources: str | None = None
 
 
 class Learned(SQLModel, table=True):

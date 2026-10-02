@@ -242,7 +242,7 @@ def _extract_llm(text: str) -> list[tuple[str, str]] | None:
     try:
         reply = llm.chat([{"role": "user", "content": prompt}], fmt=EXTRACT_SCHEMA)
         points = json.loads(reply.get("content") or "{}").get("points") or []
-    except (httpx.HTTPError, json.JSONDecodeError, KeyError, AttributeError):
+    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, KeyError, AttributeError):
         log.exception("Legal points could not be listed by the model")
         return None
     found = []
@@ -252,7 +252,7 @@ def _extract_llm(text: str) -> list[tuple[str, str]] | None:
     return found[:MAX_POINTS]
 
 
-def _excerpt(body: str, claim: str) -> str:
+def excerpt(body: str, claim: str) -> str:
     """The part of a page about the point: around the paragraph sharing most of its words."""
     words = {w for w in re.findall(r"[a-z0-9]{4,}", normalize(claim))}
     paragraphs = body.split("\n")
@@ -267,7 +267,7 @@ def _excerpt(body: str, claim: str) -> str:
 
 def _judge(claim: str, pages: list[tuple[Source, str]]) -> _Judged | None:
     sources = "\n".join(
-        f'[{i}] {src.url}\n"""\n{_excerpt(body, claim)}\n"""'
+        f'[{i}] {src.url}\n"""\n{excerpt(body, claim)}\n"""'
         for i, (src, body) in enumerate(pages, 1)
     )
     prompt = JUDGE_PROMPT.format(
@@ -282,7 +282,7 @@ def _judge(claim: str, pages: list[tuple[Source, str]]) -> _Judged | None:
         # No reasoning step: as accurate here once the evidence is checked, and minutes faster.
         reply = llm.chat([{"role": "user", "content": prompt}], fmt=JUDGE_SCHEMA)
         return _Judged.model_validate(json.loads(reply.get("content") or "{}"))
-    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
         log.exception("Legal point could not be judged")
         return None
 

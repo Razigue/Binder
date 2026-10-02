@@ -1,10 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import {
-  Copy, FlaskConical, FolderSync, KeyRound, Mail, Monitor, Moon, RefreshCw, Sun, SunMoon, Trash2,
-  type LucideIcon,
-} from "lucide-react"
+import { CopyIcon, EraserIcon, FlaskIcon, FoldersIcon, KeyIcon, EnvelopeIcon, MonitorIcon, MoonIcon, ArrowsClockwiseIcon, SunIcon, CircleHalfIcon, TrashIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -13,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Sele
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
+import { usePanels } from "@/components/panels"
 import { PageHeader } from "@/components/layout/AppLayout"
 import { useInvalidateAll } from "@/hooks/queries"
 import { useLocale, useT } from "@/i18n"
@@ -63,7 +61,7 @@ export function SettingsPage() {
           action={
             anySource && (
               <Button variant="outline" onClick={() => run.mutate()} disabled={run.isPending}>
-                <RefreshCw className={run.isPending ? "animate-spin" : ""} /> {t("import.check")}
+                <ArrowsClockwiseIcon className={run.isPending ? "animate-spin" : ""} /> {t("import.check")}
               </Button>
             )
           }
@@ -81,8 +79,8 @@ export function SettingsPage() {
         <Section title={t("security.title")} description={t("security.description")}>
           <RecoveryCard />
         </Section>
-        <Section title={t("demo.title")} description={t("demo.description")}>
-          <DemoCard />
+        <Section title={t("data.title")} description={t("data.description")}>
+          <DataCard />
         </Section>
       </div>
     </>
@@ -105,7 +103,7 @@ function Section({ title, description, action, children }: { title: string; desc
   )
 }
 
-function CardHeading({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description?: string }) {
+function CardHeading({ icon: Icon, title, description }: { icon: Icon; title: string; description?: string }) {
   return (
     <div className="flex items-start gap-3">
       <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
@@ -320,10 +318,10 @@ function RegionCard() {
   )
 }
 
-const THEMES: { value: Theme; icon: LucideIcon }[] = [
-  { value: "system", icon: Monitor },
-  { value: "light", icon: Sun },
-  { value: "dark", icon: Moon },
+const THEMES: { value: Theme; icon: Icon }[] = [
+  { value: "system", icon: MonitorIcon },
+  { value: "light", icon: SunIcon },
+  { value: "dark", icon: MoonIcon },
 ]
 
 function AppearanceCard() {
@@ -332,7 +330,7 @@ function AppearanceCard() {
   const save = useSavePreference()
   return (
     <Card className="gap-5 p-6">
-      <CardHeading icon={SunMoon} title={t("appearance.title")} description={t("appearance.description")} />
+      <CardHeading icon={CircleHalfIcon} title={t("appearance.title")} description={t("appearance.description")} />
       <div className="space-y-2">
         <p id="pref-theme" className="text-sm font-medium">
           {t("theme.label")}
@@ -379,7 +377,7 @@ function FolderCard({ settings }: { settings: ImportSettings }) {
 
   return (
     <Card className="gap-5 p-6">
-      <CardHeading icon={FolderSync} title={t("folder.title")} description={t("folder.description")} />
+      <CardHeading icon={FoldersIcon} title={t("folder.title")} description={t("folder.description")} />
       <Toggle checked={enabled} onChange={setEnabled} label={t("folder.toggle")} />
       <Field id="watch-path" label={t("folder.path")}>
         <Input id="watch-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="~/Documents/Scans" />
@@ -426,7 +424,7 @@ function MailCard({ settings }: { settings: ImportSettings }) {
 
   return (
     <Card className="gap-5 p-6">
-      <CardHeading icon={Mail} title={t("mail.title")} description={t("mail.description")} />
+      <CardHeading icon={EnvelopeIcon} title={t("mail.title")} description={t("mail.description")} />
       <Toggle checked={form.enabled} onChange={(enabled) => set({ enabled })} label={t("mail.toggle")} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="imap-user" label={t("mail.address")}>
@@ -518,14 +516,14 @@ function RecoveryCard() {
 
   return (
     <Card className="gap-5 p-6">
-      <CardHeading icon={KeyRound} title={t("recovery.title")} description={info.code ? t("recovery.toWrite") : t("recovery.noted")} />
+      <CardHeading icon={KeyIcon} title={t("recovery.title")} description={info.code ? t("recovery.toWrite") : t("recovery.noted")} />
       {info.code ? (
         <div className="flex flex-wrap items-center gap-3">
           <code className="rounded-lg border bg-muted/50 px-4 py-2 font-sans text-lg font-semibold tracking-wider select-all">
             {info.code}
           </code>
           <Button variant="outline" onClick={() => navigator.clipboard.writeText(info.code ?? "").then(() => toast.success(t("recovery.copied")))}>
-            <Copy /> {t("recovery.copy")}
+            <CopyIcon /> {t("recovery.copy")}
           </Button>
           <Button onClick={() => confirm.mutate()} disabled={confirm.isPending}>
             {t("recovery.done")}
@@ -534,7 +532,7 @@ function RecoveryCard() {
       ) : (
         <div>
           <Button variant="outline" onClick={() => setRenewing(true)}>
-            <KeyRound /> {t("recovery.renew")}
+            <KeyIcon /> {t("recovery.renew")}
           </Button>
         </div>
       )}
@@ -548,7 +546,7 @@ function RecoveryCard() {
           <p className="text-xs break-all text-muted-foreground">{t("backup.folder", { path: info.folder })}</p>
         </div>
         <Button variant="outline" onClick={() => now.mutate()} disabled={now.isPending}>
-          <RefreshCw className={now.isPending ? "animate-spin" : ""} /> {t("backup.now")}
+          <ArrowsClockwiseIcon className={now.isPending ? "animate-spin" : ""} /> {t("backup.now")}
         </Button>
       </div>
       <ConfirmDialog
@@ -564,45 +562,97 @@ function RecoveryCard() {
   )
 }
 
-// --- Demo data ---------------------------------------------------------------------------------
+// --- Data: demo documents and erasing everything ----------------------------------------------
 
-function DemoCard() {
+function DataCard() {
   const t = useT(messages)
+  const panels = usePanels()
   const demo = useQuery({ queryKey: ["demo"], queryFn: api.demoStatus })
   const invalidate = useInvalidateAll()
-  const [confirming, setConfirming] = useState(false)
+  const [confirming, setConfirming] = useState<"demo" | "erase" | null>(null)
+  const seed = useMutation({
+    mutationFn: api.seedDemo,
+    onSuccess: (r) => {
+      invalidate()
+      toast.success(t("demo.loaded", { count: r.imported }))
+      if (r.batch) panels.showReport(r.batch)
+    },
+    onError: (e) => toast.error(e.message),
+  })
   const clear = useMutation({
     mutationFn: api.clearDemo,
     onSuccess: (r) => {
       invalidate()
-      toast.success(t("demo.cleared", { count: r.removed }))
+      toast.success(r.removed ? t("demo.cleared", { count: r.removed }) : t("demo.leftoversCleared"))
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const erase = useMutation({
+    mutationFn: api.eraseData,
+    onSuccess: (r) => {
+      invalidate()
+      toast.success(t("erase.done", { count: r.removed }))
     },
     onError: (e) => toast.error(e.message),
   })
   const count = demo.data?.documents ?? 0
+  const leftovers = demo.data?.leftovers ?? 0
+  const busy = seed.isPending || clear.isPending || erase.isPending
 
   return (
-    <Card className="gap-5 p-6">
-      <div className="flex items-center gap-3">
+    <Card className="gap-0 p-0">
+      <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-          <FlaskConical className="size-5" />
+          <FlaskIcon className="size-5" />
         </span>
-        <p className="text-sm">{count ? t("demo.count", { count }) : t("demo.none")}</p>
-      </div>
-      {count > 0 && (
-        <div>
-          <Button variant="destructive" onClick={() => setConfirming(true)} disabled={clear.isPending}>
-            <Trash2 /> {t("demo.clear")}
-          </Button>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{t("demo.title")}</p>
+          <p className="text-sm text-muted-foreground">{count ? t("demo.count", { count }) : t("demo.none")}</p>
+          {leftovers > 0 && (
+            <p className="text-xs text-muted-foreground">{t("demo.leftovers", { count: leftovers })}</p>
+          )}
         </div>
-      )}
+        <div className="flex flex-wrap gap-2">
+          {count === 0 && (
+            <Button variant="outline" onClick={() => seed.mutate()} disabled={busy || demo.isPending}>
+              <FlaskIcon /> {seed.isPending ? t("demo.loading") : t("demo.load")}
+            </Button>
+          )}
+          {(count > 0 || leftovers > 0) && (
+            <Button variant="outline" onClick={() => setConfirming("demo")} disabled={busy}>
+              <TrashIcon /> {t("demo.clear")}
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col gap-4 border-t p-6 sm:flex-row sm:items-center">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+          <EraserIcon className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{t("erase.title")}</p>
+          <p className="text-sm text-muted-foreground">{t("erase.what")}</p>
+        </div>
+        <Button variant="destructive" onClick={() => setConfirming("erase")} disabled={busy}>
+          <EraserIcon /> {t("erase.button")}
+        </Button>
+      </div>
       <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
+        open={confirming === "demo"}
+        onOpenChange={(open) => setConfirming(open ? "demo" : null)}
         title={t("demo.confirmTitle")}
         description={t("demo.confirmDescription")}
         confirmLabel={t("demo.clear")}
         onConfirm={() => clear.mutateAsync()}
+      />
+      <ConfirmDialog
+        open={confirming === "erase"}
+        onOpenChange={(open) => setConfirming(open ? "erase" : null)}
+        title={t("erase.confirmTitle")}
+        description={t("erase.confirmDescription")}
+        confirmLabel={t("erase.button")}
+        typeToConfirm={t("erase.word")}
+        onConfirm={() => erase.mutateAsync()}
       />
     </Card>
   )

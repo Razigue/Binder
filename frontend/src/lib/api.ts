@@ -19,7 +19,7 @@ export const DOC_TYPES = [
   "payment_schedule", "invoice", "contract", "loan_statement", "savings_statement",
   "annual_tax_statement", "donation_receipt", "childcare_certificate", "school_certificate",
   "civil_status", "family_record_book", "pension_statement", "benefit_decision",
-  "charges_statement", "fine", "purchase_receipt",
+  "charges_statement", "fine", "purchase_receipt", "payment_reminder",
 ] as const
 
 export type DocType = (typeof DOC_TYPES)[number]
@@ -51,10 +51,18 @@ export interface Doc {
   category: Category
   issuer: string | null
   amount: number | null
+  amount_ht?: number | null
+  amount_tva?: number | null
+  amount_ttc?: number | null
+  amount_due?: number | null
   issue_date: string | null
   due_date: string | null
   expiry_date: string | null
+  period_start?: string | null
+  period_end?: string | null
   reference: string | null
+  iban?: string | null
+  siret?: string | null
   confidence: number
   status: DocumentStatus
   missing_fields: string[]
@@ -88,6 +96,14 @@ export type DocPatch = Partial<
 > & { validated?: boolean; keep_forever?: boolean }
 
 /** The life areas of the navigation. */
+/** Grouped action on the documents selected in a list. */
+export interface BulkResult {
+  count: number
+  message: string
+}
+
+export type BulkPatch = { category?: Category; keep_forever?: boolean; validated?: boolean }
+
 export type Area = "housing" | "money" | "work" | "family" | "health" | "identity" | "vehicle"
 export const AREAS: Area[] = ["housing", "money", "work", "family", "health", "identity", "vehicle"]
 
@@ -160,6 +176,22 @@ export interface ChatMessage {
 export interface ToolCall {
   name: string
   arguments: Record<string, unknown>
+  /** Set once the tool has run. */
+  duration_ms?: number | null
+  error?: boolean
+}
+
+/** Token counts and speed of the local model for one answer. */
+export interface ChatStats {
+  model: string
+  /** Model turns, one per tool round trip. */
+  turns: number
+  prompt_tokens: number
+  output_tokens: number
+  tokens_per_second: number | null
+  prompt_tokens_per_second: number | null
+  /** Whole answer, tools included. */
+  seconds: number
 }
 
 export interface ChatResponse {
@@ -178,11 +210,31 @@ export interface ChatResponse {
   folders: Folder[]
   /** Journeys started or read during the turn. */
   journeys: Journey[]
+  /** Null when the demo rules answered, without a model. */
+  stats?: ChatStats | null
+  /** Changes held back until the user confirms them (proposed after reading a document). */
+  confirmations?: PendingAction[]
+  /** Shown under the answer (a legal point that could not be checked online). */
+  warnings?: string[]
+}
+
+export interface PendingAction {
+  token: string
+  tool: string
+  description: string
+}
+
+export interface ConfirmResult {
+  message: string
+  changed: boolean
+  undo: string | null
 }
 
 /** Progress of an answer: tools as they start, text as it is written. */
 export type ChatEvent =
   | ({ type: "tool" } & ToolCall)
+  | { type: "tool_done"; duration_ms: number; error: boolean }
+  | { type: "stats"; stats: ChatStats }
   | { type: "token"; text: string }
   | { type: "step" }
   | { type: "done"; response: ChatResponse }
@@ -306,6 +358,8 @@ export interface Letter {
   blanks: number
   /** Its legal points, checked online when it was written. */
   verification: LegalCheck | null
+  /** Web pages it was adapted from: the organisation's procedure and conditions. */
+  sources: LegalSource[]
 }
 
 export interface LegalSource {
@@ -417,6 +471,8 @@ export interface SetupStatus {
   total: number
   model: string | null
   error: string | null
+  /** Works, but not as well as it should (an outdated Ollama). Localized. */
+  warning?: string | null
 }
 
 export interface Feed {
@@ -620,6 +676,12 @@ export const api = {
   updateDocument: (id: number, patch: DocPatch) => request<DocDetail>(`/documents/${id}`, json("PATCH", patch)),
   reanalyze: (id: number) => request<DocDetail>(`/documents/${id}/reanalyze`, { method: "POST" }),
   deleteDocument: (id: number) => request<void>(`/documents/${id}`, { method: "DELETE" }),
+  bulkTrash: (ids: number[]) => request<BulkResult>("/documents/bulk/trash", json("POST", { ids })),
+  bulkUpdate: (ids: number[], patch: BulkPatch) =>
+    request<BulkResult>("/documents/bulk/update", json("POST", { ids, ...patch })),
+  bulkReanalyze: (ids: number[]) => request<BulkResult>("/documents/bulk/reanalyze", json("POST", { ids })),
+  bulkRestore: (ids: number[]) => request<BulkResult>("/trash/restore", json("POST", { ids })),
+  bulkPurge: (ids: number[]) => request<BulkResult>("/trash/purge", json("POST", { ids, confirm: true })),
   explanation: (id: number, refresh = false) =>
     request<Explanation>(`/documents/${id}/explanation${query({ refresh: refresh || undefined })}`),
   folders: () => request<Folder[]>("/folders"),
@@ -636,6 +698,8 @@ export const api = {
   act: (action: Pick<FeedAction, "type" | "params">) =>
     request<ActResult>("/actions", json("POST", { type: action.type, params: action.params })),
   undo: (token: string) => request<void>(`/undo/${encodeURIComponent(token)}`, { method: "POST" }),
+  confirmAction: (token: string) =>
+    request<ConfirmResult>(`/agent/confirm/${encodeURIComponent(token)}`, { method: "POST" }),
   report: (batch: string) => request<ImportReport>(`/reports/${encodeURIComponent(batch)}`),
   reportSeen: (batch: string) => request<void>(`/reports/${encodeURIComponent(batch)}/seen`, { method: "POST" }),
   areas: () => request<AreaSummary[]>("/areas"),
@@ -694,8 +758,9 @@ export const api = {
   closeScan: () => request<void>("/scan/session", { method: "DELETE" }),
   deleteScanPage: (id: string) => request<void>(`/scan/pages/${id}`, { method: "DELETE" }),
   seedDemo: () => request<{ imported: number; batch: string | null }>("/demo", { method: "POST" }),
-  demoStatus: () => request<{ documents: number }>("/demo"),
-  clearDemo: () => request<{ removed: number }>("/demo", { method: "DELETE" }),
+  demoStatus: () => request<{ documents: number; leftovers: number }>("/demo"),
+  clearDemo: () => request<{ removed: number; files: number }>("/demo", { method: "DELETE" }),
+  eraseData: () => request<{ removed: number }>("/data?confirm=true", { method: "DELETE" }),
   chat: (message: string, history: ChatMessage[], attachments: number[] = [], signal?: AbortSignal) =>
     request<ChatResponse>("/agent/chat", { ...json("POST", { message, history, attachments }), signal }),
   chatStream: (
@@ -710,6 +775,7 @@ export const api = {
 export const fileUrl = (id: number) => `/api/documents/${id}/file`
 export const previewUrl = (id: number, page = 0) => `/api/documents/${id}/preview?page=${page}`
 export const exportUrl = (category?: Category) => `/api/export${query({ category })}`
+export const selectionExportUrl = (ids: number[]) => `/api/export?${ids.map((id) => `ids=${id}`).join("&")}`
 export const scanThumbUrl = (id: string) => `/api/scan/pages/${id}/thumb`
 export const folderExportUrl = (key: string) => `/api/folders/${key}/export`
 export const letterPdfUrl = (id: number) => `/api/letters/${id}/pdf`

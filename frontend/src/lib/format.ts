@@ -112,9 +112,17 @@ export function docTypeLabel(docType: string | null | undefined): string {
   return key in common.en ? t(key as keyof typeof common.en) : docType
 }
 
+/** "unverified:due_date" → "Not found in the text" (a doubt raised when reading). */
+export function doubtLabel(doubt: string): string | null {
+  const key = `doubt.${doubt.split(":")[0]}`
+  return key in common.en ? t(key as keyof typeof common.en) : null
+}
+
 export function missingLabel(fields: string[]): string {
   if (fields.includes("text")) return t("missing.text")
   if (fields.includes("duplicate")) return t("missing.duplicate")
+  const doubt = fields.map(doubtLabel).find(Boolean)
+  if (doubt) return doubt
   if (fields.length === 0) return t("missing.none")
   if (fields.length > 1) return t("missing.several")
   const key = `missing.${fields[0]}`

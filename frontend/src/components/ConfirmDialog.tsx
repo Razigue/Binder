@@ -1,12 +1,15 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { useT } from "@/i18n"
 import { common } from "@/i18n/messages/common"
 
-/** Asks for explicit consent before an irreversible action. */
+/** Asks for explicit consent before an irreversible action. With `typeToConfirm`, the user must
+ * also type that word: for actions too heavy for a single click. */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -14,6 +17,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   destructive = true,
+  typeToConfirm,
   onConfirm,
 }: {
   open: boolean
@@ -22,29 +26,49 @@ export function ConfirmDialog({
   description: React.ReactNode
   confirmLabel: string
   destructive?: boolean
+  typeToConfirm?: string
   onConfirm: () => Promise<unknown> | void
 }) {
   const t = useT(common)
   const [busy, setBusy] = useState(false)
+  const [typed, setTyped] = useState("")
+  const confirmed = !typeToConfirm || typed.trim().toLocaleUpperCase() === typeToConfirm.toLocaleUpperCase()
+  const changeOpen = (next: boolean) => {
+    if (!next) setTyped("")
+    onOpenChange(next)
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+        {typeToConfirm && (
+          <div className="grid gap-2">
+            <Label htmlFor="confirm-word">{t("confirm.type", { word: typeToConfirm })}</Label>
+            <Input
+              id="confirm-word"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy}
+            />
+          </div>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button variant="outline" onClick={() => changeOpen(false)} disabled={busy}>
             {t("action.cancel")}
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
-            disabled={busy}
+            disabled={busy || !confirmed}
             onClick={async () => {
               setBusy(true)
               try {
                 await onConfirm()
-                onOpenChange(false)
+                changeOpen(false)
               } finally {
                 setBusy(false)
               }

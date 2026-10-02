@@ -1,7 +1,9 @@
 """Letters written for the user, complete and ready to send, then followed until answered.
 
 Any letter can be asked for in plain words ("ask the CAF to pay the overpayment in
-instalments"): the local model writes the body from the related document. The common letters
+instalments"): the local model writes the body from the related document, the user's words
+and what the web says of the organisation's own procedure (`research.py`: where to send this
+request, its conditions, the rules for this kind of contract). The common letters
 (termination, complaint, request, payment plan, appeal, formal notice, change of address) also
 have templates carrying the legal points they rely on; the model is briefed with the same
 points, and the templates write the letter without a model (demos). The sender
@@ -29,9 +31,9 @@ from sqlmodel import Session
 
 from binder import i18n
 from binder.models import Category, Correspondence, Deadline, DocType, Document
-from binder.schemas import LegalCheck
+from binder.schemas import LegalCheck, LegalSource
 from binder.schemas import Letter as Letter  # re-exported: letters.Letter
-from binder.services import activity, household, lawcheck, llm, settings_store, undo
+from binder.services import activity, household, lawcheck, llm, research, settings_store, undo
 from binder.services.profile import KEY as PROFILE_KEY
 from binder.services.profile import Profile as Profile  # re-exported: letters.Profile
 from binder.services.rules import normalize
@@ -720,19 +722,27 @@ def written_msg(letter: Letter) -> i18n.Msg:
 COMPOSE_PROMPT = """Write the body of a formal letter, in {language}, from a private person to \
 an organisation. Today: {today}. Country: {country}.
 What the letter must do: {purpose}
-{document}
-Return JSON: subject (short, no "Subject:"), recipient (organisation name), paragraphs (2 to 5 \
-paragraphs of the body only: no address, date, greeting, closing formula or signature), \
-registered (true for a termination, a dispute or a formal notice).
-Use only the facts given; for a fact you do not have (a date, a figure), write \
-{blank}. Plain, firm and polite; cite references and amounts exactly."""
+{document}{research}
+Return JSON: subject (short, no "Subject:"), recipient (organisation name and, when the \
+sources name one, the department handling this request), recipient_address (the postal \
+address this organisation gives for this kind of request, copied from the document or the \
+sources; "" if they give none), paragraphs (2 to 5 paragraphs of the body only: no address, \
+date, greeting, closing formula or signature), registered (true for a termination, a dispute \
+or a formal notice), sources (numbers of the web sources used, [] if none).
+Write this letter for this organisation and this kind of contract, not a generic template: \
+follow its own procedure and conditions and the rules that apply to it, as the sources state \
+them; leave out what does not apply. Use only the facts given (the request, the document, the \
+sources); for a fact you do not have (a date, a figure), write {blank}. Plain, firm and \
+polite; cite references and amounts exactly."""
 COMPOSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "subject": {"type": "string"},
         "recipient": {"type": "string"},
+        "recipient_address": {"type": "string"},
         "paragraphs": {"type": "array", "items": {"type": "string"}},
         "registered": {"type": "boolean"},
+        "sources": {"type": "array", "items": {"type": "integer"}},
     },
     "required": ["subject", "recipient", "paragraphs", "registered"],
 }
@@ -741,12 +751,28 @@ COMPOSE_SCHEMA: dict[str, Any] = {
 class _Composed(BaseModel):
     subject: str
     recipient: str
+    recipient_address: str = ""
     paragraphs: list[str]
     registered: bool = False
+    sources: list[int] = []
 
 
 # What the model is told for a letter of a known kind: the legal points of the template.
 BRIEFS = {
+    "termination": "Terminate the contract or subscription: the decision stated plainly, the "
+    "date it takes effect under the notice and commitment period that apply to this kind of "
+    "contract with this organisation, a request for written confirmation and for the refund of "
+    "sums paid for the period not covered, and whatever this organisation requires for it "
+    "where it applies (a number portability code for a mobile line, equipment to return, a "
+    "meter reading).",
+    "complaint": "Dispute the invoice or charge with the facts given and ask for its "
+    "correction or refund; if no satisfactory answer comes in the time that applies, the "
+    "matter goes to the ombudsman of this sector.",
+    "request": "Ask for the document named (certificate, duplicate, statement…), by the "
+    "channel this organisation uses for it.",
+    "address_change": "Give the new address (and the moving date if given) and ask for the "
+    "contract's details to be updated; for energy or telecoms, ask for the contract to be "
+    "transferred to the new address on that date, or ended then.",
     "payment_plan": "Ask for a payment plan (monthly instalments) or extra time to pay the sum "
     "due, explaining the situation in good faith. To a benefits office (CAF…), also ask for the "
     "debt to be written off in whole or in part if it cannot be repaid.",
@@ -771,8 +797,8 @@ DETAILED = {"custom", "complaint", "payment_plan", "appeal", "formal_notice", "a
 
 
 def brief(kind: str | None, doc: Document | None) -> str:
-    """Instructions for the model for a letter of this kind ("" for kinds whose template is
-    used as it is: termination, request, change of address)."""
+    """Instructions for the model for a letter of this kind ("" for a letter described in
+    words only)."""
     if kind == "appeal":
         return APPEAL_BRIEFS[appeal_procedure(doc)]
     return BRIEFS.get(kind or "", "")
@@ -797,33 +823,46 @@ def guess_kind(purpose: str) -> str:
     return next((kind for kind, words in KIND_WORDS if re.search(words, norm)), "custom")
 
 
-def _compose_llm(purpose: str, doc: Document | None, language: i18n.Language) -> _Composed | None:
-    facts = ""
-    if doc is not None:
-        fields = {
-            "title": doc.title,
-            "issuer": doc.issuer,
-            "reference": doc.reference,
-            "amount": doc.amount,
-            "issue_date": doc.issue_date,
-            "due_date": doc.due_date,
-        }
-        facts = f'Related document: {llm.dumps(i18n.jsonable(fields))}\n"""\n'
-        facts += llm.compact(doc.text, 2500) + '\n"""'
+def _facts(doc: Document | None, text_chars: int = 2500) -> str:
+    """The related document for the model: its fields and the start of its text."""
+    if doc is None:
+        return ""
+    fields = {
+        "title": doc.title,
+        "issuer": doc.issuer,
+        "reference": doc.reference,
+        "amount": doc.amount,
+        "issue_date": doc.issue_date,
+        "due_date": doc.due_date,
+    }
+    facts = f"Related document: {llm.dumps(i18n.jsonable(fields))}"
+    if text_chars:
+        facts += f'\n"""\n{llm.compact(doc.text, text_chars)}\n"""'
+    return facts
+
+
+def _compose_llm(
+    purpose: str,
+    doc: Document | None,
+    language: i18n.Language,
+    pages: list[research.Page] | None = None,
+) -> _Composed | None:
     with i18n.using(language):
         blank = T("to_complete")
+    block = research.prompt_block(pages or [])
     prompt = COMPOSE_PROMPT.format(
         language=i18n.language_name(language),
         today=date.today().isoformat(),
         country=llm.user_context()["country"],
         purpose=purpose,
-        document=facts,
+        document=_facts(doc),
+        research=f"\n{block}" if block else "",
         blank=blank,
     )
     try:
         message = llm.chat([{"role": "user", "content": prompt}], fmt=COMPOSE_SCHEMA)
         composed = _Composed.model_validate(json.loads(message.get("content") or "{}"))
-    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
         log.exception("Letter by the model failed, falling back to a template")
         return None
     composed.paragraphs = [p.strip() for p in composed.paragraphs if p.strip()]
@@ -844,13 +883,24 @@ def compose(
     address = recipient_address(doc, profile)
     language = letter_language()
     composed = None
-    instructions = brief(kind, doc)
-    if purpose.strip() and llm.is_available() and (kind is None or instructions):
-        composed = _compose_llm(f"{instructions} {purpose.strip()}".strip(), doc, language)
+    pages: list[research.Page] = []
+    request = f"{brief(kind, doc)} {purpose.strip()}".strip()
+    if request and llm.is_available():
+        # The plan sees the document's fields only; what leaves the machine is checked there.
+        with i18n.using(language):
+            pages = research.gather(session, request, _facts(doc, 0), language)
+        composed = _compose_llm(request, doc, language, pages)
     if composed is not None:
         with i18n.using(language):
             special = _recipient(kind or "custom", doc)
         issuer = doc.issuer if doc and doc.issuer else None
+        named = composed.recipient.strip()
+        if issuer and normalize(issuer) in normalize(named):
+            issuer = named  # with the department handling this request ("… Service Résiliation")
+        # The address the organisation gives for this request, when a source really says it.
+        found = composed.recipient_address.strip()
+        if found and research.backed(found, [p.excerpt for p in pages] + [doc.text if doc else ""]):
+            address = found
         letter = layout(
             kind or "custom",
             doc,
@@ -860,8 +910,10 @@ def compose(
             composed.registered,
             language,
             address,
-            recipient=special or issuer or composed.recipient.strip() or None,
+            recipient=special or issuer or named or None,
         )
+        used = [pages[i - 1].source for i in composed.sources if 1 <= i <= len(pages)]
+        letter.sources = list({s.url: s for s in used}.values())
     else:
         kind = kind or guess_kind(purpose)
         details = purpose if kind in DETAILED else ""
@@ -883,6 +935,7 @@ def save(session: Session, letter: Letter, *, actor: str = "user") -> Letter:
         language=letter.language,
         registered=letter.registered,
         verification=letter.verification.model_dump_json() if letter.verification else None,
+        sources=json.dumps([s.model_dump() for s in letter.sources]) if letter.sources else None,
     )
     session.add(row)
     session.flush()
@@ -909,6 +962,7 @@ def out(row: Correspondence) -> Letter:
         answered=row.answered,
         blanks=len(BLANK.findall(row.body)),
         verification=LegalCheck.model_validate_json(row.verification) if row.verification else None,
+        sources=[LegalSource.model_validate(s) for s in json.loads(row.sources or "[]")],
     )
 
 

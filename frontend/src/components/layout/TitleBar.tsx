@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { BookLock } from "lucide-react"
+import { VaultIcon } from "@phosphor-icons/react"
 import { useLocale, useT } from "@/i18n"
 import { layout } from "@/i18n/messages/layout"
 import { cn } from "@/lib/utils"
@@ -180,7 +180,7 @@ export function TitleBar({ maximized }: { maximized: boolean }) {
     <header onMouseDown={onMouseDown} className="flex h-9 shrink-0 items-center border-b bg-sidebar select-none">
       <div className={cn("flex items-center gap-2 px-3.5 transition-opacity", !active && "opacity-55")}>
         <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-primary-foreground">
-          <BookLock className="size-3" />
+          <VaultIcon className="size-3" />
         </span>
         <span className="text-[13px] font-medium text-sidebar-foreground">Binder</span>
       </div>

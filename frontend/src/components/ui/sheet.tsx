@@ -7,7 +7,7 @@ import { useT } from "@/i18n"
 import { common } from "@/i18n/messages/common"
 
 import { Button } from "@/components/ui/button"
-import { XIcon } from "lucide-react"
+import { XIcon } from "@phosphor-icons/react"
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />

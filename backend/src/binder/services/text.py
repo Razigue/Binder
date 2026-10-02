@@ -6,8 +6,9 @@ Tesseract when installed. Pages are also rendered as images for the vision of th
 
 import io
 import logging
+import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
@@ -26,6 +27,8 @@ class ReadResult:
     text: str
     page_count: int
     ocr_used: bool
+    # Text of each page (PDFs), to spot several documents scanned into one file.
+    pages: list[str] = field(default_factory=list)
 
 
 def _prepare(image: Image.Image) -> Image.Image:
@@ -169,7 +172,9 @@ def _read_pdf(data: bytes) -> ReadResult:
     ocr_used = False
     with pymupdf.open(stream=data, filetype="pdf") as pdf:
         for page in pdf:
-            page_text = page.get_text("text")
+            # Sorted by position: columns and tables come out in reading order, not in the
+            # order the PDF happens to draw them.
+            page_text = page.get_text("text", sort=True)
             if len(page_text.strip()) < MIN_TEXT_PER_PAGE:
                 pix = page.get_pixmap(dpi=200)
                 ocr_text = ocr_image(Image.open(io.BytesIO(pix.tobytes("png"))))
@@ -177,7 +182,30 @@ def _read_pdf(data: bytes) -> ReadResult:
                     page_text, ocr_used = ocr_text, True
             pages.append(page_text)
         text = unicodedata.normalize("NFKC", "\n".join(pages)).strip()
-        return ReadResult(text=text, page_count=len(pdf), ocr_used=ocr_used)
+        return ReadResult(text=text, page_count=len(pdf), ocr_used=ocr_used, pages=pages)
+
+
+_PAGE_NUMBER = re.compile(r"(?<![a-z])page\s*(\d{1,3})(?:\s*(?:/|sur|of)\s*\d{1,3})?(?!\d)")
+# Lines of a page where its issuer's letterhead is.
+LETTERHEAD_LINES = 2
+
+
+def several_documents(pages: list[str]) -> bool:
+    """Several documents in one file (a batch scanned together): the page numbering starts
+    again at 1, or the pages are headed by different issuers. A hint for review only."""
+    from binder.services.rules import detect_issuer, normalize
+
+    numbers = []
+    issuers = set()
+    for page in pages:
+        norm = normalize(page)
+        if m := _PAGE_NUMBER.search(norm):
+            numbers.append(int(m[1]))
+        head = "\n".join([line for line in norm.splitlines() if line.strip()][:LETTERHEAD_LINES])
+        if issuer := detect_issuer(head):
+            issuers.add(issuer)
+    restarts = any(n == 1 and before > 1 for before, n in zip(numbers, numbers[1:], strict=False))
+    return restarts or len(issuers) > 1
 
 
 def render_page(data: bytes, mime_type: str, page_number: int = 0, dpi: int = 110) -> bytes:
@@ -229,3 +257,19 @@ def html_to_pdf(html: str, css: str, margin: float = 64) -> bytes:
         writer.end_page()
     writer.close()
     return buffer.getvalue()
+
+
+def is_bare_a4_pdf(data: bytes) -> bool:
+    """One A4 page and no metadata at all: how `samples.Sample.pdf` writes the demo documents in
+    every version. Real PDFs always carry the name of the software that made them."""
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as pdf:
+            if pdf.page_count != 1:
+                return False
+            rect = pdf[0].rect
+            meta = pdf.metadata or {}
+    except Exception:
+        return False
+    return (round(rect.width), round(rect.height)) == (595, 842) and not any(
+        meta.get(key) for key in ("producer", "creator", "creationDate", "title")
+    )

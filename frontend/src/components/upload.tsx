@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react"
-import { CircleAlert, FileText, Loader2, Lock, Smartphone, Upload } from "lucide-react"
+import { WarningCircleIcon, FileTextIcon, CircleNotchIcon, LockIcon, DeviceMobileIcon, UploadSimpleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useInvalidateAll } from "@/hooks/queries"
@@ -121,7 +121,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               {batch && (sent || !items.length) && <ReportView batch={batch} onNavigate={() => onOpenChange(false)} />}
               {batch && !sent && items.length > failed.length && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" /> {t("analysing")}
+                  <CircleNotchIcon className="size-4 animate-spin" /> {t("analysing")}
                 </p>
               )}
               {batch && (
@@ -130,7 +130,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 </div>
               )}
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Lock className="size-3.5" /> {t("local")}
+                <LockIcon className="size-3.5" /> {t("local")}
               </p>
             </>
           )}
@@ -165,7 +165,7 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
         className,
       )}
     >
-      <FileText className={cn("text-primary", compact ? "size-5" : "size-8")} strokeWidth={1.5} />
+      <FileTextIcon className={cn("text-primary", compact ? "size-5" : "size-8")} weight="light" />
       <p className="text-sm font-medium">{t("dropHere")}</p>
       <p className="text-xs text-muted-foreground">{t("dropHint")}</p>
       <div className="mt-2 flex flex-wrap justify-center gap-2">
@@ -173,7 +173,7 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
           {t("browse")}
         </Button>
         <Button variant="outline" size="sm" onClick={scanWithPhone}>
-          <Smartphone /> {scanT("action")}
+          <DeviceMobileIcon /> {scanT("action")}
         </Button>
       </div>
       <input
@@ -194,7 +194,7 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
 function ErrorBox({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-      <CircleAlert className="size-4" /> {message}
+      <WarningCircleIcon className="size-4" /> {message}
     </div>
   )
 }
@@ -204,7 +204,7 @@ export function ImportButton() {
   const { open } = useUpload()
   return (
     <Button onClick={open}>
-      <Upload /> {t("import")}
+      <UploadSimpleIcon /> {t("import")}
     </Button>
   )
 }

@@ -64,6 +64,13 @@ def _column_default(column: Column[Any]) -> str:
     return "0" if python_type in (int, float, bool) else "''"
 
 
+# Filled when their column is added: values carried over from an older column.
+BACKFILL = {
+    # The former single amount becomes the total including tax.
+    ("document", "amount_ttc"): "UPDATE document SET amount_ttc = amount",
+}
+
+
 def migrate(engine: Engine) -> None:
     """Adds the columns that appeared since the database was created (no column is dropped or
     renamed: databases from previous versions stay readable)."""
@@ -82,6 +89,8 @@ def migrate(engine: Engine) -> None:
                         f"DEFAULT {_column_default(column)}"
                     )
                 )
+                if (table.name, column.name) in BACKFILL:
+                    conn.execute(text(BACKFILL[(table.name, column.name)]))
                 if column.index:
                     conn.execute(
                         text(

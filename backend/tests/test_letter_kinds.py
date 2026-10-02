@@ -123,6 +123,7 @@ def test_the_model_writes_with_the_legal_points(
     assert "requête en exonération" in prompts[0] and "I was not driving" in prompts[0]
     assert letter["kind"] == "appeal" and letter["recipient"] == "Public Prosecutor's Officer"
     assert "I was not driving the car that day." in letter["body"]
-    # A kind whose template is used as it is does not go to the model.
-    write(client, kind="termination", document_id=edf["id"], purpose="end it")
-    assert len(prompts) == 1
+    # A termination too: written for this contract, with the user's words, not a template.
+    write(client, kind="termination", document_id=edf["id"], purpose="end it, I am moving")
+    assert len(prompts) == 2
+    assert "commitment period" in prompts[1] and "end it, I am moving" in prompts[1]

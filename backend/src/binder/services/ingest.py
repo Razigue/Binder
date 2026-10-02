@@ -7,6 +7,7 @@ import mimetypes
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlmodel import Session, col, or_, select
 
@@ -29,8 +30,16 @@ from binder.services import (
     rules,
     subscriptions,
     undo,
+    verify,
 )
-from binder.services.text import SUPPORTED_MIME, ReadResult, page_image, read_document
+from binder.services.text import (
+    SUPPORTED_MIME,
+    ReadResult,
+    is_bare_a4_pdf,
+    page_image,
+    read_document,
+    several_documents,
+)
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +69,47 @@ T = i18n.catalog(
         "unreadable": {"en": "unreadable text", "fr": "texte illisible"},
         "missing": {"en": "missing {ingest_missing}", "fr": "manque {ingest_missing}"},
         "unknown_category": {"en": "unknown category", "fr": "catégorie inconnue"},
+        "doubtful": {"en": "to check: {ingest_doubts}", "fr": "à vérifier : {ingest_doubts}"},
+        "doubt_unverified": {
+            "en": "{field} not found in the text",
+            "fr": "{field} introuvable dans le texte",
+        },
+        "doubt_ocr_mismatch": {
+            "en": "image and OCR differ ({field})",
+            "fr": "image et OCR divergent ({field})",
+        },
+        "doubt_date_swapped": {
+            "en": "day and month swapped ({field})",
+            "fr": "jour et mois inversés ({field})",
+        },
+        "doubt_invalid": {
+            "en": "invalid check digits ({field})",
+            "fr": "clé de contrôle invalide ({field})",
+        },
+        "doubt_inconsistent_amounts": {
+            "en": "before tax + VAT ≠ total",
+            "fr": "HT + TVA ≠ TTC",
+        },
+        "doubt_implausible_dates": {
+            "en": "implausible date ({field})",
+            "fr": "date improbable ({field})",
+        },
+        "doubt_disagreement": {
+            "en": "two different readings ({field})",
+            "fr": "deux lectures divergentes ({field})",
+        },
+        "doubt_truncated": {
+            "en": "long document, read in part only",
+            "fr": "document long, lu en partie seulement",
+        },
+        "doubt_several_documents": {
+            "en": "several documents in one file?",
+            "fr": "plusieurs documents dans un même fichier ?",
+        },
+        "doubt_transcribed": {
+            "en": "text read by the AI only, unchecked",
+            "fr": "texte lu par l'IA seule, non vérifié",
+        },
         "to_review": {
             "en": "“{title}” set aside for review ({why})",
             "fr": "« {title} » mis de côté pour vérification ({why})",
@@ -103,6 +153,15 @@ T = i18n.catalog(
     },
 )
 DEMO_BATCH = "demo-"
+# Every file name the demo has used, older versions included.
+DEMO_FILENAMES = (
+    "attestation-caf.pdf", "attestation-garde.pdf", "avis-contravention.pdf",
+    "avis-imposition.pdf", "bulletin-paie.pdf", "carte-identite.pdf", "certificat-scolarite.pdf",
+    "controle-technique.pdf", "decompte-ameli.pdf", "facture-edf.pdf", "facture-edf-juillet.pdf",
+    "facture-orange.pdf", "maif-echeance.pdf", "note-garage.pdf", "quittance-loyer.pdf",
+    "recu-don.pdf", "regularisation-charges.pdf", "releve-bancaire.pdf", "taxe-fonciere.pdf",
+    "trop-percu-caf.pdf",
+)  # fmt: skip
 
 
 def _render_missing(fields: list[str], language: i18n.Language) -> str:
@@ -112,8 +171,25 @@ def _render_missing(fields: list[str], language: i18n.Language) -> str:
 
 i18n.register_param_renderer("ingest_missing", _render_missing)
 
+
+def render_doubt(doubt: str, language: i18n.Language | None = None) -> str:
+    """A doubt of the checks in words: "unverified:due_date" → "due date not found…"."""
+    code, _, field = doubt.partition(":")
+    key = f"doubt_{code}"
+    if key not in T.keys:
+        return doubt
+    return T.get(key, language).format(field=i18n.field_label(field, language) if field else "")
+
+
+def _render_doubts(doubts: list[str], language: i18n.Language) -> str:
+    return T.get("separator", language).join(render_doubt(d, language) for d in doubts)
+
+
+i18n.register_param_renderer("ingest_doubts", _render_doubts)
+
 REVIEW_THRESHOLD = 0.6
-# Pages of a scan shown to the model: administrative documents say what matters up front.
+# Pages of a scan shown to the model: administrative documents say what matters up front, and
+# the last page of a longer one is added (totals, signature).
 VISION_PAGES = 3
 
 
@@ -204,28 +280,40 @@ def delete_file(doc: Document) -> None:
     (get_settings().files_dir / doc.stored_name).unlink(missing_ok=True)
 
 
-def merge(by_rules: Extraction, by_llm: Extraction | None) -> Extraction:
-    """Combines both extractions: the model wins, the rules fill its gaps."""
+def merge(
+    by_rules: Extraction, by_llm: Extraction | None, reading: list[str] | None = None
+) -> Extraction:
+    """Combines both extractions (each already checked against the text): the model wins, the
+    rules fill its gaps, and any amount or date they read differently is a doubt. The
+    confidence comes from the checks only. `reading`: doubts about the reading itself (text
+    cut, several documents in the file)."""
     if by_llm is None:
-        return by_rules
-    merged = by_llm.model_copy()
-    for field in (
-        "issuer", "amount", "issue_date", "due_date", "expiry_date", "reference", "person",
-    ):  # fmt: skip
-        if getattr(merged, field) in (None, ""):
-            setattr(merged, field, getattr(by_rules, field))
-    if merged.category == Category.OTHER and by_rules.category != Category.OTHER:
-        merged.category = by_rules.category
-    merged.title = merged.title or by_rules.title
-    merged.doc_type = by_llm.doc_type or by_rules.doc_type
+        merged = by_rules.model_copy()
+    else:
+        merged = by_llm.model_copy()
+        merged.doubts = [*by_llm.doubts, *verify.disagreements(by_rules, by_llm)]
+        if merged.amount is None:
+            merged.amount = by_rules.amount
+        for field in ("issuer", "issue_date", "due_date", "expiry_date", "reference", "person"):
+            if getattr(merged, field) in (None, ""):
+                setattr(merged, field, getattr(by_rules, field))
+        if merged.category == Category.OTHER and by_rules.category != Category.OTHER:
+            merged.category = by_rules.category
+        merged.title = merged.title or by_rules.title
+        merged.doc_type = by_llm.doc_type or by_rules.doc_type
+        merged.extractor = "llm+rules"
     if merged.due_date is not None and merged.due_date == merged.expiry_date:
         # "Next inspection before…": an end of validity, not a payment (as in the rules).
         merged.due_date = None
-    if by_rules.category == merged.category:
-        merged.confidence = round(max(by_llm.confidence, by_rules.confidence), 2)
-    else:
-        merged.confidence = round(min(by_llm.confidence, by_rules.confidence) * 0.8, 2)
-    merged.extractor = "llm+rules"
+    merged.doubts = list(
+        dict.fromkeys([*(reading or []), *merged.doubts, *verify.consistency(merged)])
+    )
+    merged.missing_fields = rules.missing_for(merged.category, merged.model_dump())
+    checked = verify.confidence(
+        merged.doubts, merged.missing_fields, known_category=merged.category != Category.OTHER
+    )
+    # Without the model (demo), the keyword score of the rules is one more check.
+    merged.confidence = checked if by_llm is not None else min(checked, by_rules.confidence)
     return merged
 
 
@@ -234,10 +322,19 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     doc.category = ext.category
     doc.issuer = ext.issuer
     doc.amount = ext.amount
+    doc.amount_ht = ext.amount_ht
+    doc.amount_tva = ext.amount_tva
+    doc.amount_ttc = ext.amount_ttc
+    doc.amount_due = ext.amount_due
     doc.issue_date = ext.issue_date
     doc.due_date = ext.due_date
     doc.expiry_date = ext.expiry_date
+    doc.period_start = ext.period_start
+    doc.period_end = ext.period_end
     doc.reference = ext.reference
+    doc.iban = ext.iban
+    doc.siret = ext.siret
+    doc.doubts = json.dumps(ext.doubts)
     doc.doc_type = ext.doc_type
     doc.person = household.display(ext.person) if ext.person else None
     doc.confidence = ext.confidence
@@ -251,14 +348,18 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
         # Validating a flagged duplicate means deciding to keep both.
         doc.duplicate_of = None
         doc.duplicate_dismissed = True
+    if validated:
+        # The user checked the document: the doubts of the reading are settled.
+        doc.doubts = "[]"
     missing = rules.missing_for(doc.category, doc.model_dump())
+    doubts = json.loads(doc.doubts or "[]")
     if doc.duplicate_of is not None:
         missing.append("duplicate")
-    doc.missing_fields = json.dumps(missing)
+    doc.missing_fields = json.dumps([*missing, *doubts])
     doc.area = areas.area_of(doc)
     if validated:
         doc.status = DocumentStatus.CLASSIFIED
-    elif missing or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.OTHER:
+    elif missing or doubts or doc.confidence < REVIEW_THRESHOLD or doc.category == Category.OTHER:
         doc.status = DocumentStatus.TO_REVIEW
     else:
         doc.status = DocumentStatus.CLASSIFIED
@@ -318,11 +419,24 @@ def extract(data: bytes, mime_type: str, *, use_llm: bool = True) -> tuple[ReadR
     model = use_llm and llm.is_available()
     read = read_document(data, mime_type)
     images = _scan_pages(data, mime_type, read) if model else []
-    if images and not read.text.strip():
+    transcribed = bool(images) and not read.text.strip()
+    if transcribed:
         read.text = llm.transcribe(images)
     by_rules = rules.extract(read.text)
+    by_rules.doubts = verify.check(by_rules, read.text)
     by_llm = llm.extract(read.text, images) if read.text.strip() and model else None
-    ext = merge(by_rules, by_llm)
+    if by_llm is not None:
+        # On a scan the model saw the pages: what it read is checked against the OCR text.
+        by_llm.doubts = verify.check(by_llm, read.text, scanned=bool(images))
+        if transcribed:
+            # The only text is the model's own reading: nothing independent to check against.
+            by_llm.doubts.append(verify.TRANSCRIBED)
+    reading = []
+    if by_llm is not None and llm.truncated(read.text):
+        reading.append(verify.TRUNCATED)
+    if several_documents(read.pages):
+        reading.append(verify.SEVERAL_DOCUMENTS)
+    ext = merge(by_rules, by_llm, reading)
     ext.person = ext.person or household.detect(read.text)
     return read, ext
 
@@ -367,7 +481,15 @@ def _scan_pages(data: bytes, mime_type: str, read: ReadResult) -> list[bytes]:
     skewed photo; the model reads the image itself. PDFs with text do not need it."""
     if not (read.ocr_used or not read.text.strip()) or not llm.has_vision():
         return []
-    return [page_image(data, mime_type, n) for n in range(min(read.page_count, VISION_PAGES))]
+    return [page_image(data, mime_type, n) for n in vision_pages(read.page_count)]
+
+
+def vision_pages(page_count: int) -> list[int]:
+    """Indexes of the pages shown to the model: the first ones, and the last of a long scan."""
+    pages = list(range(min(page_count, VISION_PAGES)))
+    if page_count > VISION_PAGES:
+        pages.append(page_count - 1)
+    return pages
 
 
 def _log_analysis(session: Session, doc: Document) -> None:
@@ -375,13 +497,16 @@ def _log_analysis(session: Session, doc: Document) -> None:
     msg: i18n.Msg
     if doc.status == DocumentStatus.TO_REVIEW:
         missing = json.loads(doc.missing_fields)
-        reasons = [f for f in missing if f not in ("text", "duplicate")]
+        doubts = json.loads(doc.doubts or "[]")
+        reasons = [f for f in missing if f not in ("text", "duplicate", *doubts)]
         original = session.get(Document, doc.duplicate_of) if doc.duplicate_of else None
         why: i18n.Msg
         if original is not None:
             why = T.msg("probable_duplicate", title=original.title)
         elif "text" in missing or not doc.text.strip():
             why = T.msg("unreadable")
+        elif doubts:
+            why = T.msg("doubtful", ingest_doubts=doubts)
         elif reasons:
             why = T.msg("missing", ingest_missing=reasons)
         elif doc.category == Category.OTHER:
@@ -401,6 +526,7 @@ def _log_analysis(session: Session, doc: Document) -> None:
             "confidence": doc.confidence,
             "extractor": doc.extractor,
             "amount": doc.amount,
+            "doubts": json.loads(doc.doubts or "[]"),
             "due_date": doc.due_date,
             "reference": doc.reference,
             "duplicate_of": doc.duplicate_of,
@@ -517,19 +643,49 @@ def seed_demo(session: Session) -> list[tuple[Document, bool]]:
 
 
 def demo_documents(session: Session) -> list[Document]:
-    """Documents imported by `seed_demo`, trashed ones included."""
-    return list(session.exec(select(Document).where(col(Document.batch).startswith(DEMO_BATCH))))
+    """Documents imported by `seed_demo`, trashed ones included.
+
+    Older versions did not mark them with a batch: those are recognised by their file.
+    """
+    docs = list(session.exec(select(Document).where(col(Document.batch).startswith(DEMO_BATCH))))
+    for doc in session.exec(select(Document).where(col(Document.filename).in_(DEMO_FILENAMES))):
+        if not is_demo(doc) and _is_demo_file(get_settings().files_dir / doc.stored_name):
+            docs.append(doc)
+    return docs
 
 
-def clear_demo(session: Session) -> int:
+def demo_leftover_files(session: Session) -> list[Path]:
+    """Demo files no document points to any more (left behind by older versions)."""
+    files_dir = get_settings().files_dir
+    if not files_dir.is_dir():
+        return []
+    known = set(session.exec(select(Document.stored_name)))
+    return [
+        path
+        for path in files_dir.iterdir()
+        if path.is_file() and path.name not in known and _is_demo_file(path)
+    ]
+
+
+def _is_demo_file(path: Path) -> bool:
+    try:
+        return is_bare_a4_pdf(security.decrypt(path.read_bytes()))
+    except Exception:
+        return False
+
+
+def clear_demo(session: Session) -> tuple[int, list[Path]]:
     """Permanently removes the demo documents and what came from them (reminders, letters).
 
-    The user asks for it explicitly; one entry in the history sums it up.
+    Returns how many documents went and the files to delete once committed (theirs and the
+    demo files older versions left behind), so a failed transaction never loses a file. The
+    user asks for it explicitly; one entry in the history sums it up.
     """
     docs = demo_documents(session)
+    files = demo_leftover_files(session)
     ids = {doc.id for doc in docs if doc.id is not None}
     if not ids:
-        return 0
+        return 0, files
     for deadline in session.exec(select(Deadline).where(col(Deadline.document_id).in_(ids))):
         session.delete(deadline)
     for letter in session.exec(
@@ -554,10 +710,10 @@ def clear_demo(session: Session) -> int:
         assert doc.id is not None
         unindex_document(session, doc.id)
         embeddings.forget(session, doc.id)
-        delete_file(doc)
+        files.append(get_settings().files_dir / doc.stored_name)
         session.delete(doc)
     activity.log(session, "purge", T.plural_msg("demo_cleared", len(docs)), actor="user")
     session.flush()
     # The details Binder took from the demo documents go with them.
     profile.learn(session)
-    return len(docs)
+    return len(docs), files

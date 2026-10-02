@@ -31,16 +31,16 @@ the `velopack` Python package) on the PyInstaller output:
   wizard, no UAC prompt, Start menu and desktop shortcuts, then starts Binder. Uninstall from
   Settings > Apps removes that folder only.
 - **macOS**: a `.pkg`. **Linux**: an AppImage.
-- `--noPortable` is passed only on Windows and macOS: Linux's `vpk pack` does not accept
-  it, since the AppImage is its portable package. The workflow also creates the portable
-  archives used by older installations.
+- No portable archive: Binder is distributed only through its installers. `--noPortable` is
+  passed on Windows and macOS; Linux's `vpk pack` does not accept it, since the AppImage is its
+  own portable package.
 - The package id is `BinderApp`, not `Binder`: on Windows the install folder is
   `%LocalAppData%\<id>`, and `%LocalAppData%\Binder` is the data folder, which uninstalling would
   delete.
 - Each system has its own channel (`windows`, `macos`, `linux`), part of every file name, so the
   three sets of files fit in one GitHub release.
 - `packaging/binder_app.py` calls `velopack.App().run()` first: it handles the installer's hooks
-  (`--veloapp-install`, …) and exits, and does nothing for a normal or portable launch.
+  (`--veloapp-install`, …) and exits, and does nothing for a normal launch.
 
 Signing: `vpk` signs when its `VPK_*` variables are set (see the comment at the top of
 `release.yml`): Azure Trusted Signing on Windows, Developer ID and notarization on macOS
@@ -55,8 +55,8 @@ tests on Linux, Windows and macOS, evaluation, interface build.
 To publish, push a tag: `git tag v1.2.0 && git push origin v1.2.0`. The "Release" workflow reruns
 the whole CI, then on each system downloads the previous installer release (for delta packages),
 builds the application and its installer with the tag's version, and creates the GitHub release:
-installers, update packages and feeds (`releases.<channel>.json`), portable archives,
-`SHA256SUMS.txt`, generated notes. A tag with a suffix (`v1.3.0-beta.1`) gives a pre-release.
+installers, update packages and feeds (`releases.<channel>.json`), `SHA256SUMS.txt`, generated
+notes. A tag with a suffix (`v1.3.0-beta.1`) gives a pre-release.
 Run manually, the workflow builds everything (version `0.0.0-dev.<run>`) without publishing.
 
 ## Automatic update
@@ -64,10 +64,9 @@ Run manually, the workflow builds everything (version `0.0.0-dev.<run>`) without
 At launch, the desktop application shows a splash screen and checks the latest release. Offline
 or on failure, Binder starts normally. Log: `DATA_DIR/binder.log`.
 
-- **Installed** (`updater.installed()` finds Velopack's installation): Velopack reads the feed of
-  its channel, downloads the delta packages (or the full one), verifies them, and applies them
-  once Binder has exited, then restarts it.
-- **Portable archive** (and versions published before the installer): Binder downloads the
-  archive for its system, verifies its SHA-256, extracts it next to the installation, replaces
-  itself and restarts. The installation folder must be writable by the user. The archives keep
-  their names (`updater.ASSETS`) so these copies keep updating.
+Velopack (`updater.installed()`) reads the feed of its channel, downloads the delta packages (or
+the full one), verifies them, and applies them once Binder has exited, then restarts it. A
+PyInstaller build run straight from `packaging/dist/` does not update itself.
+
+Copies extracted from the portable archives of v0.3.1 and earlier no longer update: they find no
+archive in newer releases and start normally. Their users install with the installer once.

@@ -62,10 +62,8 @@ class Settings(BaseSettings):
     # Default: Documents/Binder backups (or DATA_DIR/backups without a Documents folder).
     backup_dir: Path | None = None
 
-    # Desktop app update at launch, from GitHub releases.
+    # Desktop app update at launch, from GitHub releases (read by Velopack).
     auto_update: bool = True
-    update_url: str = "https://api.github.com/repos/Razigue/Binder/releases/latest"
-    # Same releases, read by Velopack when Binder was installed with the installer.
     update_repo: str = "https://github.com/Razigue/Binder"
 
     # System locale override, e.g. "fr_FR" (default: detected from the operating system).

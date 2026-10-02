@@ -50,10 +50,6 @@ Binder updates itself: at launch it checks for a newer version, downloads only w
 restarts. Without internet, it simply starts as usual. To uninstall it, use your system's usual
 way (Windows: Settings > Apps); your documents stay in place (see [Your data](#your-data)).
 
-Prefer not to install anything? The release also has portable archives
-(`Binder-windows-x64.zip`, `Binder-macos-arm64.zip`, `Binder-linux-x64.tar.gz`): extract one and
-open `Binder.exe`, `Binder.app` or `Binder/Binder`.
-
 ## First steps
 
 1. **Open Binder.** The welcome screen invites you to drop your first documents. No document at
@@ -208,6 +204,20 @@ that sender.
 
 **Can I undo something?** Yes: right after any action, click **Undo**. A document in the
 **Trash** can be restored as long as you have not deleted it permanently.
+
+**Would a less compressed model read better?** The models Binder downloads are quantized to
+4 bits (Q4), the best trade-off for most computers. To measure what an 8-bit version (Q8) would
+change on your machine, from the `backend` folder of the source code (a Q8 tag of the model,
+listed on ollama.com, e.g. `qwen3.5:9b-q8_0`):
+
+```bash
+ollama pull qwen3.5:9b-q8_0
+uv run python scripts/evaluate.py --llm --report q4.json
+uv run python scripts/evaluate.py --llm --model qwen3.5:9b-q8_0 --report q8.json
+```
+
+Both reports give the accuracy per field and the time per document; add `--corpus <folder>`
+to measure on your own annotated documents (see [docs/evaluation.md](docs/evaluation.md)).
 
 ---
 

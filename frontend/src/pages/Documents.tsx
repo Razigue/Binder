@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Bot, Search } from "lucide-react"
+import { RobotIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -37,7 +37,7 @@ export function DocumentsPage() {
     <>
       <PageHeader title={t("title")} subtitle={t("subtitle")} actions={<ImportButton />} />
       <div className="relative mb-3">
-        <Search className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <MagnifyingGlassIcon className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -82,7 +82,7 @@ export function DocumentsPage() {
       {q && (
         <div className="mt-4 flex justify-center">
           <Button variant="outline" onClick={() => agent.open(q)}>
-            <Bot /> {t("askInstead", { query: q })}
+            <RobotIcon /> {t("askInstead", { query: q })}
           </Button>
         </div>
       )}

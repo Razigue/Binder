@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
-import {
-  CalendarDays, Check, Mail, ChevronLeft, ChevronRight, Copy, Download, Folder, History, Hourglass, Loader2,
-  MoreHorizontal, Pencil, RefreshCw, Trash2, X,
-} from "lucide-react"
+import { CalendarDotsIcon, CheckIcon, EnvelopeIcon, CaretLeftIcon, CaretRightIcon, CopyIcon, DownloadSimpleIcon, FolderIcon, ClockCounterClockwiseIcon, HourglassIcon, CircleNotchIcon, DotsThreeIcon, PencilSimpleIcon, ArrowsClockwiseIcon, TrashIcon, XIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -28,7 +25,16 @@ import { documentDetail } from "@/i18n/messages/documentDetail"
 import {
   api, CATEGORIES, DOC_TYPES, fileUrl, previewUrl, type Category, type DocDetail, type DocPatch,
 } from "@/lib/api"
-import { categoryLabel, docTypeLabel, fieldLabel, formatAmount, formatDate, formatNumber, parseDate } from "@/lib/format"
+import {
+  categoryLabel,
+  docTypeLabel,
+  doubtLabel,
+  fieldLabel,
+  formatAmount,
+  formatDate,
+  formatNumber,
+  parseDate,
+} from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const selectClass = "h-8 w-full rounded-md border bg-background px-2 text-sm"
@@ -58,7 +64,7 @@ export function DocumentDetailPage() {
           <Link to={doc?.area ? `/area/${doc.area}` : "/"} className="hover:text-foreground">
             {doc?.area ? ta(`area.${doc.area}`) : t("breadcrumb")}
           </Link>
-          <ChevronRight className="size-3.5" />
+          <CaretRightIcon className="size-3.5" />
           <span className="truncate font-medium text-foreground">{doc?.title ?? "…"}</span>
         </nav>
       </div>
@@ -134,7 +140,7 @@ function Preview({ doc, active }: { doc: DocDetail; active: string | null }) {
           onClick={() => setPage((p) => p - 1)}
           aria-label={t("previousPage")}
         >
-          <ChevronLeft />
+          <CaretLeftIcon />
         </Button>
         <span className="tabular-nums">
           {page + 1} / {pages}
@@ -146,7 +152,7 @@ function Preview({ doc, active }: { doc: DocDetail; active: string | null }) {
           onClick={() => setPage((p) => p + 1)}
           aria-label={t("nextPage")}
         >
-          <ChevronRight />
+          <CaretRightIcon />
         </Button>
       </div>
     </Card>
@@ -191,6 +197,10 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
   const processing = doc.status === "processing"
   const waiting = doc.status === "waiting"
   const missing = new Set(doc.missing_fields)
+  // Doubts of the reading ("unverified:due_date"), by field: highlighted, value kept.
+  const doubts = new Map(
+    doc.missing_fields.filter((f) => f.includes(":")).map((f) => [f.split(":")[1], doubtLabel(f)]),
+  )
   const dueSoon = doc.due_date ? (parseDate(doc.due_date).getTime() - Date.now()) / 86_400_000 < 15 : false
 
   const save = (validated = false) =>
@@ -215,6 +225,19 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
     { key: "person", type: "text", display: doc.person ?? "—" },
     { key: "doc_type", type: "docType", display: docTypeLabel(doc.doc_type) },
   ]
+  // Breakdown read from the document, shown when it says more than the main amount.
+  const details: { key: string; display: string }[] = [
+    { key: "amount_ht", value: doc.amount_ht },
+    { key: "amount_tva", value: doc.amount_tva },
+    { key: "amount_ttc", value: doc.amount_ttc !== doc.amount ? doc.amount_ttc : null },
+    { key: "amount_due", value: doc.amount_due !== doc.amount ? doc.amount_due : null },
+  ]
+    .filter((d) => d.value != null)
+    .map((d) => ({ key: d.key, display: formatAmount(d.value ?? null) }))
+  if (doc.period_start && doc.period_end)
+    details.push({ key: "period", display: `${formatDate(doc.period_start)} – ${formatDate(doc.period_end)}` })
+  if (doc.iban) details.push({ key: "iban", display: doc.iban })
+  if (doc.siret) details.push({ key: "siret", display: doc.siret })
   const year = (doc.issue_date ?? doc.due_date ?? doc.created_at).slice(0, 4)
   // Keep a legacy value that is not a known type selectable, so that saving does not drop it.
   const docTypes: string[] =
@@ -257,17 +280,17 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={t("moreActions")} />}>
-            <MoreHorizontal />
+            <DotsThreeIcon />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={() => reanalyze.mutate()}>
-              <RefreshCw /> {t("reanalyze")}
+              <ArrowsClockwiseIcon /> {t("reanalyze")}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => agent.open(t("letterAbout", { title: doc.title, id: doc.id }))}>
-              <Mail /> {t("writeLetter")}
+              <EnvelopeIcon /> {t("writeLetter")}
             </DropdownMenuItem>
             <DropdownMenuItem render={<a href={fileUrl(doc.id)} target="_blank" rel="noreferrer" />}>
-              <Download /> {t("openOriginal")}
+              <DownloadSimpleIcon /> {t("openOriginal")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -276,7 +299,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                 remove.mutate(doc.id, { onSuccess: () => navigate(doc.area ? `/area/${doc.area}` : "/") })
               }
             >
-              <Trash2 /> {t("trash")}
+              <TrashIcon /> {t("trash")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -290,7 +313,7 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
       <OrganizeNotices doc={doc} />
       {waiting && (
         <div className="flex items-start gap-3 border-b px-5 py-4">
-          <Hourglass className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <HourglassIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div>
             <p className="text-sm font-medium">{t("waiting")}</p>
             <p className="text-sm text-muted-foreground">{t("waitingHint")}</p>
@@ -303,12 +326,13 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
         <h2 className="mb-2 font-semibold">{t("extracted")}</h2>
         {processing || reanalyze.isPending ? (
           <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> {t("reading")}
+            <CircleNotchIcon className="size-4 animate-spin" /> {t("reading")}
           </p>
         ) : (
           <dl className="divide-y text-sm">
             {rows.map((row) => {
               const isMissing = missing.has(row.key)
+              const doubt = doubts.get(row.key)
               const highlight = row.key === "due_date" && doc.due_date && dueSoon
               const label = fieldLabel(row.key)
               return (
@@ -319,8 +343,9 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                   className={cn(
                     "grid grid-cols-[140px_1fr] items-center gap-3 px-2 py-2.5",
                     highlight && "rounded-md bg-red-50/70 text-red-600 dark:bg-red-500/10 dark:text-red-400",
-                    isMissing && "rounded-md bg-amber-50/70 dark:bg-amber-500/10",
+                    (isMissing || doubt) && "rounded-md bg-amber-50/70 dark:bg-amber-500/10",
                   )}
+                  title={doubt ?? undefined}
                 >
                   <dt className={cn("text-muted-foreground", highlight && "text-red-600 dark:text-red-400")}>{label}</dt>
                   <dd className="font-medium">
@@ -352,9 +377,11 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                       />
                     ) : isMissing ? (
                       <span className="text-amber-700 dark:text-amber-400">{t("toComplete")}</span>
+                    ) : doubt && row.display === "—" ? (
+                      <span className="text-amber-700 dark:text-amber-400">{doubt}</span>
                     ) : (
                       <span className="flex items-center gap-1.5">
-                        {highlight && <CalendarDays className="size-3.5" />}
+                        {highlight && <CalendarDotsIcon className="size-3.5" />}
                         {row.display}
                       </span>
                     )}
@@ -362,6 +389,13 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
                 </div>
               )
             })}
+            {!editing &&
+              details.map((d) => (
+                <div key={d.key} className="grid grid-cols-[140px_1fr] items-center gap-3 px-2 py-2.5">
+                  <dt className="text-muted-foreground">{fieldLabel(d.key)}</dt>
+                  <dd className="font-medium tabular-nums">{d.display}</dd>
+                </div>
+              ))}
           </dl>
         )}
 
@@ -395,12 +429,12 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
         <RetentionInfo doc={doc} />
 
         <p className="mt-5 flex items-center gap-2 text-sm text-primary">
-          <Folder className="size-4" />
+          <FolderIcon className="size-4" />
           <Link to={doc.area ? `/area/${doc.area}` : "/"} className="hover:underline">
             {categoryLabel(doc.category)}
           </Link>
-          <ChevronRight className="size-3" /> {year}
-          <ChevronRight className="size-3" />{" "}
+          <CaretRightIcon className="size-3" /> {year}
+          <CaretRightIcon className="size-3" />{" "}
           <span className="truncate text-muted-foreground" title={t("standardNameHint")}>
             {doc.standard_name}
           </span>
@@ -411,27 +445,27 @@ function InfoPanel({ doc, onActive }: { doc: DocDetail; onActive: (field: string
         {editing ? (
           <>
             <Button onClick={() => save(true)} disabled={update.isPending}>
-              <Check /> {t("saveAndValidate")}
+              <CheckIcon /> {t("saveAndValidate")}
             </Button>
             <Button variant="outline" onClick={() => save(false)} disabled={update.isPending}>
               {tc("action.save")}
             </Button>
             <Button variant="ghost" onClick={() => setEditing(false)}>
-              <X /> {tc("action.cancel")}
+              <XIcon /> {tc("action.cancel")}
             </Button>
           </>
         ) : (
           <>
             <Button variant="outline" onClick={() => setEditing(true)} disabled={processing}>
-              <Pencil /> {tc("action.edit")}
+              <PencilSimpleIcon /> {tc("action.edit")}
             </Button>
             {doc.status === "to_review" && (
               <Button onClick={() => save(true)} disabled={update.isPending}>
-                <Check /> {t("validate")}
+                <CheckIcon /> {t("validate")}
               </Button>
             )}
             <Button variant="outline" render={<a href={fileUrl(doc.id)} download={doc.standard_name} />} nativeButton={false}>
-              <Download /> {t("export")}
+              <DownloadSimpleIcon /> {t("export")}
             </Button>
           </>
         )}
@@ -475,7 +509,7 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
   if (doc.duplicate_of !== null)
     return (
       <div className="flex flex-wrap items-center gap-3 border-b bg-amber-50/70 px-5 py-3 text-sm dark:bg-amber-500/10">
-        <Copy className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <CopyIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
         <p className="min-w-0 flex-1">
           {t("duplicate.before")}
           <Link to={`/documents/${doc.duplicate_of}`} className="font-medium underline">
@@ -498,7 +532,7 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
             remove.mutate(doc.id, { onSuccess: () => navigate(`/documents/${doc.duplicate_of}`) })
           }
         >
-          <Trash2 /> {t("trashDuplicate")}
+          <TrashIcon /> {t("trashDuplicate")}
         </Button>
       </div>
     )
@@ -506,7 +540,7 @@ function OrganizeNotices({ doc }: { doc: DocDetail }) {
   if (doc.superseded_by !== null)
     return (
       <div className="flex items-center gap-3 border-b bg-muted/60 px-5 py-3 text-sm">
-        <History className="size-4 shrink-0 text-muted-foreground" />
+        <ClockCounterClockwiseIcon className="size-4 shrink-0 text-muted-foreground" />
         <p>
           {t("superseded.before")}
           <Link to={`/documents/${doc.superseded_by}`} className="font-medium underline">
@@ -592,13 +626,13 @@ function InShort({ doc }: { doc: DocDetail }) {
             aria-label={t("reexplain")}
             title={t("reexplain")}
           >
-            <RefreshCw className={cn("size-3.5", refresh.isPending && "animate-spin")} />
+            <ArrowsClockwiseIcon className={cn("size-3.5", refresh.isPending && "animate-spin")} />
           </button>
         )}
       </div>
       {ex.isPending ? (
         <p className="flex items-center gap-2 text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> {t("readingLetter")}
+          <CircleNotchIcon className="size-4 animate-spin" /> {t("readingLetter")}
         </p>
       ) : ex.isError ? (
         <p className="text-muted-foreground">{t("explanationUnavailable")}</p>
@@ -609,7 +643,7 @@ function InShort({ doc }: { doc: DocDetail }) {
             <ul className="mt-2 space-y-1">
               {ex.data.actions.map((a) => (
                 <li key={a.label} className="flex items-start gap-2 font-medium">
-                  <Check className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <CheckIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <span>
                     {a.label}
                     {a.due_date && (

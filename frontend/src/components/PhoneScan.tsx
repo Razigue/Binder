@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { CircleAlert, Loader2, ScanLine, Smartphone, X } from "lucide-react"
+import { WarningCircleIcon, CircleNotchIcon, ScanIcon, DeviceMobileIcon, XIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/i18n"
 import { phoneScan } from "@/i18n/messages/phoneScan"
@@ -59,7 +59,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" /> {error}
+          <WarningCircleIcon className="mt-0.5 size-4 shrink-0" /> {error}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>
@@ -81,7 +81,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
   if (!session) {
     return (
       <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> {t("opening")}
+        <CircleNotchIcon className="size-4 animate-spin" /> {t("opening")}
       </div>
     )
   }
@@ -153,7 +153,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
                       onClick={() => api.deleteScanPage(page.id).then(() => live.refetch())}
                       className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                     >
-                      <X className="size-3" />
+                      <XIcon className="size-3" />
                     </button>
                   </div>
                 ))}
@@ -170,7 +170,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
             {t("cancel")}
           </Button>
           <Button disabled={!pageCount || importing} onClick={importNow}>
-            {importing ? <Loader2 className="animate-spin" /> : <ScanLine />}
+            {importing ? <CircleNotchIcon className="animate-spin" /> : <ScanIcon />}
             {pageCount ? t("import", { count: documents.length }) : t("importEmpty")}
           </Button>
         </div>
@@ -184,7 +184,7 @@ function PhoneStatus({ connected }: { connected: boolean }) {
   return (
     <p className="flex items-center gap-2 text-sm font-medium" role="status" aria-live="polite">
       <span className={cn("size-2.5 shrink-0 rounded-full", connected ? "bg-emerald-500" : "bg-muted-foreground/50")} />
-      <Smartphone className="size-4 text-muted-foreground" />
+      <DeviceMobileIcon className="size-4 text-muted-foreground" />
       {connected ? t("connected") : t("waiting")}
     </p>
   )

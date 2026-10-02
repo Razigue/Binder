@@ -14,25 +14,8 @@ import {
 } from "react"
 import { Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
-import {
-  ArrowUp,
-  Bot,
-  CalendarClock,
-  Camera,
-  Check,
-  ChevronRight,
-  Copy,
-  FileText,
-  FileUp,
-  Loader2,
-  Paperclip,
-  Pencil,
-  RotateCcw,
-  Square,
-  SquarePen,
-  Undo2,
-  X,
-} from "lucide-react"
+import { toast } from "sonner"
+import { ArrowUpIcon, RobotIcon, ClockCountdownIcon, CameraIcon, CheckIcon, CaretRightIcon, CopyIcon, FileTextIcon, FileArrowUpIcon, CircleNotchIcon, WarningCircleIcon, PaperclipIcon, PencilSimpleIcon, ArrowCounterClockwiseIcon, SquareIcon, PencilSimpleLineIcon, ArrowUUpLeftIcon, XIcon, ShieldWarningIcon, WarningIcon } from "@phosphor-icons/react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -43,12 +26,15 @@ import {
   previewUrl,
   type ChatMessage,
   type ChatResponse,
+  type ChatStats,
   type Doc,
+  type PendingAction,
   type ToolCall,
 } from "@/lib/api"
 import { useT } from "@/i18n"
+import type { Translate } from "@/i18n/core"
 import { agent as messages } from "@/i18n/messages/agent"
-import { categoryLabel, daysLabel, formatAmount, formatDate } from "@/lib/format"
+import { categoryLabel, daysLabel, formatAmount, formatDate, formatNumber } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { CategoryIcon } from "./CategoryIcon"
 import { JourneyCard } from "./journey"
@@ -74,6 +60,8 @@ interface Turn {
   steps: ToolCall[]
   /** Answer text as it is written (streamed). */
   draft: string
+  /** Model token counts and speed so far. */
+  stats?: ChatStats
   error?: string
   stopped?: boolean
 }
@@ -148,6 +136,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         (event) => {
           if (event.type === "tool")
             progress((turn) => ({ steps: [...turn.steps, { name: event.name, arguments: event.arguments }] }))
+          else if (event.type === "tool_done")
+            progress((turn) => ({
+              steps: turn.steps.map((step, i) =>
+                i === turn.steps.length - 1 ? { ...step, duration_ms: event.duration_ms, error: event.error } : step,
+              ),
+            }))
+          else if (event.type === "stats") progress(() => ({ stats: event.stats }))
           else if (event.type === "token") progress((turn) => ({ draft: turn.draft + event.text }))
           else if (event.type === "step") progress(() => ({ draft: "" }))
         },
@@ -200,13 +195,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-lg">
           <SheetHeader className="flex-row items-center gap-2 border-b px-5 py-3.5 pr-12">
             <SheetTitle className="flex flex-1 items-center gap-2.5 text-lg">
-              <Bot className="size-5 text-primary" />
+              <RobotIcon className="size-5 text-primary" />
               {t("title")}
             </SheetTitle>
             <SheetDescription className="sr-only">{t("description")}</SheetDescription>
             {turns.length > 0 && (
               <Button variant="ghost" size="icon-sm" onClick={reset} title={t("newChat")} aria-label={t("newChat")}>
-                <SquarePen />
+                <PencilSimpleLineIcon />
               </Button>
             )}
           </SheetHeader>
@@ -303,7 +298,7 @@ function AgentConversation({
               </div>
             ))}
             <p className="flex items-start gap-2 text-xs text-muted-foreground">
-              <Paperclip className="mt-0.5 size-3.5 shrink-0" /> {t("attachTip")}
+              <PaperclipIcon className="mt-0.5 size-3.5 shrink-0" /> {t("attachTip")}
             </p>
           </>
         )}
@@ -338,7 +333,7 @@ function AgentConversation({
                     <span className="flex-1">{turn.error}</span>
                     {!pending && (
                       <Button variant="outline" size="xs" onClick={() => onAsk(turn.question, turn.attachments, i)}>
-                        <RotateCcw /> {t("retry")}
+                        <ArrowCounterClockwiseIcon /> {t("retry")}
                       </Button>
                     )}
                   </div>
@@ -347,7 +342,7 @@ function AgentConversation({
                     {t("stopped")}
                     {!pending && (
                       <Button variant="ghost" size="xs" onClick={() => onAsk(turn.question, turn.attachments, i)}>
-                        <RotateCcw /> {t("retry")}
+                        <ArrowCounterClockwiseIcon /> {t("retry")}
                       </Button>
                     )}
                   </div>
@@ -361,7 +356,7 @@ function AgentConversation({
                           label={t("regenerate")}
                           onClick={() => onAsk(turn.question, turn.attachments, i)}
                         >
-                          <RotateCcw />
+                          <ArrowCounterClockwiseIcon />
                         </ActionButton>
                       )}
                     </MessageActions>
@@ -387,7 +382,7 @@ function AgentConversation({
 
       {dragging && (
         <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary bg-background/90 text-center">
-          <FileUp className="size-7 text-primary" />
+          <FileArrowUpIcon className="size-7 text-primary" />
           <p className="text-sm font-medium">{t("dropFiles")}</p>
           <p className="text-xs text-muted-foreground">{t("dropHint")}</p>
         </div>
@@ -441,7 +436,7 @@ function UserMessage({
         {turn.question && <CopyButton text={turn.question} />}
         {canEdit && (
           <ActionButton label={t("edit")} onClick={onEdit}>
-            <Pencil />
+            <PencilSimpleIcon />
           </ActionButton>
         )}
       </MessageActions>
@@ -542,7 +537,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
       label={copied ? t("copied") : (label ?? t("copy"))}
       onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true))}
     >
-      {copied ? <Check /> : <Copy />}
+      {copied ? <CheckIcon /> : <CopyIcon />}
     </ActionButton>
   )
 }
@@ -559,7 +554,7 @@ function Thumbnail({ src, className }: { src?: string; className?: string }) {
       {src && !failed ? (
         <img src={src} alt="" onError={() => setFailed(true)} className="size-full object-cover" />
       ) : (
-        <FileText className="size-4" />
+        <FileTextIcon className="size-4" />
       )}
     </span>
   )
@@ -667,7 +662,7 @@ function Composer({
                   <Thumbnail src={d.thumbnail ?? (d.doc ? previewUrl(d.doc.id) : undefined)} />
                   {!d.doc && !d.error && (
                     <span className="absolute inset-0 flex items-center justify-center rounded-md bg-background/60">
-                      <Loader2 className="size-3.5 animate-spin" />
+                      <CircleNotchIcon className="size-3.5 animate-spin" />
                     </span>
                   )}
                 </span>
@@ -682,7 +677,7 @@ function Composer({
                   aria-label={t("remove", { name: d.file.name })}
                   className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
-                  <X className="size-3" />
+                  <XIcon className="size-3" />
                 </button>
               </div>
             ))}
@@ -719,14 +714,14 @@ function Composer({
                 />
               }
             >
-              <Paperclip />
+              <PaperclipIcon />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top" className="w-52">
               <DropdownMenuItem onClick={() => filePicker.current?.click()}>
-                <FileUp /> {t("attachFile")}
+                <FileArrowUpIcon /> {t("attachFile")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={takePhoto}>
-                <Camera /> {t("takePhoto")}
+                <CameraIcon /> {t("takePhoto")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -735,7 +730,7 @@ function Composer({
           </span>
           {pending ? (
             <Button size="icon-sm" onClick={onStop} aria-label={t("stop")} title={t("stop")} className="ml-auto rounded-full">
-              <Square className="size-3 fill-current" />
+              <SquareIcon className="size-3 fill-current" />
             </Button>
           ) : (
             <Button
@@ -746,7 +741,7 @@ function Composer({
               title={t("send")}
               className="ml-auto rounded-full"
             >
-              {uploading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+              {uploading ? <CircleNotchIcon className="animate-spin" /> : <ArrowUpIcon />}
             </Button>
           )}
         </div>
@@ -875,7 +870,7 @@ function CameraView({
   if (failed)
     return (
       <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-        <Camera className="size-6" />
+        <CameraIcon className="size-6" />
         {t("cameraUnavailable")}
         <Button variant="outline" size="sm" onClick={onFallback}>
           {t("chooseImage")}
@@ -887,14 +882,14 @@ function CameraView({
     <>
       <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black">
         <video ref={video} autoPlay playsInline muted className="size-full object-contain" />
-        {!stream && <Loader2 className="absolute size-6 animate-spin text-white/70" />}
+        {!stream && <CircleNotchIcon className="absolute size-6 animate-spin text-white/70" />}
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>
           {t("cancel")}
         </Button>
         <Button onClick={capture} disabled={!stream}>
-          <Camera /> {t("capture")}
+          <CameraIcon /> {t("capture")}
         </Button>
       </div>
     </>
@@ -921,11 +916,12 @@ function Progress({ turn, onNavigate }: { turn: Turn; onNavigate: () => void }) 
       {turn.steps.length > 0 && (
         <ul className="space-y-1">
           {turn.steps.map((step, i) => {
-            const current = i === turn.steps.length - 1 && !turn.draft
+            const running = step.duration_ms == null && i === turn.steps.length - 1 && !turn.draft
             return (
               <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                {current ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3 text-primary" />}
-                {label(step)}
+                <StepIcon step={step} running={running} />
+                <span className="min-w-0 truncate">{label(step)}</span>
+                <StepDuration step={step} />
               </li>
             )
           })}
@@ -938,39 +934,127 @@ function Progress({ turn, onNavigate }: { turn: Turn; onNavigate: () => void }) 
       ) : (
         turn.steps.length === 0 && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> {t("thinking")}
+            <CircleNotchIcon className="size-3.5 animate-spin" /> {t("thinking")}
           </p>
         )
       )}
+      {turn.stats && <StatsLine stats={turn.stats} />}
     </div>
   )
 }
 
-/** Steps of a finished answer, folded under a single line. */
-function Steps({ steps }: { steps: ToolCall[] }) {
+function StepIcon({ step, running }: { step: ToolCall; running: boolean }) {
+  if (running) return <CircleNotchIcon className="size-3 shrink-0 animate-spin" />
+  if (step.error) return <WarningCircleIcon className="size-3 shrink-0 text-destructive" />
+  return <CheckIcon className="size-3 shrink-0 text-primary" />
+}
+
+/** How long a tool took ("120 ms", "1.4 s"), and whether it failed. */
+function StepDuration({ step }: { step: ToolCall }) {
+  const t = useT(messages)
+  if (step.duration_ms == null) return null
+  const ms = step.duration_ms
+  const value =
+    ms < 1000
+      ? t("stats.ms", { value: formatNumber(ms) })
+      : t("stats.seconds", { value: formatNumber(ms / 1000, { maximumFractionDigits: 1 }) })
+  return (
+    <span className="shrink-0 tabular-nums opacity-70">
+      {step.error ? `${t("toolFailed")} · ${value}` : value}
+    </span>
+  )
+}
+
+function speed(stats: ChatStats, t: Translate<(typeof messages)["en"]>) {
+  if (stats.tokens_per_second == null) return null
+  return t("stats.speed", { value: formatNumber(stats.tokens_per_second, { maximumFractionDigits: 1 }) })
+}
+
+function seconds(value: number, t: Translate<(typeof messages)["en"]>) {
+  return t("stats.seconds", { value: formatNumber(value, { maximumFractionDigits: 1 }) })
+}
+
+/** Speed of the model while it works: "qwen3:8b · 42 tok/s · 3.1 s". */
+function StatsLine({ stats }: { stats: ChatStats }) {
+  const t = useT(messages)
+  const parts = [stats.model, speed(stats, t), seconds(stats.seconds, t)].filter(Boolean)
+  return <p className="text-[11px] text-muted-foreground tabular-nums">{parts.join(" · ")}</p>
+}
+
+/** Steps and model stats of a finished answer, folded under a single line. */
+function Steps({ steps, stats }: { steps: ToolCall[]; stats?: ChatStats | null }) {
   const t = useT(messages)
   const label = useStepLabel()
   const [open, setOpen] = useState(false)
-  if (!steps.length) return null
+  if (!steps.length && !stats) return null
+  const summary = [
+    steps.length ? t("steps", { count: steps.length }) : t("details"),
+    stats && speed(stats, t),
+    stats && seconds(stats.seconds, t),
+  ].filter(Boolean)
   return (
     <div className="text-xs text-muted-foreground">
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 rounded select-none hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded tabular-nums select-none hover:text-foreground"
       >
-        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-        {t("steps", { count: steps.length })}
+        <CaretRightIcon className={cn("size-3 transition-transform", open && "rotate-90")} />
+        {summary.join(" · ")}
       </button>
       {open && (
-        <ul className="mt-1 space-y-0.5 pl-4">
-          {steps.map((step, i) => (
-            <li key={i}>{label(step)}</li>
-          ))}
-        </ul>
+        <div className="mt-1.5 space-y-2 pl-4">
+          {steps.length > 0 && (
+            <ul className="space-y-1.5">
+              {steps.map((step, i) => (
+                <li key={i} className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <StepIcon step={step} running={false} />
+                    <span className="min-w-0 flex-1 truncate">{label(step)}</span>
+                    <StepDuration step={step} />
+                  </span>
+                  <code className="mt-0.5 block pl-5 font-mono text-[11px] break-all opacity-70">
+                    {step.name}({toolArguments(step.arguments)})
+                  </code>
+                </li>
+              ))}
+            </ul>
+          )}
+          {stats && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
+              <dt>{t("stats.model")}</dt>
+              <dd className="text-foreground">{stats.model}</dd>
+              <dt>{t("stats.turns")}</dt>
+              <dd className="text-foreground">{formatNumber(stats.turns)}</dd>
+              <dt>{t("stats.read")}</dt>
+              <dd className="text-foreground">
+                {formatNumber(stats.prompt_tokens)}
+                {stats.prompt_tokens_per_second != null &&
+                  ` · ${t("stats.speed", { value: formatNumber(stats.prompt_tokens_per_second, { maximumFractionDigits: 0 }) })}`}
+              </dd>
+              <dt>{t("stats.written")}</dt>
+              <dd className="text-foreground">
+                {formatNumber(stats.output_tokens)}
+                {stats.tokens_per_second != null && ` · ${speed(stats, t)}`}
+              </dd>
+              <dt>{t("stats.total")}</dt>
+              <dd className="text-foreground">{seconds(stats.seconds, t)}</dd>
+            </dl>
+          )}
+        </div>
       )}
     </div>
   )
+}
+
+/** Arguments of a tool call as the model wrote them, kept short. */
+function toolArguments(args: Record<string, unknown>) {
+  return Object.entries(args)
+    .map(([key, value]) => {
+      const text = JSON.stringify(value) ?? "null"
+      return `${key}=${text.length > 80 ? `${text.slice(0, 79)}…` : text}`
+    })
+    .join(", ")
 }
 
 /** Minimal rendering of the agent's text: links [text](url), citations [#id] and **bold**. */
@@ -1033,13 +1117,39 @@ function Changed({ token }: { token: string | null }) {
   })
   return (
     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <Check className="size-3.5 text-primary" /> {undone ? t("undone") : t("changed")}
+      <CheckIcon className="size-3.5 text-primary" /> {undone ? t("undone") : t("changed")}
       {token && !undone && (
         <Button variant="link" size="xs" className="h-auto px-1" onClick={() => undo.mutate()} disabled={undo.isPending}>
-          <Undo2 /> {t("undo")}
+          <ArrowUUpLeftIcon /> {t("undo")}
         </Button>
       )}
     </p>
+  )
+}
+
+/** A change the agent proposed after reading a document or a web page: made only once confirmed. */
+function Confirmation({ action }: { action: PendingAction }) {
+  const t = useT(messages)
+  const invalidate = useInvalidateAll()
+  const [skipped, setSkipped] = useState(false)
+  const run = useMutation({
+    mutationFn: () => api.confirmAction(action.token),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e.message),
+  })
+  if (run.data) return <Changed token={run.data.undo} />
+  if (skipped) return <p className="text-xs text-muted-foreground">{t("confirm.skipped")}</p>
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+      <ShieldWarningIcon className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
+      <span className="min-w-0 flex-1 font-medium">{action.description}</span>
+      <Button size="xs" onClick={() => run.mutate()} disabled={run.isPending}>
+        {t("confirm.do")}
+      </Button>
+      <Button size="xs" variant="ghost" onClick={() => setSkipped(true)} disabled={run.isPending}>
+        {t("confirm.skip")}
+      </Button>
+    </div>
   )
 }
 
@@ -1049,10 +1159,23 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
   const docs = response.documents
   return (
     <div className="space-y-3">
-      <Steps steps={response.tool_calls} />
+      <Steps steps={response.tool_calls} stats={response.stats} />
       <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
         <RichText text={response.answer} docs={docs} onNavigate={onNavigate} />
       </p>
+      {(response.warnings ?? []).map((warning) => (
+        <p key={warning} className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <WarningIcon className="mt-0.5 size-3.5 shrink-0" /> {warning}
+        </p>
+      ))}
+      {(response.confirmations ?? []).length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">{t("confirm.why")}</p>
+          {(response.confirmations ?? []).map((action) => (
+            <Confirmation key={action.token} action={action} />
+          ))}
+        </div>
+      )}
       {response.letters.map((letter, i) => (
         <LetterView key={letter.id ?? i} letter={letter} compact />
       ))}
@@ -1068,10 +1191,10 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
           {!expanded ? (
             <button onClick={() => setExpanded(true)} className="flex w-full items-center gap-3 px-3 py-2.5 text-sm hover:bg-accent">
               <span className="flex size-7 items-center justify-center rounded-md bg-accent text-primary">
-                <FileText className="size-3.5" />
+                <FileTextIcon className="size-3.5" />
               </span>
               <span className="flex-1 text-left font-medium">{t("documents", { count: docs.length })}</span>
-              <ChevronRight className="size-4 text-muted-foreground" />
+              <CaretRightIcon className="size-4 text-muted-foreground" />
             </button>
           ) : (
             <ul className="divide-y">
@@ -1097,7 +1220,7 @@ function AgentAnswer({ response, onNavigate }: { response: ChatResponse; onNavig
         <ul className="divide-y overflow-hidden rounded-lg border">
           {response.deadlines.map((d) => (
             <li key={d.id} className="flex items-center gap-3 px-3 py-2">
-              <CalendarClock className="size-4 text-muted-foreground" />
+              <ClockCountdownIcon className="size-4 text-muted-foreground" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{d.title}</span>
                 <span className="block text-xs text-muted-foreground">

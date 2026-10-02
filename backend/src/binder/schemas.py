@@ -15,13 +15,28 @@ class Extraction(BaseModel):
     category: Category = Category.OTHER
     title: str = ""
     issuer: str | None = None
+    # Main figure, derived from the amounts below (verify.main_amount): what is left to pay or
+    # received, else the total.
     amount: float | None = None
+    amount_ht: float | None = None
+    amount_tva: float | None = None
+    amount_ttc: float | None = None
+    # Left to pay or received now: net pay, refund, balance after a deposit.
+    amount_due: float | None = None
     issue_date: date | None = None
     due_date: date | None = None
     expiry_date: date | None = None
+    # Period the document covers (billing, pay, rent).
+    period_start: date | None = None
+    period_end: date | None = None
     reference: str | None = None
+    iban: str | None = None
+    siret: str | None = None
+    # Computed from the checks of services/verify.py, never declared by the model.
     confidence: float = Field(default=0.0, ge=0, le=1)
     missing_fields: list[str] = []
+    # Doubts raised by the checks ("unverified:due_date"): the document goes to review.
+    doubts: list[str] = []
     extractor: str = "rules"
     # Document type (a DocType value: "invoice", "insurance_certificate"…).
     doc_type: str | None = None
@@ -38,11 +53,19 @@ class DocumentOut(BaseModel):
     category: Category
     issuer: str | None
     amount: float | None
+    amount_ht: float | None = None
+    amount_tva: float | None = None
+    amount_ttc: float | None = None
+    amount_due: float | None = None
     issue_date: date | None
     due_date: date | None
     expiry_date: date | None = None
+    period_start: date | None = None
+    period_end: date | None = None
     keep_forever: bool = False
     reference: str | None
+    iban: str | None = None
+    siret: str | None = None
     confidence: float
     status: DocumentStatus
     missing_fields: list[str]
@@ -70,7 +93,7 @@ class DocumentOut(BaseModel):
         from binder.services import deadlines, organize, retention
 
         data = doc.model_dump(
-            exclude={"text", "missing_fields", "sha256", "stored_name", "explanation"}
+            exclude={"text", "missing_fields", "doubts", "sha256", "stored_name", "explanation"}
         )
         rule = retention.rule_for(doc)
         return cls(
@@ -120,6 +143,28 @@ class ExpirationOut(BaseModel):
 
 class TrashRequest(BaseModel):
     ids: list[int]
+
+
+class DocumentIds(BaseModel):
+    """Documents selected together in a list (grouped actions)."""
+
+    ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+class BulkUpdate(DocumentIds):
+    category: Category | None = None
+    keep_forever: bool | None = None
+    validated: bool | None = None
+
+
+class BulkPurge(DocumentIds):
+    confirm: bool = False
+
+
+class BulkResult(BaseModel):
+    count: int
+    # Shown in the "Undo" toast.
+    message: str
 
 
 class DeadlineOut(BaseModel):
@@ -178,6 +223,25 @@ class ChatRequest(BaseModel):
 class ToolCallTrace(BaseModel):
     name: str
     arguments: dict[str, object]
+    # Time the tool took, and whether it answered with an error.
+    duration_ms: int | None = None
+    error: bool = False
+
+
+class ChatStats(BaseModel):
+    """What the local model did for one answer: shown under it for the curious."""
+
+    model: str
+    # Model turns (each tool round trip is one).
+    turns: int = 0
+    prompt_tokens: int = 0
+    output_tokens: int = 0
+    # Generation speed, output tokens over the time spent writing them.
+    tokens_per_second: float | None = None
+    # Prompt reading speed.
+    prompt_tokens_per_second: float | None = None
+    # Whole answer, tools included.
+    seconds: float = 0
 
 
 class LegalSource(BaseModel):
@@ -228,6 +292,8 @@ class Letter(BaseModel):
     blanks: int = 0
     # Its legal points checked online when it was written.
     verification: LegalCheck | None = None
+    # Web pages it was adapted from (the organisation's procedure, its conditions).
+    sources: list[LegalSource] = []
 
 
 class ChatResponse(BaseModel):
@@ -248,6 +314,18 @@ class ChatResponse(BaseModel):
     folders: list[dict[str, object]] = []
     # Journeys started or read during the turn.
     journeys: list[dict[str, object]] = []
+    # Token counts and speed of the model, None without a model.
+    stats: ChatStats | None = None
+    # Changes held back for the user's confirmation (agent/confirm.py): token, description.
+    confirmations: list[dict[str, str]] = []
+    # Shown under the answer (a legal point that could not be checked online).
+    warnings: list[str] = []
+
+
+class ConfirmResult(BaseModel):
+    message: str
+    changed: bool = False
+    undo: str | None = None
 
 
 class SystemStatus(BaseModel):

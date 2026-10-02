@@ -23,19 +23,24 @@ from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from binder import __version__, i18n
-from binder.agent import loop, tools
+from binder.agent import confirm, loop, tools
 from binder.api.assistant import folder_status, folder_zip, undoable
 from binder.config import get_settings
 from binder.db import WITHOUT_TEXT, get_engine, get_session
 from binder.models import Activity, Category, Deadline, Document, DocumentStatus
 from binder.schemas import (
     ActivityOut,
+    BulkPurge,
+    BulkResult,
+    BulkUpdate,
     ChatRequest,
     ChatResponse,
+    ConfirmResult,
     DeadlineCreate,
     DeadlineOut,
     DeadlineUpdate,
     DocumentDetail,
+    DocumentIds,
     DocumentOut,
     DocumentUpdate,
     ExpirationOut,
@@ -54,6 +59,7 @@ from binder.services import (
     activity,
     deadlines,
     editing,
+    erase,
     explain,
     folders,
     importers,
@@ -98,6 +104,10 @@ T = i18n.catalog(
             "en": "Permanent deletion: confirmation required (confirm=true)",
             "fr": "Suppression définitive : confirmation requise (confirm=true)",
         },
+        "confirm_erase": {
+            "en": "Erasing all data: confirmation required (confirm=true)",
+            "fr": "Effacement de toutes les données : confirmation requise (confirm=true)",
+        },
         "unknown_folder": {"en": "Unknown folder", "fr": "Dossier inconnu"},
         "unknown_letter": {"en": "Unknown letter type", "fr": "Type de courrier inconnu"},
         "deadline_not_found": {"en": "Deadline not found", "fr": "Échéance introuvable"},
@@ -120,6 +130,37 @@ T = i18n.catalog(
         "reanalyze": {
             "en": "New analysis of “{title}” requested",
             "fr": "Nouvelle analyse de « {title} » demandée",
+        },
+        "bulk_trashed_one": {
+            "en": "{n} document moved to the trash",
+            "fr": "{n} document mis à la corbeille",
+        },
+        "bulk_trashed_other": {
+            "en": "{n} documents moved to the trash",
+            "fr": "{n} documents mis à la corbeille",
+        },
+        "bulk_updated_one": {"en": "{n} document updated", "fr": "{n} document modifié"},
+        "bulk_updated_other": {"en": "{n} documents updated", "fr": "{n} documents modifiés"},
+        "bulk_restored_one": {"en": "{n} document restored", "fr": "{n} document restauré"},
+        "bulk_restored_other": {
+            "en": "{n} documents restored",
+            "fr": "{n} documents restaurés",
+        },
+        "bulk_purged_one": {
+            "en": "{n} document permanently deleted",
+            "fr": "{n} document supprimé définitivement",
+        },
+        "bulk_purged_other": {
+            "en": "{n} documents permanently deleted",
+            "fr": "{n} documents supprimés définitivement",
+        },
+        "bulk_reanalyze_one": {
+            "en": "New analysis of {n} document started",
+            "fr": "Nouvelle analyse de {n} document lancée",
+        },
+        "bulk_reanalyze_other": {
+            "en": "New analysis of {n} documents started",
+            "fr": "Nouvelle analyse de {n} documents lancée",
         },
         "export_one": {"en": "Exported {n} document", "fr": "Export de {n} document"},
         "export_other": {"en": "Exported {n} documents", "fr": "Export de {n} documents"},
@@ -312,6 +353,82 @@ def list_documents(
     return [DocumentOut.from_model(d) for d in docs]
 
 
+# Grouped actions on the documents selected in a list: one request, one "Undo" for all of
+# them. Ids that are unknown (or not in the expected place) are skipped.
+
+
+def _selected(session: Session, ids: list[int], *, trashed: bool = False) -> list[Document]:
+    docs = session.exec(select(Document).where(col(Document.id).in_(set(ids))))
+    return [d for d in docs if (d.deleted_at is not None) == trashed]
+
+
+@router.post("/documents/bulk/trash")
+def bulk_trash(body: DocumentIds, session: SessionDep, response: Response) -> BulkResult:
+    docs = _selected(session, body.ids)
+    with undoable(session, response):
+        for doc in docs:
+            ingest.trash(session, doc)
+    session.commit()
+    return BulkResult(count=len(docs), message=T.plural("bulk_trashed", len(docs)))
+
+
+@router.post("/documents/bulk/update")
+def bulk_update(body: BulkUpdate, session: SessionDep, response: Response) -> BulkResult:
+    changes = body.model_dump(exclude_unset=True, exclude={"ids", "validated"})
+    changes = {k: v for k, v in changes.items() if v is not None}
+    docs = _selected(session, body.ids)
+    with undoable(session, response):
+        for doc in docs:
+            editing.update_document(session, doc, changes, validated=bool(body.validated))
+    session.commit()
+    return BulkResult(count=len(docs), message=T.plural("bulk_updated", len(docs)))
+
+
+@router.post("/documents/bulk/reanalyze", status_code=202)
+def bulk_reanalyze(
+    body: DocumentIds, session: SessionDep, background: BackgroundTasks
+) -> BulkResult:
+    """Read again in the background, one after the other, like a fresh import."""
+    docs = [d for d in _selected(session, body.ids) if d.status != DocumentStatus.PROCESSING]
+    for doc in docs:
+        activity.log(
+            session, "reanalyze", T.msg("reanalyze", title=doc.title), actor="user", document=doc
+        )
+        doc.status = DocumentStatus.PROCESSING
+        session.add(doc)
+    session.commit()
+    ids = [d.id for d in docs if d.id is not None]
+    background.add_task(_analyze_all, ids)
+    return BulkResult(count=len(ids), message=T.plural("bulk_reanalyze", len(ids)))
+
+
+def _analyze_all(ids: list[int]) -> None:
+    for doc_id in ids:
+        ingest.analyze_in_background(doc_id)
+
+
+@router.post("/trash/restore")
+def bulk_restore(body: DocumentIds, session: SessionDep, response: Response) -> BulkResult:
+    docs = _selected(session, body.ids, trashed=True)
+    with undoable(session, response):
+        for doc in docs:
+            ingest.restore(session, doc)
+    session.commit()
+    return BulkResult(count=len(docs), message=T.plural("bulk_restored", len(docs)))
+
+
+@router.post("/trash/purge")
+def bulk_purge(body: BulkPurge, session: SessionDep) -> BulkResult:
+    """Permanent deletion of documents already in the trash: requires `confirm`."""
+    if not body.confirm:
+        raise HTTPException(428, T("confirm_purge"))
+    docs = _selected(session, body.ids, trashed=True)
+    for doc in docs:
+        ingest.purge(session, doc)
+    session.commit()
+    return BulkResult(count=len(docs), message=T.plural("bulk_purged", len(docs)))
+
+
 @router.get("/documents/{doc_id}")
 def get_document(doc_id: int, session: SessionDep) -> DocumentDetail:
     return DocumentDetail.from_model(_get_doc(session, doc_id))
@@ -428,11 +545,19 @@ def _disposition(kind: str, name: str) -> str:
 
 
 @router.get("/export")
-def export(session: SessionDep, category: Category | None = None) -> StreamingResponse:
-    """ZIP archive of the decrypted documents, sorted by category, with a JSON index."""
+def export(
+    session: SessionDep,
+    category: Category | None = None,
+    ids: Annotated[list[int] | None, Query(max_length=1000)] = None,
+) -> StreamingResponse:
+    """ZIP archive of the decrypted documents, sorted by category, with a JSON index.
+
+    `ids`: only the documents selected in a list."""
     stmt = select(Document).options(*WITHOUT_TEXT).where(ACTIVE)
     if category:
         stmt = stmt.where(Document.category == category)
+    if ids:
+        stmt = stmt.where(col(Document.id).in_(ids))
     docs = list(session.exec(stmt))
     activity.log(
         session,
@@ -787,10 +912,31 @@ def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
         for doc_id in dict.fromkeys(body.attachments)
     ]
     with undo.capture() as cap:
-        response = loop.run(session, body.message, body.history, attached)
+        try:
+            response = loop.run(session, body.message, body.history, attached)
+        except loop.AgentError as exc:
+            raise HTTPException(503, str(exc)) from exc
     response.undo = undo.save(session, cap, actor="agent")
     session.commit()
     return response
+
+
+@router.post("/agent/confirm/{token}")
+def confirm_action(token: str, session: SessionDep) -> ConfirmResult:
+    """Makes a change the agent proposed after reading a document or the web, once the user
+    confirmed it."""
+    proposal = confirm.take(token)
+    if proposal is None:
+        raise HTTPException(410, confirm.T("expired"))
+    name, arguments = proposal
+    with undo.capture() as cap:
+        result = tools.call(session, name, arguments)
+    if "error" in result.payload:
+        session.rollback()
+        raise HTTPException(422, str(result.payload["error"]))
+    token_undo = undo.save(session, cap, actor="user")
+    session.commit()
+    return ConfirmResult(message=confirm.T("done"), changed=result.changed, undo=token_undo)
 
 
 class _Stopped(Exception):
@@ -800,7 +946,8 @@ class _Stopped(Exception):
 @router.post("/agent/chat/stream")
 def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
     """Same as /agent/chat, as newline-delimited JSON events: {"type": "tool"} when a tool
-    starts, {"type": "token"} as the answer is written, {"type": "step"} to discard the text
+    starts, {"type": "tool_done"} when it ends, {"type": "stats"} after each model turn,
+    {"type": "token"} as the answer is written, {"type": "step"} to discard the text
     so far, then {"type": "done", "response"} or {"type": "error", "message"}."""
     ids = list(dict.fromkeys(body.attachments))
     for doc_id in ids:
@@ -827,6 +974,9 @@ def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
                 events.put({"type": "done", "response": response.model_dump(mode="json")})
             except _Stopped:
                 worker.rollback()
+            except loop.AgentError as exc:
+                worker.rollback()
+                events.put({"type": "error", "message": str(exc)})
             except Exception:
                 log.exception("Agent failed")
                 worker.rollback()
@@ -858,13 +1008,30 @@ def seed_demo(session: SessionDep) -> dict[str, object]:
 
 @router.get("/demo")
 def demo_status(session: SessionDep) -> dict[str, int]:
-    """How many demo documents the library holds (Settings offers to clear them)."""
-    return {"documents": len(ingest.demo_documents(session))}
+    """Demo documents in the library and demo files older versions left behind (Settings
+    offers to clear them, or to load the demo when there is none)."""
+    return {
+        "documents": len(ingest.demo_documents(session)),
+        "leftovers": len(ingest.demo_leftover_files(session)),
+    }
 
 
 @router.delete("/demo")
 def clear_demo(session: SessionDep) -> dict[str, int]:
-    """Permanently removes the demo documents and what came from them."""
-    removed = ingest.clear_demo(session)
+    """Permanently removes the demo documents, what came from them and leftover demo files."""
+    removed, files = ingest.clear_demo(session)
     session.commit()
+    for path in files:
+        path.unlink(missing_ok=True)
+    return {"removed": removed, "files": len(files)}
+
+
+@router.delete("/data")
+def erase_data(session: SessionDep, confirm: bool = False) -> dict[str, int]:
+    """Permanently erases everything Binder holds about the user (Settings); `confirm=true`."""
+    if not confirm:
+        raise HTTPException(428, T("confirm_erase"))
+    removed = erase.erase_all(session)
+    session.commit()
+    erase.delete_files(session)
     return {"removed": removed}

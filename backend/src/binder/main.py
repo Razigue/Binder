@@ -13,6 +13,7 @@ from sqlmodel import Session
 from starlette.responses import Response
 
 from binder import __version__, guard
+from binder.agent import loop
 from binder.api import assistant
 from binder.api import journeys as journeys_api
 from binder.api import scan as scan_api
@@ -38,6 +39,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     with Session(get_engine()) as session:
         llm_models.restore(session)
         areas.backfill(session)
+        loop.check_context(session)
     setup.start()
     scheduler = background.Scheduler() if background.enabled() else None
     if scheduler:

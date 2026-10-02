@@ -17,6 +17,7 @@ import re
 import string
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -198,6 +199,32 @@ def currency_for(country: str | None) -> str:
 
 def language_name(language: Language, in_language: Language = "en") -> str:
     return LANGUAGE_NAMES[in_language][language]
+
+
+# Frequent words that tell French from English apart (normalized: lowercase, no accents).
+_STOPWORDS: dict[Language, frozenset[str]] = {
+    "fr": frozenset({
+        "le", "la", "les", "un", "une", "des", "du", "de", "et", "est", "sont", "pour", "avec",
+        "votre", "vos", "vous", "dans", "sur", "au", "aux", "pas", "ce", "cette", "qui", "que",
+        "il", "elle", "a", "ete", "payer", "facture", "echeance", "avant",
+    }),
+    "en": frozenset({
+        "the", "a", "an", "and", "is", "are", "for", "with", "your", "you", "in", "on", "to",
+        "of", "not", "this", "that", "it", "be", "was", "has", "have", "pay", "bill", "due",
+        "before", "by",
+    }),
+}  # fmt: skip
+
+
+def guess_language(text: str) -> Language | None:
+    """Language a text is written in, None when it is too short or mixed to tell."""
+    words = re.findall(r"[a-z]+", unicodedata.normalize("NFKD", text.lower()))
+    counts = {lang: sum(w in stop for w in words) for lang, stop in _STOPWORDS.items()}
+    best = max(counts, key=lambda lang: counts[lang])
+    other = min(counts.values())
+    if counts[best] < 4 or counts[best] < 2 * other:
+        return None
+    return best
 
 
 def letter_language(country: str | None, ui_language: Language) -> Language:
@@ -479,6 +506,7 @@ DOC_TYPES = catalog(
         "charges_statement": {"en": "Service charges statement", "fr": "Régularisation de charges"},
         "fine": {"en": "Fine", "fr": "Avis de contravention"},
         "purchase_receipt": {"en": "Purchase receipt", "fr": "Facture d'achat"},
+        "payment_reminder": {"en": "Payment reminder", "fr": "Relance de paiement"},
     },
 )
 
@@ -494,6 +522,14 @@ FIELDS = catalog(
         "expiry_date": {"en": "expiry date", "fr": "la date d'expiration"},
         "reference": {"en": "reference", "fr": "la référence"},
         "doc_type": {"en": "document type", "fr": "le type de document"},
+        "amount_ht": {"en": "amount before tax", "fr": "le montant HT"},
+        "amount_tva": {"en": "VAT", "fr": "la TVA"},
+        "amount_ttc": {"en": "total including tax", "fr": "le montant TTC"},
+        "amount_due": {"en": "amount due", "fr": "le reste dû"},
+        "period_start": {"en": "start of the period", "fr": "le début de la période"},
+        "period_end": {"en": "end of the period", "fr": "la fin de la période"},
+        "iban": {"en": "IBAN", "fr": "l'IBAN"},
+        "siret": {"en": "SIRET", "fr": "le SIRET"},
     },
 )
 
