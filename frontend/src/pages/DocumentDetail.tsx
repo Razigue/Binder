@@ -16,7 +16,7 @@ import { ActivityList } from "@/components/ActivityList"
 import {
   useActivity, useDeleteDocument, useDocument, useFeed, useInvalidateAll, useUpdateDocument,
 } from "@/hooks/queries"
-import { useAgent } from "@/components/agent"
+import { useAgent, useAgentViewing } from "@/components/agent"
 import { FeedCard } from "@/components/feed"
 import { useT } from "@/i18n"
 import { area as areaMessages } from "@/i18n/messages/area"
@@ -44,6 +44,7 @@ export function DocumentDetailPage() {
   const ta = useT(areaMessages)
   const id = Number(useParams().id)
   const { data: doc, isPending, isError } = useDocument(id)
+  useAgentViewing(doc)
   // Field hovered in the panel: its source is highlighted on the page.
   const [active, setActive] = useState<string | null>(null)
 

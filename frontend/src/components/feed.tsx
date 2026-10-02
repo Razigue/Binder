@@ -1,8 +1,10 @@
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon, FileTextIcon, HourglassIcon, TrayIcon, LightbulbIcon, ListChecksIcon, EnvelopeIcon, NewspaperIcon, UsersIcon, type Icon } from "@phosphor-icons/react"
+import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon, FileTextIcon, HourglassIcon, TrayIcon, LightbulbIcon, ListChecksIcon, EnvelopeIcon, NewspaperIcon, UsersIcon, CircleNotchIcon, EyeIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { useAgent } from "@/components/agent"
 import { usePanels } from "@/components/panels"
@@ -10,7 +12,7 @@ import { useUpload } from "@/components/upload"
 import { useInvalidateAll } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { feed } from "@/i18n/messages/feed"
-import { api, type FeedAction, type FeedItem } from "@/lib/api"
+import { api, previewUrl, type FeedAction, type FeedItem } from "@/lib/api"
 import { AreaIcon } from "@/lib/areas"
 import { formatAmount } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -37,6 +39,9 @@ const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
   info: { dot: "bg-primary/60 ring-primary/10", label: "text-muted-foreground" },
 }
 
+// Identifies one action among a card's actions, to spot which button is running.
+const actionKey = (action: FeedAction) => `${action.type}:${JSON.stringify(action.params)}`
+
 /** Runs a card's action: on the server (with undo), or in the interface (open, ask, add…). */
 export function useRunAction() {
   const navigate = useNavigate()
@@ -44,6 +49,7 @@ export function useRunAction() {
   const upload = useUpload()
   const panels = usePanels()
   const invalidate = useInvalidateAll()
+  const [runningKey, setRunningKey] = useState<string | null>(null)
   const server = useMutation({
     mutationFn: api.act,
     onSuccess: (result) => {
@@ -51,6 +57,7 @@ export function useRunAction() {
       if (result.letter) panels.showLetter(result.letter)
     },
     onError: (e) => toast.error(e.message),
+    onSettled: () => setRunningKey(null),
   })
   const run = (action: FeedAction) => {
     const p = action.params
@@ -74,17 +81,22 @@ export function useRunAction() {
         window.location.assign(String(p.url))
         return
       default:
+        setRunningKey(actionKey(action))
         server.mutate({ type: action.type, params: p })
     }
   }
-  return { run, pending: server.isPending }
+  const isRunning = (action: FeedAction) => server.isPending && runningKey === actionKey(action)
+  return { run, pending: server.isPending, isRunning }
 }
 
 export function FeedCard({ item }: { item: FeedItem }) {
   const t = useT(feed)
-  const { run, pending } = useRunAction()
+  const { run, pending, isRunning } = useRunAction()
+  const [preview, setPreview] = useState(false)
   const Icon = KIND_ICON[item.kind]
   const tone = TONE_STYLE[item.tone]
+  // A question is a judgment call about a document: let the user read it before answering.
+  const previewable = item.kind === "question" && item.document_ids.length === 1
 
   return (
     <li className="flex gap-4 px-5 py-4">
@@ -117,23 +129,47 @@ export function FeedCard({ item }: { item: FeedItem }) {
             {item.detail}
           </p>
         )}
-        {item.actions.length > 0 && (
+        {(previewable || item.actions.length > 0) && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {item.actions.map((action, i) => (
-              <Button
-                key={i}
-                size="sm"
-                variant={action.primary ? "default" : action.type === "dismiss" ? "ghost" : "outline"}
-                disabled={pending}
-                onClick={() => run(action)}
-              >
-                {action.type === "open" && <FileTextIcon />}
-                {action.label}
+            {previewable && (
+              <Button size="sm" variant="outline" onClick={() => setPreview(true)}>
+                <EyeIcon /> {t("seeDocument")}
               </Button>
-            ))}
+            )}
+            {item.actions.map((action, i) => {
+              const running = isRunning(action)
+              return (
+                <Button
+                  key={i}
+                  size="sm"
+                  variant={action.primary ? "default" : action.type === "dismiss" ? "ghost" : "outline"}
+                  disabled={pending}
+                  onClick={() => run(action)}
+                >
+                  {running ? <CircleNotchIcon className="animate-spin" /> : action.type === "open" && <FileTextIcon />}
+                  {running ? t("working") : action.label}
+                </Button>
+              )
+            })}
           </div>
         )}
       </div>
+      {previewable && (
+        <Dialog open={preview} onOpenChange={setPreview}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="text-base">{item.title}</DialogTitle>
+              <DialogDescription className="sr-only">{item.title}</DialogDescription>
+            </DialogHeader>
+            {/* White backing on purpose: it is a picture of a paper page, in both themes. */}
+            <img
+              src={previewUrl(item.document_ids[0])}
+              alt={item.title}
+              className="w-full rounded bg-white shadow-sm dark:brightness-[0.88]"
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </li>
   )
 }

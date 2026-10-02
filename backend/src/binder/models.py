@@ -160,6 +160,10 @@ class Document(SQLModel, table=True):
     duplicate_dismissed: bool = False
     # Former version of a renewed document (certificate, identity document…).
     superseded_by: int | None = Field(default=None, index=True)
+    # Set when this document is a copy of a letter Binder itself wrote (its PDF carries that
+    # letter's id, services/text.py:stamp_letter): a draft or sent copy re-imported, not mail
+    # received from someone else.
+    source_letter_id: int | None = Field(default=None, index=True)
     page_count: int = 0
     # Import batch (one drop of files, one mailbox pass, one phone scan): the import report
     # groups its documents.

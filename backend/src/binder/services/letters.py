@@ -37,7 +37,7 @@ from binder.services import activity, household, lawcheck, llm, research, settin
 from binder.services.profile import KEY as PROFILE_KEY
 from binder.services.profile import Profile as Profile  # re-exported: letters.Profile
 from binder.services.rules import normalize
-from binder.services.text import html_to_pdf
+from binder.services.text import html_to_pdf, stamp_letter
 
 log = logging.getLogger(__name__)
 
@@ -402,6 +402,10 @@ T = i18n.catalog(
         "answered": {
             "en": "Letter to {recipient} answered",
             "fr": "Courrier à {recipient} : réponse reçue",
+        },
+        "deleted": {
+            "en": "Letter to {recipient} removed",
+            "fr": "Courrier à {recipient} supprimé",
         },
         "to_complete": {"en": "[to be completed]", "fr": "[à compléter]"},
         "enclosures": {"en": "Enclosure: {what}", "fr": "Pièce jointe : {what}"},
@@ -1008,6 +1012,19 @@ def mark_answered(session: Session, row: Correspondence, *, actor: str = "user")
     )
 
 
+def delete(session: Session, row: Correspondence, *, actor: str = "user") -> None:
+    """Removes a letter Binder is tracking (draft or still waiting for an answer)."""
+    undo.row_deleted(row)
+    activity.log(
+        session,
+        "letter",
+        T.msg("deleted", recipient=row.recipient),
+        actor=actor,
+        document_id=row.document_id,
+    )
+    session.delete(row)
+
+
 def _followup_deadlines(session: Session, row: Correspondence) -> list[Deadline]:
     from sqlmodel import select
 
@@ -1076,7 +1093,8 @@ def pdf(row: Correspondence) -> bytes:
         if block.startswith(("Objet", "Subject")):
             css = "subject"
         parts.append(f'<p class="{css}">{text}</p>')
-    return html_to_pdf("".join(parts), PDF_CSS)
+    data = html_to_pdf("".join(parts), PDF_CSS)
+    return stamp_letter(data, row.id) if row.id is not None else data
 
 
 def file_name(row: Correspondence) -> str:

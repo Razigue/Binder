@@ -76,6 +76,8 @@ class DocumentOut(BaseModel):
     doc_type: str | None = None
     duplicate_of: int | None = None
     superseded_by: int | None = None
+    # Set when this document is a copy of a letter Binder itself wrote, not mail received.
+    source_letter_id: int | None = None
     # Standard name used for downloads and exports ("2026-09-18 EDF invoice.pdf").
     standard_name: str = ""
     # Retention: applicable rule, date until which to keep it, reason to sort it out.
@@ -218,6 +220,8 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
     # Documents the user attached to this message (already uploaded with POST /documents).
     attachments: list[int] = Field(default=[], max_length=10)
+    # Document open on screen while asking: "this document", "how much?" refer to it.
+    viewing: int | None = None
 
 
 class ToolCallTrace(BaseModel):
