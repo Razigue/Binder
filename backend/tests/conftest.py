@@ -10,7 +10,7 @@ from binder import i18n, updater
 from binder.config import get_settings
 from binder.db import reset_engine
 from binder.samples import Sample, build_samples
-from binder.services import llm, llm_models, websearch
+from binder.services import llm, llm_models, scan, websearch
 
 TODAY = date(2026, 9, 30)
 
@@ -39,6 +39,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     websearch._seen.clear()
     for name in list(llm_models._downloads):
         llm_models.cancel_download(name)
+    # A scan's analysis would otherwise write into the next test's database.
+    scan.wait_for_analysis()
     llm.transport = updater.transport = None
     llm.select(None)
     reset_engine()

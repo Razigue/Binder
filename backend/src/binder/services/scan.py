@@ -227,6 +227,8 @@ _lock = threading.RLock()
 _session: ScanSession | None = None
 _server: _Server | None = None
 _watchdog: threading.Thread | None = None
+# Analysis of imported documents still running in the background (see wait_for_analysis).
+_analysis_threads: list[threading.Thread] = []
 
 
 def current() -> ScanSession | None:
@@ -351,5 +353,17 @@ def import_documents(session: ScanSession) -> list[int]:
         for doc_id in ids:
             ingest.analyze_in_background(doc_id)
 
-    threading.Thread(target=analyse, daemon=True).start()
+    thread = threading.Thread(target=analyse, name="scan-analysis", daemon=True)
+    with _lock:
+        _analysis_threads.append(thread)
+    thread.start()
     return ids
+
+
+def wait_for_analysis(timeout: float = 90) -> None:
+    """Waits for the background analysis of every scanned document imported so far (tests: it
+    must not outlive the database it writes to)."""
+    with _lock:
+        threads, _analysis_threads[:] = list(_analysis_threads), []
+    for thread in threads:
+        thread.join(timeout)
