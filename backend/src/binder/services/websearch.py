@@ -14,6 +14,7 @@ import socket
 import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from typing import ClassVar
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
@@ -111,7 +112,7 @@ def _personal_words(session: Session) -> dict[str, str]:
     """Words of the household's names and home address, with the kind each one reveals."""
     me = profile.load(session)
     found: dict[str, str] = {}
-    names = [me.name, *(m.name for m in household.members(session))]
+    names = [me.name, *(m.name for m in household.members(session, everyone=True))]
     for name in names:
         found.update(dict.fromkeys(_words(name), "name"))
     street = me.address.splitlines()[0] if me.address else ""
@@ -169,9 +170,10 @@ class _ResultsParser(HTMLParser):
         self._field: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        classes = (dict(attrs).get("class") or "").split()
+        values = dict(attrs)
+        classes = (values.get("class") or "").split()
         if tag == "a" and "result__a" in classes:
-            self.results.append(Result(title="", url=_target(dict(attrs).get("href")), snippet=""))
+            self.results.append(Result(title="", url=_target(values.get("href")), snippet=""))
             self._field = "title"
         elif "result__snippet" in classes and self.results:
             self._field = "snippet"
@@ -306,8 +308,12 @@ def _public(url: str) -> bool:
 
 
 class _TextParser(HTMLParser):
-    SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "form"}
-    BLOCKS = {"p", "div", "li", "br", "tr", "h1", "h2", "h3", "h4", "section", "article"}
+    SKIP: ClassVar[frozenset[str]] = frozenset(
+        {"script", "style", "noscript", "svg", "nav", "footer", "header", "form"}
+    )
+    BLOCKS: ClassVar[frozenset[str]] = frozenset(
+        {"p", "div", "li", "br", "tr", "h1", "h2", "h3", "h4", "section", "article"}
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -365,7 +371,7 @@ def read_page(url: str, limit: int = PAGE_CHARS) -> tuple[str, str]:
                 kind = r.headers.get("content-type", "")
                 if "html" not in kind and "text/plain" not in kind:
                     raise ValueError(f"not a web page ({kind or 'unknown type'})")
-                body = b""
+                body = bytearray()
                 for chunk in r.iter_bytes():
                     body += chunk
                     if len(body) >= MAX_BYTES:

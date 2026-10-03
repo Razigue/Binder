@@ -20,7 +20,7 @@ function matcher(language: "en" | "fr") {
   for (const [key, value] of Object.entries(dict)) {
     if (!key.endsWith(".terms")) continue
     const id = key.slice(0, -".terms".length)
-    for (const term of value.split("|")) entries.set(term.toLowerCase(), { id, def: dict[`${id}.def`] })
+    for (const term of value.split("|")) entries.set(term.toLowerCase(), { id, def: dict[`${id}.def`] ?? "" })
   }
   const escaped = [...entries.keys()]
     .sort((a, b) => b.length - a.length)

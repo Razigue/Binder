@@ -2,14 +2,17 @@
 
 No model ships with Binder: at launch, setup.py picks the best one the machine runs and downloads
 it. The download runs in the background; the interface follows its progress. Each launch measures
-the machine again: when Binder chose the model and a better one now suits the machine, the
-upgrade is offered (never downloaded silently, never a downgrade). docs/models.md: adding one.
+the machine again: when Binder chose the model and a better one now suits the machine, it is
+downloaded in the background and used once ready (shown, and the user can stop it; never a
+downgrade, never over a model the user picked). Only the models in use stay on the disk.
+docs/models.md: adding one, retiring one.
 """
 
 import json
 import logging
 import threading
 from dataclasses import dataclass, field
+from typing import Literal
 
 import httpx
 from pydantic import BaseModel
@@ -92,8 +95,12 @@ T = i18n.catalog(
         "removed": {"en": "Model {label} deleted", "fr": "Modèle {label} supprimé"},
         "downloaded": {"en": "Model {label} downloaded", "fr": "Modèle {label} téléchargé"},
         "upgraded": {
-            "en": "Local AI upgraded: {old} → {new} (the former model stays installed)",
-            "fr": "IA locale améliorée : {old} → {new} (l'ancien modèle reste installé)",
+            "en": "Local AI upgraded: {old} → {new}",
+            "fr": "IA locale améliorée : {old} → {new}",
+        },
+        "pruned": {
+            "en": "Unused model {label} deleted (disk space freed)",
+            "fr": "Modèle inutilisé {label} supprimé (espace disque libéré)",
         },
         "upgrade_declined": {
             "en": "Upgrade to {label} declined",
@@ -155,6 +162,9 @@ CATALOG = [
     ),
 ]
 BY_NAME = {e.name: e for e in CATALOG}
+# Chat models earlier versions of Binder downloaded and no longer offer: deleted at launch, like
+# any other catalogue model not in use. Add a model here when it leaves the catalogue.
+RETIRED = ["qwen3.5:27b"]
 # Chat models, from the weakest to the best.
 CHAT = sorted((e for e in CATALOG if e.kind == "chat"), key=lambda e: e.rank)
 
@@ -222,6 +232,9 @@ def advise(session: Session, recommended: str | None, fits: str | None) -> bool:
         return False
     if recommended and rank(recommended) > rank(active) and recommended != config.declined:
         _advice.upgrade = recommended
+        # The best local AI the machine runs, without the user thinking about it: downloaded
+        # in the background, used once ready; the user can still stop it (decline_upgrade).
+        accept_upgrade()
     return fits is not None and rank(active) > rank(fits)
 
 
@@ -262,7 +275,7 @@ def upgrade_offer() -> ModelUpgrade | None:
 
 
 def _switch(session: Session, name: str) -> None:
-    """Moves to the upgrade just downloaded; the former model stays installed."""
+    """Moves to the upgrade just downloaded; the former model then leaves the disk."""
     previous = llm.model()
     config = settings_store.load(session, KEY, LlmConfig)
     config.model, config.auto = name, True
@@ -273,6 +286,39 @@ def _switch(session: Session, name: str) -> None:
     _advice.automatic = _automatic(config)
     msg = T.msg("upgraded", old=label(previous), new=label(name))
     activity.log(session, "settings", msg, actor="binder")
+    prune(session)
+
+
+def prune(session: Session) -> list[str]:
+    """Deletes the models Binder downloaded that it no longer uses (a former model after an
+    upgrade, one a Binder update dropped): only the active chat model and the embedding stay
+    on the disk. Only in Binder's own Ollama (a shared one serves other apps too), never a
+    model installed outside Binder, and never while a download runs (layers are shared)."""
+    if not llm.owned() or _advice.upgrade is not None:
+        return []
+    with _lock:
+        if _downloads:
+            return []
+    installed = llm.installed_models()
+    active = llm.model().removesuffix(":latest")
+    if not installed or not llm.is_installed(active, installed):
+        return []
+    managed = {e.name for e in CHAT} | set(RETIRED)
+    removed = []
+    for name in installed:
+        base = name.removesuffix(":latest")
+        if base not in managed or base == active:
+            continue
+        try:
+            _delete(name)
+        except httpx.HTTPError as e:
+            log.info("Could not delete the unused model %s: %s", name, e)
+            continue
+        removed.append(base)
+        activity.log(session, "settings", T.msg("pruned", label=label(base)), actor="binder")
+    if removed:
+        llm.forget_availability()
+    return removed
 
 
 def choose(session: Session, name: str, *, actor: str = "user") -> None:
@@ -301,12 +347,11 @@ def remove(session: Session, name: str) -> None:
     if name not in BY_NAME:
         raise UnknownModel(T("not_in_catalog", name=name))
     # Ollama shares layers between models: delete nothing while a download is running.
-    if any(d.phase != "error" for d in _downloads.values()):
+    with _lock:
+        busy = any(d.phase != "error" for d in _downloads.values())
+    if busy:
         raise Busy(T("busy"))
-    with llm.client() as c:
-        r = c.request("DELETE", "/api/delete", json={"model": name})
-        if r.status_code != 404:
-            r.raise_for_status()
+    _delete(name)
     config = settings_store.load(session, KEY, LlmConfig)
     if config.model == name:
         config.model, config.auto = None, True
@@ -318,6 +363,14 @@ def remove(session: Session, name: str) -> None:
     activity.log(session, "settings", T.msg("removed", label=label(name)), actor="user")
 
 
+def _delete(name: str) -> None:
+    """Deletes a model from Ollama (already gone is fine). Raises httpx.HTTPError."""
+    with llm.client() as c:
+        r = c.request("DELETE", "/api/delete", json={"model": name})
+        if r.status_code != 404:
+            r.raise_for_status()
+
+
 def label(name: str) -> str:
     """The model's name as shown to the user."""
     entry = BY_NAME.get(name.removesuffix(":latest"))
@@ -327,9 +380,12 @@ def label(name: str) -> str:
 # --- Downloads -----------------------------------------------------------------------
 
 
+DownloadPhase = Literal["queued", "starting", "downloading", "verifying", "error"]
+
+
 @dataclass
 class _Download:
-    phase: str = "queued"  # queued, starting, downloading, verifying, error
+    phase: DownloadPhase = "queued"
     error: str | None = None
     # Ollama downloads several layers: digest → (received, total).
     layers: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -337,10 +393,12 @@ class _Download:
     thread: threading.Thread | None = None
 
     def out(self) -> ModelDownload:
+        # A copy: the download thread adds layers while the interface reads the progress.
+        layers = list(self.layers.values())
         return ModelDownload(
             phase=self.phase,
-            completed=sum(done for done, _ in self.layers.values()),
-            total=sum(total for _, total in self.layers.values()),
+            completed=sum(done for done, _ in layers),
+            total=sum(total for _, total in layers),
             error=self.error,
         )
 
@@ -376,9 +434,17 @@ def cancel_download(name: str) -> None:
         download.cancel.set()
 
 
+def download_state(name: str) -> ModelDownload | None:
+    """Progress of the model's download; None once it is over (or never started)."""
+    with _lock:
+        download = _downloads.get(name)
+        return download.out() if download else None
+
+
 def wait(name: str, timeout: float = 10.0) -> None:
     """Waits for a download to finish (tests)."""
-    thread = _threads.get(name)
+    with _lock:
+        thread = _threads.get(name)
     if thread:
         thread.join(timeout)
 

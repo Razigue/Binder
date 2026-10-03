@@ -2,20 +2,18 @@
 return."""
 
 from datetime import date
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.api.assistant import undoable
-from binder.db import get_session
+from binder.api.common import SessionDep, get_or_404
 from binder.models import Journey
 from binder.services import journeys
 
 router = APIRouter(prefix="/api/journeys")
-SessionDep = Annotated[Session, Depends(get_session)]
 
 T = i18n.catalog(
     "journeys_api",
@@ -42,10 +40,7 @@ class StepEdit(BaseModel):
 
 
 def _journey(session: Session, journey_id: int) -> Journey:
-    row = session.get(Journey, journey_id)
-    if row is None:
-        raise HTTPException(404, T("not_found"))
-    return row
+    return get_or_404(session, Journey, journey_id, T("not_found"))
 
 
 @router.get("/kinds")

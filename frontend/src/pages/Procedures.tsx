@@ -5,12 +5,12 @@ import {
 } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { useAgent } from "@/components/agent"
-import { PageHeader } from "@/components/layout/AppLayout"
+import { useAgent } from "@/components/agent/context"
+import { PageHeader } from "@/components/layout/PageHeader"
 import { FinishedLetters, Ongoing } from "@/components/ongoing"
 import { PrepareDialog, type Task } from "@/components/prepare"
-import { usePanels } from "@/components/panels"
-import { useUpload } from "@/components/upload"
+import { usePanels } from "@/components/panels/context"
+import { useUpload } from "@/components/upload/context"
 import { useJourneyKinds, useJourneys } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { prepare as prepareMessages } from "@/i18n/messages/prepare"
@@ -113,8 +113,9 @@ export function ProceduresPage() {
             {EVENTS.map((e, i) => {
               const Icon = EVENT_ICON[e]
               return (
-                <li key={e} className="animate-rise" style={{ "--i": i } as React.CSSProperties}>
+                <li key={e} className="animate-rise" style={{ "--i": i }}>
                   <button
+                    type="button"
                     onClick={() => setEvent(e)}
                     className="group flex h-full min-h-20 w-full items-center gap-3 rounded-xl bg-card px-4 py-3.5 text-left ring-1 ring-foreground/10 transition-[background-color,box-shadow] outline-none hover:bg-accent/40 hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring"
                   >
@@ -249,6 +250,7 @@ function StepRow({ step, onClick }: { step: Step; onClick: () => void }) {
   return (
     <li>
       <button
+        type="button"
         onClick={onClick}
         className="group flex min-h-14 w-full items-center gap-3 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors outline-none hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring"
       >

@@ -11,6 +11,19 @@ import cv2
 import numpy as np
 import pymupdf
 
+from binder import i18n
+
+T = i18n.catalog(
+    "scan_image",
+    {
+        "unreadable": {"en": "Unreadable image", "fr": "Image illisible"},
+        "not_encoded": {
+            "en": "Could not encode the page",
+            "fr": "Impossible d'enregistrer la page",
+        },
+    },
+)
+
 Quad = list[tuple[float, float]]
 
 # Outline detection works on a reduced image: faster, and paper texture disappears.
@@ -40,7 +53,7 @@ class Page:
 def decode(data: bytes) -> np.ndarray:
     image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
-        raise InvalidImage("Unreadable image")
+        raise InvalidImage(T("unreadable"))
     return image
 
 
@@ -153,7 +166,7 @@ def _resize(image: np.ndarray, long_side: int) -> np.ndarray:
 def _jpeg(image: np.ndarray, quality: int = JPEG_QUALITY) -> bytes:
     ok, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
-        raise InvalidImage("Could not encode the page")
+        raise InvalidImage(T("not_encoded"))
     return buffer.tobytes()
 
 
@@ -177,15 +190,14 @@ def process(data: bytes, hint: Quad | None = None) -> Page:
 
 def build_pdf(pages: list[bytes]) -> bytes:
     """One PDF page per JPEG image, sized to the image's proportions."""
-    pdf = pymupdf.open()
-    for jpeg in pages:
-        height, width = decode(jpeg).shape[:2]
-        if height >= width:
-            size = (PDF_LONG_SIDE * width / height, PDF_LONG_SIDE)
-        else:
-            size = (PDF_LONG_SIDE, PDF_LONG_SIDE * height / width)
-        page = pdf.new_page(width=size[0], height=size[1])
-        page.insert_image(page.rect, stream=jpeg)
-    data: bytes = pdf.tobytes(garbage=3, deflate=True)
-    pdf.close()
+    with pymupdf.open() as pdf:
+        for jpeg in pages:
+            height, width = decode(jpeg).shape[:2]
+            if height >= width:
+                size = (PDF_LONG_SIDE * width / height, PDF_LONG_SIDE)
+            else:
+                size = (PDF_LONG_SIDE, PDF_LONG_SIDE * height / width)
+            page = pdf.new_page(width=size[0], height=size[1])
+            page.insert_image(page.rect, stream=jpeg)
+        data: bytes = pdf.tobytes(garbage=3, deflate=True)
     return data

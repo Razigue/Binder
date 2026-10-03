@@ -1,7 +1,8 @@
 import { defineMessages } from "@/i18n/core"
 
-// Settings: what Binder must know about the user, language and appearance, automatic import,
-// the recovery code, demo data and erasing everything.
+// Settings, in two tabs: you (details, situation, household) and the app (language and
+// appearance, automatic import, reminders, local AI, the recovery code, demo data and erasing
+// everything).
 export const settings = defineMessages({
   en: {
     title: "Settings",
@@ -21,6 +22,31 @@ export const settings = defineMessages({
     "you.notes": "What Binder should know",
     "you.notesPlaceholder": "e.g. Tenant since 2021, two children, self-employed. My partner handles the car.",
     "you.notesHint": "Your situation in your own words: the agent reads it before every answer.",
+
+    "tab.label": "Settings",
+    "tab.you": "You and your household",
+    "tab.app": "The app",
+
+    "situation.title": "Your situation",
+    "situation.description": "The papers Binder expects from you follow from it.",
+
+    "household.title": "Your household",
+    "household.description": "The people your documents concern. Binder found them in your papers: correct it when it got it wrong.",
+    "household.empty": "Nobody found in your documents yet.",
+    "household.documents_one": "{count} document",
+    "household.documents_other": "{count} documents",
+    "household.added": "Added by you",
+    "household.rename": "Rename",
+    "household.renameLabel": "New name for {name}",
+    "household.mergeHint": "Give the name of another member to merge them. Their documents follow.",
+    "household.save": "Save",
+    "household.cancel": "Cancel",
+    "household.remove": "Not in my household",
+    "household.removeLabel": "Remove {name} from the household",
+    "household.addLabel": "Someone missing?",
+    "household.addPlaceholder": "First and last name",
+    "household.add": "Add",
+    "household.saved": "Household updated",
 
     "region.title": "Language & region",
     "region.description": "The language of the interface, of the agent's answers and of your letters.",
@@ -63,12 +89,15 @@ export const settings = defineMessages({
     "folder.path": "Folder path",
     "folder.watch": "Watch this folder",
     "folder.enabled": "Folder watched: its documents are being imported",
-    "folder.disabled": "Folder watching turned off",
+    "folder.disabled": "Watching stopped: the documents already imported stay in Binder, the folder is left as it is",
+    "folder.stopped": "Not watched: files added to this folder are no longer imported.",
+    "folder.resume": "Watch again",
 
     "mail.title": "Mailbox",
     "mail.description": "Imports the attachments of your emails. Read only: nothing is moved, deleted or marked as read.",
     "mail.toggle": "Import the attachments of my emails",
     "mail.address": "Email address",
+    "mail.addressPlaceholder": "firstname.lastname@gmail.com",
     "mail.password": "App password",
     "mail.passwordHint": "Create one in your email account’s security settings.",
     "mail.passwordSet": "Saved (unchanged)",
@@ -79,6 +108,15 @@ export const settings = defineMessages({
     "mail.folder": "Folder",
     "mail.since": "First check goes back (days)",
     "mail.saved": "Mailbox saved",
+
+    "reminders.title": "Reminders",
+    "reminders.description": "Binder reminds you of what needs you, even when it is closed.",
+    "reminders.card": "While Binder is closed",
+    "reminders.cardDescription": "Every day at {hour}:00 and when you log in, one notification if something needs you: a deadline, a paper to fetch, a right to check. Nothing when all is in order.",
+    "reminders.toggle": "Remind me while Binder is closed",
+    "reminders.enabled": "Reminders turned on",
+    "reminders.disabled": "Reminders turned off",
+    "reminders.unavailable": "Available in the installed application: while Binder is open, it notifies you itself.",
 
     "security.title": "Security",
     "security.description": "Binder backs up your documents every day, encrypted. The recovery code opens a backup on any computer.",
@@ -144,6 +182,31 @@ export const settings = defineMessages({
     "you.notesPlaceholder": "Ex. : locataire depuis 2021, deux enfants, auto-entrepreneur. Mon conjoint gère la voiture.",
     "you.notesHint": "Votre situation, avec vos mots : l'agent la lit avant chaque réponse.",
 
+    "tab.label": "Réglages",
+    "tab.you": "Vous et votre foyer",
+    "tab.app": "L'application",
+
+    "situation.title": "Votre situation",
+    "situation.description": "Les papiers que Binder attend de vous en découlent.",
+
+    "household.title": "Votre foyer",
+    "household.description": "Les personnes que vos documents concernent. Binder les a trouvées dans vos papiers : corrigez-le s'il s'est trompé.",
+    "household.empty": "Personne n'a encore été trouvé dans vos documents.",
+    "household.documents_one": "{count} document",
+    "household.documents_other": "{count} documents",
+    "household.added": "Ajouté par vous",
+    "household.rename": "Renommer",
+    "household.renameLabel": "Nouveau nom pour {name}",
+    "household.mergeHint": "Donnez le nom d'un autre membre pour les fusionner. Leurs documents suivent.",
+    "household.save": "Enregistrer",
+    "household.cancel": "Annuler",
+    "household.remove": "Pas dans mon foyer",
+    "household.removeLabel": "Retirer {name} du foyer",
+    "household.addLabel": "Quelqu'un manque ?",
+    "household.addPlaceholder": "Prénom et nom",
+    "household.add": "Ajouter",
+    "household.saved": "Foyer mis à jour",
+
     "region.title": "Langue et région",
     "region.description": "La langue de l'interface, des réponses de l'agent et de vos courriers.",
     "language.label": "Langue",
@@ -185,12 +248,15 @@ export const settings = defineMessages({
     "folder.path": "Chemin du dossier",
     "folder.watch": "Surveiller ce dossier",
     "folder.enabled": "Dossier surveillé : ses documents sont en cours d'import",
-    "folder.disabled": "Surveillance désactivée",
+    "folder.disabled": "Surveillance arrêtée : les documents déjà importés restent dans Binder, le dossier n'est pas modifié",
+    "folder.stopped": "Non surveillé : les fichiers ajoutés à ce dossier ne sont plus importés.",
+    "folder.resume": "Surveiller à nouveau",
 
     "mail.title": "Boîte mail",
     "mail.description": "Importe les pièces jointes de vos e-mails. Lecture seule : rien n'est déplacé, supprimé ni marqué comme lu.",
     "mail.toggle": "Importer les pièces jointes de mes e-mails",
     "mail.address": "Adresse e-mail",
+    "mail.addressPlaceholder": "prenom.nom@gmail.com",
     "mail.password": "Mot de passe d'application",
     "mail.passwordHint": "Créez-le dans les réglages de sécurité de votre compte e-mail.",
     "mail.passwordSet": "Enregistré (inchangé)",
@@ -201,6 +267,15 @@ export const settings = defineMessages({
     "mail.folder": "Dossier",
     "mail.since": "La première vérification remonte à (jours)",
     "mail.saved": "Boîte mail enregistrée",
+
+    "reminders.title": "Rappels",
+    "reminders.description": "Binder vous rappelle ce qui vous attend, même quand il est fermé.",
+    "reminders.card": "Quand Binder est fermé",
+    "reminders.cardDescription": "Chaque jour à {hour} h et à l'ouverture de votre session, une notification si quelque chose vous attend : une échéance, un papier à récupérer, un droit à vérifier. Rien quand tout est en ordre.",
+    "reminders.toggle": "Me prévenir quand Binder est fermé",
+    "reminders.enabled": "Rappels activés",
+    "reminders.disabled": "Rappels désactivés",
+    "reminders.unavailable": "Disponible dans l'application installée : quand Binder est ouvert, il vous prévient lui-même.",
 
     "security.title": "Sécurité",
     "security.description": "Binder sauvegarde vos documents chaque jour, chiffrés. Le code de récupération ouvre une sauvegarde sur n'importe quel ordinateur.",

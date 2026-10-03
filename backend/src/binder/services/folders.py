@@ -18,14 +18,14 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, DocType, Document
 from binder.services import llm, settings_store
+from binder.services.deadlines import document_date
 from binder.services.rules import normalize
 
 log = logging.getLogger(__name__)
@@ -388,14 +388,10 @@ class FolderStatus(BaseModel):
     pieces: list[PieceStatus]
 
 
-def _date_of(doc: Document) -> date:
-    return doc.issue_date or doc.due_date or doc.created_at.date()
-
-
 def _is_fresh(doc: Document, piece: Piece, today: date) -> bool:
     if doc.expiry_date is not None and doc.expiry_date < today and not piece.expired_ok:
         return False
-    return piece.max_age is None or _date_of(doc) >= today - timedelta(days=piece.max_age)
+    return piece.max_age is None or document_date(doc) >= today - timedelta(days=piece.max_age)
 
 
 def current_documents(session: Session) -> list[Document]:
@@ -425,7 +421,7 @@ def evaluate(
         docs = current_documents(session)
     pieces = []
     for piece in kind.pieces:
-        matching = sorted((d for d in docs if piece.match(d)), key=_date_of, reverse=True)
+        matching = sorted((d for d in docs if piece.match(d)), key=document_date, reverse=True)
         fresh = [d for d in matching if _is_fresh(d, piece, today)][: piece.count]
         note = ""
         if len(fresh) >= piece.count:
@@ -440,7 +436,7 @@ def evaluate(
             note = (
                 T("expired", title=latest.title, expiry=latest.expiry_date)
                 if expired
-                else T("too_old", issued=_date_of(latest))
+                else T("too_old", issued=document_date(latest))
             )
         else:
             status = "missing"
@@ -530,9 +526,15 @@ PICK_SCHEMA: dict[str, Any] = {
 }
 
 
+class _PickedPiece(BaseModel):
+    label: str | None = None
+    document_ids: list[int] = []
+    hint: str | None = None
+
+
 class _Picked(BaseModel):
     title: str
-    pieces: list[dict[str, Any]]
+    pieces: list[_PickedPiece]
 
 
 def kind_for(purpose: str) -> FolderKind | None:
@@ -544,7 +546,7 @@ def kind_for(purpose: str) -> FolderKind | None:
 
 
 def _date_label(doc: Document) -> str:
-    return _date_of(doc).isoformat()
+    return document_date(doc).isoformat()
 
 
 def _pick_llm(purpose: str, docs: list[Document]) -> _Picked | None:
@@ -561,32 +563,26 @@ def _pick_llm(purpose: str, docs: list[Document]) -> _Picked | None:
     try:
         message = llm.chat([{"role": "user", "content": prompt}], fmt=PICK_SCHEMA)
         return _Picked.model_validate(json.loads(message.get("content") or "{}"))
-    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
+    except llm.FAILURES:
         log.exception("Pack by the model failed, falling back to keywords")
         return None
 
 
 def _pick_rules(purpose: str, docs: list[Document]) -> _Picked:
     """Without a model: an identity document, then the types the request names."""
-    words = [w for w in re.findall(r"[a-z]{4,}", normalize(purpose))]
-    pieces: list[dict[str, Any]] = [
-        {
-            "label": IDENTITY.label,
-            "document_ids": [],
-            "hint": IDENTITY.hint,
-            "types": IDENTITY_TYPES,
-        }
+    words = re.findall(r"[a-z]{4,}", normalize(purpose))
+    wanted: list[tuple[str, str | None, set[DocType]]] = [
+        (IDENTITY.label, IDENTITY.hint, set(IDENTITY_TYPES))
     ]
     for doc_type in DocType:
         names = normalize(" ".join(i18n.doc_type_label(doc_type, lang) for lang in i18n.LANGUAGES))
         if any(w in names for w in words):
-            pieces.append(
-                {"label": i18n.doc_type_label(doc_type), "document_ids": [], "types": {doc_type}}
-            )
-    for piece in pieces:
-        types = piece.pop("types")
-        found = sorted((d for d in docs if d.doc_type in types), key=_date_of)
-        piece["document_ids"] = [d.id for d in reversed(found)][:3]
+            wanted.append((i18n.doc_type_label(doc_type), None, {doc_type}))
+    pieces = []
+    for label, hint, types in wanted:
+        found = sorted((d for d in docs if d.doc_type in types), key=document_date)
+        ids = [d.id for d in reversed(found) if d.id is not None][:3]
+        pieces.append(_PickedPiece(label=label, document_ids=ids, hint=hint))
     return _Picked(title=T("custom_title", purpose=purpose), pieces=pieces)
 
 
@@ -602,8 +598,8 @@ def prepare(session: Session, purpose: str) -> FolderStatus:
     known = {d.id for d in docs}
     pieces = []
     for raw in picked.pieces:
-        ids = [i for i in raw.get("document_ids") or [] if i in known]
-        label = str(raw.get("label") or "").strip()
+        ids = [i for i in raw.document_ids if i in known]
+        label = (raw.label or "").strip()
         if not label:
             continue
         pieces.append(
@@ -614,8 +610,7 @@ def prepare(session: Session, purpose: str) -> FolderStatus:
                 found=1 if ids else 0,
                 needed=1,
                 optional=False,
-                hint=str(raw.get("hint") or "")
-                or (T("found_hint") if ids else T("custom_missing_hint")),
+                hint=raw.hint or (T("found_hint") if ids else T("custom_missing_hint")),
                 document_ids=ids,
             )
         )

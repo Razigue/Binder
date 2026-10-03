@@ -18,7 +18,7 @@ def active_ids(client: TestClient) -> set[int]:
 
 def test_bulk_trash_is_undone_in_one_go(client: TestClient, samples: list[Sample]) -> None:
     ids = three(client, samples)
-    r = client.post("/api/documents/bulk/trash", json={"ids": ids[:2] + [9999]})
+    r = client.post("/api/documents/bulk/trash", json={"ids": [*ids[:2], 9999]})
     assert r.status_code == 200
     assert r.json() == {"count": 2, "message": "2 documents moved to the trash"}
     assert active_ids(client) == {ids[2]}

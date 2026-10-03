@@ -210,7 +210,17 @@
     toastTimer = setTimeout(() => (el.hidden = true), 3500)
   }
 
+  // The element focused before the sheet opened, given focus back when it closes.
+  let sheetOpener = null
+
+  function closeSheet() {
+    $("sheet").hidden = true
+    sheetOpener?.focus()
+    sheetOpener = null
+  }
+
   function sheet({ title, text, image, confirm, cancel, onConfirm }) {
+    sheetOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     $("sheetTitle").textContent = title
     $("sheetText").textContent = text || ""
     $("sheetText").hidden = !text
@@ -220,13 +230,14 @@
     $("sheetConfirm").textContent = confirm
     $("sheetCancel").textContent = cancel
     $("sheet").hidden = false
-    const close = () => ($("sheet").hidden = true)
-    $("sheetCancel").onclick = close
-    $("sheet").onclick = (e) => e.target === $("sheet") && close()
+    $("sheetCancel").onclick = closeSheet
+    $("sheet").onclick = (e) => e.target === $("sheet") && closeSheet()
     $("sheetConfirm").onclick = () => {
-      close()
+      closeSheet()
       onConfirm()
     }
+    // A dialog takes the focus, so that screen readers and keyboards land in it.
+    $("sheetConfirm").focus()
   }
 
   // --- Pages -------------------------------------------------------------------------------
@@ -283,7 +294,7 @@
     })
     if (failed) {
       $("sheetCancel").onclick = () => {
-        $("sheet").hidden = true
+        closeSheet()
         removePage(page)
       }
     }
@@ -670,6 +681,15 @@
   $("fallbackNext").onclick = nextDocument
   $("finishBtn").onclick = finish
   $("fallbackFinish").onclick = finish
+  // The photo button is a label around the file input: Enter and Space open the camera too.
+  $("fallbackBtn").parentElement.onkeydown = (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return
+    e.preventDefault()
+    $("fileInput").click()
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("sheet").hidden) closeSheet()
+  })
   $("fileInput").onchange = (e) => {
     addPhotos([...e.target.files])
     e.target.value = ""

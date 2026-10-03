@@ -1,17 +1,18 @@
-import { Suspense, useEffect, useRef } from "react"
+import { Suspense, useEffect, useRef, useState, type ReactElement } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { RobotIcon, FilesIcon, ClockCounterClockwiseIcon, CompassIcon, GearSixIcon, CheckSquareIcon, TrashIcon, PlusIcon, DeviceMobileIcon, UploadSimpleIcon, UserCircleIcon, type Icon } from "@phosphor-icons/react"
+import { ArrowUpIcon, RobotIcon, FilesIcon, ClockCounterClockwiseIcon, CompassIcon, GearSixIcon, CheckSquareIcon, TrashIcon, PlusIcon, DeviceMobileIcon, UploadSimpleIcon, UserCircleIcon, type Icon } from "@phosphor-icons/react"
 import { BinderMark } from "@/components/layout/BinderMark"
 import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useAgent } from "@/components/agent"
-import { TitleBar, useDesktopWindow } from "@/components/layout/TitleBar"
-import { HistoryButtons, useHistoryPosition, useScrollMemory } from "@/components/layout/HistoryNav"
-import { useUpload } from "@/components/upload"
-import { useFeed, useProfile } from "@/hooks/queries"
-import { useLiveChanges } from "@/hooks/queries"
+import { useAgent } from "@/components/agent/context"
+import { TitleBar } from "@/components/layout/TitleBar"
+import { useDesktopWindow } from "@/components/layout/useDesktopWindow"
+import { HistoryButtons } from "@/components/layout/HistoryNav"
+import { useHistoryPosition, useScrollMemory } from "@/components/layout/history"
+import { useUpload } from "@/components/upload/context"
+import { useFeed, useLiveChanges, useProfile } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { layout } from "@/i18n/messages/layout"
 import { cn } from "@/lib/utils"
@@ -22,7 +23,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/60",
   )
 
-/** Three places, and one button to add a paper or ask Binder, everywhere. */
+/** Three places, one button to add a paper and one bar to ask Binder, everywhere. */
 export function AppLayout() {
   const t = useT(layout)
   const desktop = useDesktopWindow()
@@ -78,7 +79,7 @@ export function AppLayout() {
             ))}
           </nav>
           <ProfileMenu>
-            <button className="mt-4 flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground">
+            <button type="button" className="mt-4 flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground">
               <UserCircleIcon className="size-5" />
               <ProfileName />
             </button>
@@ -88,7 +89,7 @@ export function AppLayout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Phone: the brand and the profile on top, the three places and ＋ at the bottom. */}
-        <header className="flex items-center gap-3 border-b bg-sidebar px-4 py-2.5 md:hidden">
+        <header className="sticky top-0 z-30 flex items-center gap-3 border-b bg-sidebar px-4 py-2.5 md:hidden">
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <BinderMark className="size-5" />
           </span>
@@ -100,13 +101,14 @@ export function AppLayout() {
             </Button>
           </ProfileMenu>
         </header>
-        {/* Without the desktop title bar, back and forward sit top left of the content. */}
+        {/* Without the desktop title bar, back and forward sit top left of the content and stay
+            there while the page scrolls. */}
         {!titleBar && (
-          <div className="hidden h-12 shrink-0 items-center px-6 md:flex 2xl:px-10">
+          <div className="sticky top-0 z-20 hidden h-12 shrink-0 items-center bg-background px-6 md:flex 2xl:px-10">
             <HistoryButtons position={history} buttonClassName="size-8" />
           </div>
         )}
-        <main id="main" tabIndex={-1} className={cn("w-full flex-1 outline-none px-4 pt-6 pb-28 md:px-8 md:pb-12 2xl:px-12", titleBar ? "md:pt-8" : "md:pt-2")}>
+        <main id="main" tabIndex={-1} className={cn("w-full flex-1 outline-none px-4 pt-6 pb-44 md:px-8 md:pb-28 2xl:px-12", titleBar ? "md:pt-8" : "md:pt-2")}>
           {/* Pages load on first visit: the menu stays in place meanwhile. */}
           <Suspense fallback={null}>
             {/* Each page fades in; a filter kept in the address does not replay it. */}
@@ -115,6 +117,7 @@ export function AppLayout() {
             </div>
           </Suspense>
         </main>
+        <AskBar />
         <nav
           aria-label={t("navigation")}
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-sidebar pb-[env(safe-area-inset-bottom)] select-none md:hidden"
@@ -141,7 +144,7 @@ export function AppLayout() {
             </NavLink>
           ))}
           <AddMenu>
-            <button aria-label={t("add")} className="flex min-h-16 flex-col items-center justify-center gap-1 text-xs font-medium text-primary">
+            <button type="button" aria-label={t("add")} className="flex min-h-16 flex-col items-center justify-center gap-1 text-xs font-medium text-primary">
               <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 <PlusIcon className="size-5" weight="bold" />
               </span>
@@ -165,11 +168,10 @@ export function AppLayout() {
   )
 }
 
-/** ＋: add a paper (the phone scan first: the easiest for most papers) or ask Binder. */
-function AddMenu({ children }: { children: React.ReactElement }) {
+/** ＋: add a paper, the phone scan first: the easiest for most papers. */
+function AddMenu({ children }: { children: ReactElement }) {
   const t = useT(layout)
   const upload = useUpload()
-  const agent = useAgent()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={children} />
@@ -179,8 +181,6 @@ function AddMenu({ children }: { children: React.ReactElement }) {
           <MenuChoice icon={DeviceMobileIcon} title={t("add.scan")} hint={t("add.scanHint")} onClick={upload.scanWithPhone} featured />
           <MenuChoice icon={UploadSimpleIcon} title={t("add.file")} hint={t("add.fileHint")} onClick={upload.open} />
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <MenuChoice icon={RobotIcon} title={t("add.ask")} hint={t("add.askHint")} onClick={() => agent.open()} />
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -207,7 +207,8 @@ function MenuChoice({
           featured ? "bg-primary text-primary-foreground" : "bg-accent text-primary",
         )}
       >
-        <Icon className="size-4" />
+        {/* The menu item recolours every descendant on hover: keep the icon readable on its chip. */}
+        <Icon className={cn("size-4", featured ? "text-primary-foreground!" : "text-primary!")} />
       </span>
       <span className="min-w-0">
         <span className="block text-sm font-medium">{title}</span>
@@ -217,8 +218,47 @@ function MenuChoice({
   )
 }
 
+/**
+ * Binder is one sentence away on every page: type, press Enter, the agent answers. On a phone it
+ * sits just above the bottom bar.
+ */
+function AskBar() {
+  const t = useT(layout)
+  const agent = useAgent()
+  const [text, setText] = useState("")
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 px-4 pb-3 md:bottom-0 md:left-60 md:pb-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          agent.open(text.trim() || undefined)
+          setText("")
+        }}
+        className="pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-xl border bg-card p-1.5 pl-4 shadow-sm transition-colors focus-within:border-primary/40"
+      >
+        <RobotIcon className="size-5 shrink-0 text-primary" />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={t("askPlaceholder")}
+          aria-label={t("ask")}
+          className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
+        />
+        <kbd className="hidden rounded border px-1.5 font-sans text-[0.6875rem] text-muted-foreground sm:inline">{t("askShortcut")}</kbd>
+        <button
+          type="submit"
+          aria-label={t("ask")}
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-80"
+        >
+          <ArrowUpIcon className="size-4" weight="bold" />
+        </button>
+      </form>
+    </div>
+  )
+}
+
 /** History, trash and settings: out of the way, one tap from the profile. */
-function ProfileMenu({ children }: { children: React.ReactElement }) {
+function ProfileMenu({ children }: { children: ReactElement }) {
   const t = useT(layout)
   const navigate = useNavigate()
   const items = [
@@ -299,24 +339,4 @@ function CountBadge({ count, className }: { count: number; className?: string })
       <span className="sr-only">{t("waiting", { count })}</span>
     </span>
   )
-}
-
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
-  useDocumentTitle(title)
-  return (
-    <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
-      </div>
-      {actions && <div className="flex items-center gap-3">{actions}</div>}
-    </div>
-  )
-}
-
-/** The window and tab title names the page, so screen readers announce where a link led. */
-export function useDocumentTitle(title: string | undefined) {
-  useEffect(() => {
-    if (title) document.title = `${title} · Binder`
-  }, [title])
 }

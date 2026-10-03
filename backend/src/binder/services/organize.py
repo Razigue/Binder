@@ -50,7 +50,7 @@ def standard_name(doc: Document) -> str:
     label = doc.title or doc.filename.rsplit(".", 1)[0]
     if doc.issuer and normalize(doc.issuer) not in normalize(label):
         label = f"{label} {doc.issuer}"
-    when = doc.issue_date or doc.due_date or doc.created_at.date()
+    when = deadlines.document_date(doc)
     ext = mimetypes.guess_extension(doc.mime_type) or ""
     if ext == ".jpe":
         ext = ".jpg"

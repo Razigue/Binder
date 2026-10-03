@@ -1,90 +1,54 @@
 import { useDeferredValue, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useSearchParams } from "react-router-dom"
 import { RobotIcon, MagnifyingGlassIcon, CheckIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useAgent } from "@/components/agent"
+import { useAgent } from "@/components/agent/context"
 import { DocumentsByYear } from "@/components/documents"
 import { EssentialsLink } from "@/components/essentials"
-import { PageHeader } from "@/components/layout/AppLayout"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { TabList, TabPanel } from "@/components/Tabs"
 import { Timeline } from "@/components/timeline"
-import { useDeadlines } from "@/hooks/queries"
+import { queries, useAreas, useCalendar, useDeadlines } from "@/hooks/queries"
+import { useSearchTab } from "@/hooks/useSearchTab"
 import { useT } from "@/i18n"
 import { papers as messages } from "@/i18n/messages/papers"
-import { AREAS, api, type Area, type AreaSummary } from "@/lib/api"
+import { AREAS, type Area, type AreaSummary } from "@/lib/api"
 import { AreaIcon } from "@/lib/areas"
 import { currentLocale, formatDate, toIso } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { cn, oneOf } from "@/lib/utils"
 
-type Tab = "documents" | "calendar" | "archives"
-const TABS: Tab[] = ["documents", "calendar", "archives"]
+const TABS = ["documents", "calendar", "archives"] as const
 
 /** Every paper in one place: the seven life areas with their state in words, then the
  * documents (search reads their content), the calendar and the archives. */
 export function PapersPage() {
   const t = useT(messages)
-  const [params, setParams] = useSearchParams()
-  const tab: Tab = TABS.includes(params.get("tab") as Tab) ? (params.get("tab") as Tab) : "documents"
-  const initial = params.get("area")
-  const [area, setArea] = useState<Area | null>(AREAS.includes(initial as Area) ? (initial as Area) : null)
-  const setTab = (next: Tab) =>
-    setParams((p) => {
-      p.set("tab", next)
-      return p
-    })
+  const [params] = useSearchParams()
+  const [tab, setTab] = useSearchTab(TABS, "documents")
+  const [area, setArea] = useState<Area | null>(() => oneOf(AREAS, params.get("area")) ?? null)
 
   return (
     <>
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
-      <div role="tablist" aria-label={t("title")} className="mb-5 flex gap-1 border-b">
-        {TABS.map((key, i) => (
-          <button
-            key={key}
-            id={`papers-tab-${key}`}
-            role="tab"
-            aria-selected={tab === key}
-            aria-controls="papers-panel"
-            tabIndex={tab === key ? 0 : -1}
-            onClick={() => setTab(key)}
-            onKeyDown={(e) => {
-              // Arrow keys move between tabs; Tab goes on to the panel.
-              const next =
-                e.key === "ArrowRight" ? (i + 1) % TABS.length
-                : e.key === "ArrowLeft" ? (i - 1 + TABS.length) % TABS.length
-                : e.key === "Home" ? 0
-                : e.key === "End" ? TABS.length - 1
-                : null
-              if (next === null) return
-              e.preventDefault()
-              setTab(TABS[next])
-              document.getElementById(`papers-tab-${TABS[next]}`)?.focus()
-            }}
-            className={cn(
-              "-mb-px min-h-11 shrink-0 border-b-2 px-3 py-2 text-[0.9375rem] font-medium transition-colors",
-              tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t(`tab.${key}`)}
-          </button>
-        ))}
-      </div>
-      <div id="papers-panel" role="tabpanel" aria-labelledby={`papers-tab-${tab}`}>
+      <TabList id="papers" label={t("title")} tabs={TABS} value={tab} onChange={setTab} labelOf={(key) => t(`tab.${key}`)} className="mb-5" />
+      <TabPanel id="papers" value={tab}>
         {tab === "calendar" ? (
           <CalendarTab />
         ) : (
           <DocumentsTab key={tab} archived={tab === "archives"} area={area} onArea={setArea} />
         )}
-      </div>
+      </TabPanel>
     </>
   )
 }
 
 function AreaTiles({ selected, onSelect }: { selected: Area | null; onSelect: (area: Area | null) => void }) {
   const t = useT(messages)
-  const areas = useQuery({ queryKey: ["areas"], queryFn: api.areas, refetchInterval: 30_000 })
+  const areas = useAreas()
   if (!areas.data)
     return (
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -100,6 +64,7 @@ function AreaTiles({ selected, onSelect }: { selected: Area | null; onSelect: (a
       ))}
       {selected && (
         <button
+          type="button"
           onClick={() => onSelect(null)}
           className="animate-rise flex min-h-24 items-center justify-center rounded-xl border border-dashed px-3 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -120,9 +85,10 @@ const TONE_TEXT: Record<string, string> = {
 function AreaTile({ summary, index, active, onClick }: { summary: AreaSummary; index: number; active: boolean; onClick: () => void }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-pressed={active}
-      style={{ "--i": index } as React.CSSProperties}
+      style={{ "--i": index }}
       className={cn(
         "animate-rise flex min-h-24 flex-col items-start gap-2 rounded-xl bg-card p-3.5 text-left ring-1 transition-[box-shadow,background-color] hover:bg-accent/40 hover:shadow-sm",
         active ? "ring-2 ring-primary" : "ring-foreground/10",
@@ -147,10 +113,9 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
   const [person, setPerson] = useState<string | null>(null)
   const q = useDeferredValue(text.trim())
   const docs = useQuery({
-    queryKey: ["documents", { q, archived, limit: 500 }],
-    queryFn: () => api.documents({ q: q || undefined, archived: archived || undefined, limit: 500 }),
-    placeholderData: (previous) => previous,
-    refetchInterval: (query) => (query.state.data?.some((d) => d.status === "processing") ? 1500 : false),
+    ...queries.documents({ q: q || undefined, archived: archived || undefined, limit: 500 }),
+    // The list stays while the next search runs.
+    placeholderData: keepPreviousData,
   })
   const all = docs.data ?? []
   const inArea = area ? all.filter((d) => d.area === area) : all
@@ -176,6 +141,7 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
         {people.length > 1 &&
           [null, ...people].map((p) => (
             <button
+              type="button"
               key={p ?? "everyone"}
               onClick={() => setPerson(p)}
               aria-pressed={person === p}
@@ -239,7 +205,7 @@ function CalendarTab() {
     [day],
   )
   const deadlines = useDeadlines(horizon)
-  const year = useQuery({ queryKey: ["calendar"], queryFn: api.calendar, staleTime: 300_000 })
+  const year = useCalendar()
   const now = day.getMonth() + 1
   // From this month on, then the months of next year.
   const months = [...Array(12).keys()].map((i) => ((now - 1 + i) % 12) + 1)

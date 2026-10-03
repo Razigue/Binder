@@ -49,6 +49,23 @@ Each request is a loop of at most `MAX_STEPS` model turns (`_run_llm`):
 - `BINDER_LLM_THINK=true` lets the model reason before each step: slower, and no better on the
   evaluation (see below).
 
+## Conversations
+
+The panel (`components/agent.tsx`) keeps each conversation in the encrypted database
+(`Conversation`, `api/conversations.py`): the turns as shown (question, attachments, answer)
+are saved after each answer, without the undo and confirmation tokens, which expire. The
+History button lists them newest first, to resume, rename or delete (undone from the toast;
+the deletion is logged). The title is the first question, without its `[#id]` references.
+
+The agent still receives only the last turns of the conversation shown (see History above), so
+a new one starts when the context changes:
+
+- a question sent from a page (feed card, document shortcut, journey step) starts its own
+  conversation;
+- a document the conversation is not about comes on screen: neither the one it started on,
+  nor one it attached or showed. Following a document from an answer keeps the conversation.
+  The empty panel then offers to resume the previous one.
+
 ## Tools
 
 | Tool | Purpose |

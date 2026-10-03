@@ -149,6 +149,18 @@ def test_offline_the_letter_is_still_written_by_the_model(
     assert written.sources == [] and "résilier mon forfait SFR" in model.writing()
 
 
+def test_a_model_failing_to_plan_leaves_the_letter_without_research(
+    web: Web, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        raise llm.ModelError("model failed to load")
+
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "chat", failing)
+    assert research.gather(session, "résilier mon forfait SFR", "", "fr") == []
+    assert web.queries == []
+
+
 def test_without_web_search_nothing_leaves(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

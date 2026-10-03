@@ -37,6 +37,12 @@ TRANSCRIBED = "transcribed"  # the only text is the model's own transcription: u
 TRUNCATED = "truncated"  # too long: the model read the start and the end only
 SEVERAL_DOCUMENTS = "several_documents"  # one file, apparently several documents
 
+
+def field_of(doubt: str) -> str:
+    """The field a doubt is about ("unverified:due_date" → "due_date"), "" for the document."""
+    return doubt.partition(":")[2]
+
+
 MONTH_NAMES = {
     # French (normalised: no accents), then English; abbreviations as printed.
     "janvier": 1, "janv": 1, "fevrier": 2, "fevr": 2, "fev": 2, "mars": 3, "avril": 4,
@@ -237,7 +243,9 @@ def check(ext: Extraction, text: str, *, scanned: bool = False) -> list[str]:
         value = getattr(ext, field)
         if not value:
             continue
-        if field == "iban" and not iban_valid(value) or field == "siret" and not siret_valid(value):
+        if (field == "iban" and not iban_valid(value)) or (
+            field == "siret" and not siret_valid(value)
+        ):
             setattr(ext, field, None)
             doubts.append(f"{INVALID}:{field}")
         elif compact(value) not in body:

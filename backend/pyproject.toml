@@ -44,10 +44,12 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "mypy>=2.3.1",
+    # Starlette's TestClient prefers httpx2 (plain httpx is deprecated there).
+    "httpx2>=2.13.1",
+    "mypy>=2.4.0",
     "pyinstaller>=6.22.3",
     "pytest>=9.1.1",
-    "ruff>=0.16.9",
+    "ruff>=0.16.10",
 ]
 
 [project.scripts]
@@ -63,7 +65,12 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+select = [
+    "E", "F", "I", "B", "UP", "SIM",
+    "C4", "PERF", "PIE", "FURB", "RET", "RUF", "LOG", "ASYNC", "FAST", "PTH", "PGH", "FLY", "G",
+]
+# French text uses typographic apostrophes, guillemets and non-breaking spaces on purpose.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -17,7 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from binder import i18n
@@ -87,7 +87,7 @@ def _plan(purpose: str, document: str, language: i18n.Language) -> _Plan | None:
     try:
         reply = llm.chat([{"role": "user", "content": prompt}], fmt=PLAN_SCHEMA)
         return _Plan.model_validate(json.loads(reply.get("content") or "{}"))
-    except (httpx.HTTPError, json.JSONDecodeError, ValidationError, KeyError):
+    except llm.FAILURES:
         log.exception("Searches for a letter could not be planned")
         return None
 
@@ -95,8 +95,8 @@ def _plan(purpose: str, document: str, language: i18n.Language) -> _Plan | None:
 def _own_site(url: str, organisation: str) -> bool:
     """The organisation's own site (sfr.fr for SFR, bouyguestelecom.fr for Bouygues Telecom)."""
     host = (urlsplit(url).hostname or "").replace("-", "")
-    words = [w for w in re.findall(r"[a-z0-9]{3,}", normalize(organisation))]
-    return bool(words) and words[0] in host
+    first = re.search(r"[a-z0-9]{3,}", normalize(organisation))
+    return first is not None and first[0] in host
 
 
 def _rank(result: websearch.Result, organisation: str) -> int:
@@ -151,7 +151,7 @@ def gather(session: Session, purpose: str, document: str, language: i18n.Languag
 def addresses(body: str, topic: str) -> list[str]:
     """Passages of a page around its postal addresses, those sharing most words with the
     request first: the excerpt around the request often stops before the address block."""
-    words = set(re.findall(r"[a-z0-9]{4,}", normalize(topic)))
+    words = _words(topic)
     spans: list[tuple[int, int]] = []
     for m in POSTAL.finditer(body):
         start = max(0, m.start() - ADDRESS_LEAD)
@@ -162,8 +162,12 @@ def addresses(body: str, topic: str) -> list[str]:
         else:
             spans.append((start, end))
     passages = [body[a:b].strip() for a, b in spans]
-    passages.sort(key=lambda p: -len(words & set(re.findall(r"[a-z0-9]{4,}", normalize(p)))))
+    passages.sort(key=lambda p: -len(words & _words(p)))
     return passages[:MAX_ADDRESSES]
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]{4,}", normalize(text)))
 
 
 def prompt_block(pages: list[Page]) -> str:

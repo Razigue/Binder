@@ -76,6 +76,58 @@ def test_trashed_document_is_not_reimported_from_folder(
     assert client.get("/api/documents").json() == []
 
 
+def test_stopping_the_watch_ends_the_pass_in_progress(
+    client: TestClient,
+    samples: list[Sample],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inbox = tmp_path / "scans"
+    for name in ("avis-imposition.pdf", "facture-orange.pdf", "facture-edf.pdf"):
+        drop(inbox, name, by_name(samples, name).pdf())
+    client.put("/api/import/settings", json={"folder": {"enabled": True, "path": str(inbox)}})
+    real = importers.import_bytes
+
+    def then_stop(*args: Any, **kwargs: Any) -> Any:
+        # The user stops the watch while the first file is being read.
+        client.put("/api/import/settings", json={"folder": {"enabled": False, "path": str(inbox)}})
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(importers, "import_bytes", then_stop)
+    assert client.post("/api/import/run").json()["folder"] == {"imported": 1, "error": None}
+    monkeypatch.setattr(importers, "import_bytes", real)
+
+    # Stopped: nothing more is read, the files and the imported document stay.
+    assert client.post("/api/import/run").json()["folder"] is None
+    assert len(client.get("/api/documents").json()) == 1
+    assert len(list(inbox.iterdir())) == 3
+    settings = client.get("/api/import/settings").json()["folder"]
+    assert settings["enabled"] is False and settings["path"] == str(inbox)
+
+    # Watching it again picks up the rest.
+    client.put("/api/import/settings", json={"folder": {"enabled": True, "path": str(inbox)}})
+    assert client.post("/api/import/run").json()["folder"]["imported"] == 2
+
+
+def test_stopped_watcher_leaves_the_folder(
+    client: TestClient, samples: list[Sample], tmp_path: Path
+) -> None:
+    inbox = tmp_path / "scans"
+    inbox.mkdir()
+    watcher = importers.FolderWatcher(lambda: Session(get_engine()))
+    watcher.start()
+    try:
+        client.put("/api/import/settings", json={"folder": {"enabled": True, "path": str(inbox)}})
+        time.sleep(0.5)
+        client.put("/api/import/settings", json={"folder": {"enabled": False, "path": str(inbox)}})
+        time.sleep(0.5)
+        (inbox / "taxe.pdf").write_bytes(by_name(samples, "avis-imposition.pdf").pdf())
+        time.sleep(importers.SETTLE_SECONDS + 1.5)
+        assert client.get("/api/documents").json() == []
+    finally:
+        watcher.stop()
+
+
 def test_folder_must_exist_to_be_enabled(client: TestClient, tmp_path: Path) -> None:
     r = client.put(
         "/api/import/settings", json={"folder": {"enabled": True, "path": str(tmp_path / "nope")}}
@@ -252,3 +304,24 @@ def test_import_origin_follows_display_language(
     client.put("/api/preferences", json={"language": "fr", "country": "FR", "theme": "system"})
     imports = [e for e in client.get("/api/activity").json() if e["action"] == "import"]
     assert any("depuis le dossier surveillé (taxe.pdf)" in e["summary"] for e in imports)
+
+
+def test_a_file_that_cannot_be_read_yet_is_tried_again(
+    monkeypatch: pytest.MonkeyPatch, samples: list[Sample], tmp_path: Path
+) -> None:
+    inbox = tmp_path / "scans"
+    locked = drop(inbox, "locked.pdf", by_name(samples, "facture-orange.pdf").pdf())
+    drop(inbox, "taxe.pdf", by_name(samples, "avis-imposition.pdf").pdf())
+    read_bytes = Path.read_bytes
+
+    def held(path: Path) -> bytes:
+        if path == locked:
+            raise PermissionError("in use by another program")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", held)
+    cfg = importers.FolderConfig(enabled=True, path=str(inbox))
+    with Session(get_engine()) as session:
+        assert [d.filename for d in importers.scan_folder(session, cfg)] == ["taxe.pdf"]
+        monkeypatch.setattr(Path, "read_bytes", read_bytes)
+        assert [d.filename for d in importers.scan_folder(session, cfg)] == ["locked.pdf"]

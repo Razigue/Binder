@@ -148,7 +148,7 @@ export function Timeline({
                 const shown = crowded ? s.items.slice(0, STACK - 1) : s.items
                 return (
                   <div
-                    key={s.items[0].id}
+                    key={s.items[0]?.id ?? s.at}
                     className="absolute flex -translate-x-1/2 flex-col items-center"
                     style={{ left: s.at, top: AXIS - DOT / 2, gap: STEP - DOT }}
                   >
@@ -252,7 +252,7 @@ function useWidth(el: HTMLElement | null) {
   const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
     if (!el) return
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    const observer = new ResizeObserver(([entry]) => entry && setWidth(entry.contentRect.width))
     observer.observe(el)
     return () => observer.disconnect()
   }, [el])

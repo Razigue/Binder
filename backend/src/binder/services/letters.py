@@ -22,12 +22,12 @@ import html
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
-import httpx
-from pydantic import BaseModel, ValidationError
-from sqlmodel import Session
+from pydantic import BaseModel
+from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.models import Category, Correspondence, Deadline, DocType, Document
@@ -417,7 +417,6 @@ FOLLOW_UP_DAYS = 21
 FOLLOW_UP_REGISTERED = 30
 BLANK = re.compile(r"\[[^\]\n]{2,80}\]")
 
-# Setting holding the sender's details.
 # Stable identifiers of the letter kinds (API values).
 KINDS = (
     "termination",
@@ -428,6 +427,9 @@ KINDS = (
     "formal_notice",
     "address_change",
 )
+
+# What a template writes: subject, paragraphs, and whether to send it registered.
+type Draft = tuple[str, list[str], bool]
 
 
 def kind_titles() -> dict[str, str]:
@@ -476,7 +478,7 @@ def _references(doc: Document | None) -> list[str]:
     return refs
 
 
-def _cancellation(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _cancellation(doc: Document | None, details: str) -> Draft:
     insured = doc is not None and doc.category == Category.INSURANCE
     what = T("my_contract") if doc is None or insured else T("my_subscription")
     paragraphs = [T("termination_notice", what=what)]
@@ -496,7 +498,7 @@ def _cancellation(doc: Document | None, details: str) -> tuple[str, list[str], b
     return T("termination_subject", what=what), paragraphs, True
 
 
-def _complaint(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _complaint(doc: Document | None, details: str) -> Draft:
     if doc is not None and doc.amount is not None:
         target = T("complaint_target_amount", amount=doc.amount)
     else:
@@ -510,13 +512,13 @@ def _complaint(doc: Document | None, details: str) -> tuple[str, list[str], bool
     return T("complaint_subject"), paragraphs, False
 
 
-def _request(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _request(doc: Document | None, details: str) -> Draft:
     wanted = details or T("request_placeholder")
     paragraphs = [T("request_intro", wanted=wanted), T("request_delivery")]
     return T("request_subject"), paragraphs, False
 
 
-def _payment_plan(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _payment_plan(doc: Document | None, details: str) -> Draft:
     if doc is not None and doc.amount is not None and doc.due_date is not None:
         target = T("plan_target_due", amount=doc.amount, due=doc.due_date)
     elif doc is not None and doc.amount is not None:
@@ -547,7 +549,7 @@ def appeal_procedure(doc: Document | None) -> str:
     return "other"
 
 
-def _appeal(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _appeal(doc: Document | None, details: str) -> Draft:
     procedure = appeal_procedure(doc)
     if procedure == "fine":
         paragraphs = [T("fine_intro"), details or T("fine_reasons"), T("fine_original")]
@@ -563,7 +565,7 @@ def _appeal(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
     return T("appeal_subject"), paragraphs, True
 
 
-def _formal_notice(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _formal_notice(doc: Document | None, details: str) -> Draft:
     what = (details or T("notice_what")).rstrip(".")
     paragraphs = [T("notice_intro", what=what[:1].lower() + what[1:])]
     if doc is not None and doc.amount is not None:
@@ -580,7 +582,7 @@ def address_details(new_address: str, when: date | None = None) -> str:
     return f"{when.isoformat()}\n{new_address}" if when else new_address
 
 
-def _address_change(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _address_change(doc: Document | None, details: str) -> Draft:
     """`details`: the new address, optionally preceded by the moving date on its own line
     (YYYY-MM-DD, see address_details)."""
     lines = [line.strip() for line in details.strip().splitlines() if line.strip()]
@@ -600,7 +602,7 @@ def _address_change(doc: Document | None, details: str) -> tuple[str, list[str],
     return T("move_subject"), paragraphs, False
 
 
-def _custom(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
+def _custom(doc: Document | None, details: str) -> Draft:
     purpose = details or T("request_placeholder")
     purpose = purpose[:1].lower() + purpose[1:]
     subject = details[:1].upper() + details[1:80] if details else T("request_subject")
@@ -609,7 +611,7 @@ def _custom(doc: Document | None, details: str) -> tuple[str, list[str], bool]:
     return subject.rstrip("."), paragraphs, False
 
 
-BUILDERS = {
+BUILDERS: dict[str, Callable[[Document | None, str], Draft]] = {
     "termination": _cancellation,
     "complaint": _complaint,
     "request": _request,
@@ -632,6 +634,10 @@ def _recipient(kind: str, doc: Document | None) -> str | None:
         board = T("benefit_recipient")
         return f"{doc.issuer} - {board}" if doc is not None and doc.issuer else board
     return None
+
+
+def _language(row: Correspondence) -> i18n.Language:
+    return "fr" if row.language == "fr" else "en"
 
 
 def letter_language() -> i18n.Language:
@@ -869,7 +875,7 @@ def _compose_llm(
             [{"role": "user", "content": prompt}], fmt=COMPOSE_SCHEMA, think=llm.think_hard()
         )
         composed = _Composed.model_validate(json.loads(message.get("content") or "{}"))
-    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
+    except llm.FAILURES:
         log.exception("Letter by the model failed, falling back to a template")
         return None
     composed.paragraphs = [p.strip() for p in composed.paragraphs if p.strip()]
@@ -962,7 +968,7 @@ def out(row: Correspondence) -> Letter:
         recipient_address=row.recipient_address,
         body=row.body,
         registered=row.registered,
-        language="fr" if row.language == "fr" else "en",
+        language=_language(row),
         document_id=row.document_id,
         sent_on=row.sent_on,
         follow_up_on=row.follow_up_on,
@@ -1029,15 +1035,17 @@ def delete(session: Session, row: Correspondence, *, actor: str = "user") -> Non
 
 
 def _followup_deadlines(session: Session, row: Correspondence) -> list[Deadline]:
-    from sqlmodel import select
-
-    title = T("followup_deadline", recipient=row.recipient)
+    # The title was written in the interface language of the day the letter was sent.
+    titles = set()
+    for language in i18n.LANGUAGES:
+        with i18n.using(language):
+            titles.add(T("followup_deadline", recipient=row.recipient))
     return list(
         session.exec(
             select(Deadline).where(
                 Deadline.source == "followup",
                 Deadline.done == False,  # noqa: E712
-                Deadline.title == title,
+                col(Deadline.title).in_(titles),
                 Deadline.due_date == row.follow_up_on,
             )
         )
@@ -1049,7 +1057,7 @@ def follow_up(session: Session, row: Correspondence, *, actor: str = "user") -> 
     assert row.sent_on is not None
     profile = profile_for(session)
     doc = session.get(Document, row.document_id) if row.document_id else None
-    language: i18n.Language = "fr" if row.language == "fr" else "en"
+    language = _language(row)
     with i18n.using(language):
         subject = T("followup_subject", subject=row.subject)
         paragraphs = [T("followup_intro", sent=row.sent_on, subject=row.subject)]

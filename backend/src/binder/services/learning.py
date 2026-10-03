@@ -9,7 +9,7 @@ to the user; the history notes when a lesson was applied.
 import json
 import re
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlmodel import Session, col, select
 
@@ -46,13 +46,13 @@ def sender_key(issuer: str | None, text: str) -> str:
     return rules.normalize(first)[:40]
 
 
-def _amount_variants(value: float) -> list[str]:
+def amount_variants(value: float) -> list[str]:
     units, cents = f"{value:.2f}".split(".")
     grouped = f"{int(units):,}".replace(",", " ")
     return [f"{grouped},{cents}", f"{units},{cents}", f"{units}.{cents}", f"{grouped}.{cents}"]
 
 
-def _date_variants(value: date) -> list[str]:
+def date_variants(value: date) -> list[str]:
     month = next(name for name, n in rules.MONTHS.items() if n == value.month)
     return [
         value.strftime("%d/%m/%Y"),
@@ -99,7 +99,7 @@ def remember(session: Session, doc: Document, diff: dict[str, tuple[Any, Any]]) 
         if name in LABEL_FIELDS:
             if new is None:
                 continue
-            needles = _amount_variants(new) if name == "amount" else _date_variants(new)
+            needles = amount_variants(new) if name == "amount" else date_variants(new)
             label = _label_before(doc.text, needles)
             if not label:
                 continue
@@ -144,11 +144,7 @@ def apply(session: Session, text: str, ext: Extraction) -> list[str]:
     lessons = session.exec(select(Learned).where(Learned.sender == sender)).all()
     if not lessons:
         return []
-    lines = [
-        rules.normalize(line).replace(" ", " ").replace(" ", " ")
-        for line in text.splitlines()
-        if line.strip()
-    ]
+    lines = [_clean(line) for line in text.splitlines() if line.strip()]
     changed = []
     for lesson in lessons:
         if lesson.field in LABEL_FIELDS:
@@ -178,6 +174,16 @@ def log_applied(session: Session, doc: Document, fields: list[str]) -> None:
         )
 
 
+class Example(TypedDict):
+    """How a document was filed, shown to the model reading the next one of its sender."""
+
+    category: str
+    doc_type: str | None
+    issuer: str | None
+    title: str
+    fields: list[str]
+
+
 # Where the sender's name stands: the letterhead and the first lines.
 HEAD_CHARS = 1500
 # Fields whose presence the example reports (not their values: they are each document's own).
@@ -187,7 +193,7 @@ EXAMPLE_FIELDS = (
 )  # fmt: skip
 
 
-def example(session: Session, text: str, exclude: int | None = None) -> dict[str, Any] | None:
+def example(session: Session, text: str, exclude: int | None = None) -> Example | None:
     """How the last filed document of the sender of `text` was read, shown to the model with
     the new one: recurring bills and payslips are then filed alike. The sender is the issuer
     of the library whose name the first lines of `text` carry (the longest, most specific)."""

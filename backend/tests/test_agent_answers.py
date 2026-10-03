@@ -39,7 +39,9 @@ def test_calculations_are_done_in_code(session: Session) -> None:
     assert result("(1240 - 1180) / 1180 * 100") == 5.08
     assert result("'2026-11-06' - '2026-09-22'") == 45
     assert result("'2026-10-01' + 30") == "2026-10-31"
-    for unsafe in ("__import__('os')", "1/0", "'hello' - 1", "2 ** 100000"):
+    # A date cannot be multiplied, divided or negated: refused rather than misread or crashing.
+    invalid = ("'2026-10-01' * 30", "'2026-10-01' / 2", "-'2026-10-01'", "True + 1")
+    for unsafe in ("__import__('os')", "1/0", "'hello' - 1", "2 ** 100000", *invalid):
         error = tools.call(session, "calculate", {"expression": unsafe}).payload["error"]
         assert "Cannot calculate" in error
 

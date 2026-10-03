@@ -18,6 +18,7 @@ from binder import i18n
 from binder.db import in_use
 from binder.models import Category, DocType, Document
 from binder.services import activity, subscriptions
+from binder.services.deadlines import document_date
 from binder.services.rules import normalize, parse_amount
 
 T = i18n.catalog(
@@ -28,9 +29,10 @@ T = i18n.catalog(
             "fr": "{issuer} : facturé deux fois ?",
         },
         "double_detail": {
-            "en": "Two bills of {amount:money} {days} days apart. Check you did not pay twice.",
-            "fr": "Deux factures de {amount:money} à {days} jours d'intervalle. Vérifiez que "
-            "vous n'avez pas payé deux fois.",
+            "en": "Two bills of {amount:money}, of {first:date} and {second:date}. Check you did "
+            "not pay twice.",
+            "fr": "Deux factures de {amount:money}, du {first:date} et du {second:date}. "
+            "Vérifiez que vous n'avez pas payé deux fois.",
         },
         "double_debit_title": {
             "en": "Debited twice: {label}",
@@ -40,10 +42,24 @@ T = i18n.catalog(
             "en": "{amount:money} appears twice on your statement of {date:date}.",
             "fr": "{amount:money} apparaît deux fois sur votre relevé du {date:date}.",
         },
+        "double_debit_bill": {
+            "en": "{amount:money} appears twice on your statement of {date:date}, for one bill: "
+            "“{bill}” of {bill_date:date}.",
+            "fr": "{amount:money} apparaît deux fois sur votre relevé du {date:date}, pour une "
+            "seule facture : « {bill} » du {bill_date:date}.",
+        },
         "double_letter": {
             "en": "Ask for the refund of an amount of {amount:money} charged twice",
             "fr": "Demander le remboursement d'un montant de {amount:money} prélevé deux fois",
         },
+        "double_letter_bills": {
+            "en": "Ask for the refund of an amount of {amount:money} charged twice ({bills})",
+            "fr": "Demander le remboursement d'un montant de {amount:money} prélevé deux fois "
+            "({bills})",
+        },
+        "bill_ref": {"en": "bill {ref} of {date:date}", "fr": "facture {ref} du {date:date}"},
+        "bill_of": {"en": "bill of {date:date}", "fr": "facture du {date:date}"},
+        "and": {"en": " and ", "fr": " et "},
         "catch_up_title": {
             "en": "{issuer} catch-up bill: {amount:money}",
             "fr": "Régularisation {issuer} : {amount:money}",
@@ -115,6 +131,10 @@ T = i18n.catalog(
             "ou retenues sur le bulletin.",
         },
         "logged": {"en": "Anomaly spotted: {title}", "fr": "Anomalie repérée : {title}"},
+        "logged_with": {
+            "en": "Anomaly spotted: {title} (with “{other}” of {date:date})",
+            "fr": "Anomalie repérée : {title} (avec « {other} » du {date:date})",
+        },
     },
 )
 
@@ -152,10 +172,6 @@ class Anomaly(BaseModel):
     letter: str | None = None
 
 
-def _when(doc: Document) -> date:
-    return doc.issue_date or doc.due_date or doc.created_at.date()
-
-
 def _amount_near(norm: str, match: re.Match[str], fallback: float | None) -> float | None:
     line_end = norm.find("\n", match.end())
     window = norm[match.start() : line_end if line_end > 0 else None]
@@ -166,12 +182,11 @@ def _amount_near(norm: str, match: re.Match[str], fallback: float | None) -> flo
 def _active(session: Session, today: date) -> list[Document]:
     """Documents in force dated within the look-back period."""
     docs = session.exec(select(Document).where(in_use(), col(Document.duplicate_of).is_(None)))
-    return [d for d in docs if _when(d) >= today - LOOKBACK]
+    return [d for d in docs if document_date(d) >= today - LOOKBACK]
 
 
-def _double_bills(docs: list[Document]) -> list[Anomaly]:
-    found = []
-    bills = sorted(
+def _bills(docs: list[Document]) -> list[Document]:
+    return sorted(
         (
             d
             for d in docs
@@ -180,31 +195,66 @@ def _double_bills(docs: list[Document]) -> list[Anomaly]:
             and d.doc_type in (DocType.INVOICE, DocType.PAYMENT_NOTICE)
             and d.superseded_by is None
         ),
-        key=lambda d: (_when(d), d.id or 0),
+        key=lambda d: (document_date(d), d.id or 0),
     )
+
+
+def _letter_for(amount: float, bills: list[Document]) -> str:
+    """The refund letter names the bills, so that the supplier finds the payments."""
+    named = [
+        T("bill_ref", ref=b.reference, date=document_date(b))
+        if b.reference
+        else T("bill_of", date=document_date(b))
+        for b in bills
+    ]
+    return T("double_letter_bills", amount=amount, bills=T("and").join(named))
+
+
+def _double_bills(docs: list[Document]) -> list[Anomaly]:
+    found = []
+    bills = _bills(docs)
     for i, a in enumerate(bills):
         for b in bills[i + 1 :]:
-            gap = (_when(b) - _when(a)).days
+            gap = (document_date(b) - document_date(a)).days
             if gap > DOUBLE_DAYS:
                 break
             if normalize(a.issuer or "") != normalize(b.issuer or "") or a.amount != b.amount:
                 continue
-            assert a.id is not None and b.id is not None
+            assert a.id is not None and b.id is not None and a.amount is not None
             found.append(
                 Anomaly(
                     key=f"double:{a.id}:{b.id}",
                     kind="double_payment",
                     title=T("double_title", issuer=a.issuer),
-                    detail=T("double_detail", amount=a.amount, days=max(gap, 1)),
+                    detail=T(
+                        "double_detail",
+                        amount=a.amount,
+                        first=document_date(a),
+                        second=document_date(b),
+                    ),
                     amount=a.amount,
                     document_ids=[a.id, b.id],
-                    letter=T("double_letter", amount=a.amount),
+                    letter=_letter_for(a.amount, [a, b]),
                 )
             )
     return found
 
 
-def _double_debits(doc: Document) -> list[Anomaly]:
+def _bill_debited(
+    bills: list[Document], label: str, amount: float, doc: Document
+) -> Document | None:
+    """The bill a debit line pays: same sender and amount, the closest in time to the
+    statement."""
+    words = set(label.split())
+    matching = [
+        b for b in bills if b.amount == amount and words & set(normalize(b.issuer or "").split())
+    ]
+    return min(
+        matching, key=lambda b: abs((document_date(b) - document_date(doc)).days), default=None
+    )
+
+
+def _double_debits(doc: Document, bills: list[Document]) -> list[Anomaly]:
     flat = re.sub(r"\s+", " ", normalize(doc.text))
     seen: dict[tuple[str, float], int] = {}
     for m in _DEBIT.finditer(flat):
@@ -215,15 +265,29 @@ def _double_debits(doc: Document) -> list[Anomaly]:
         if n < 2:
             continue
         assert doc.id is not None
+        # The bill debited twice comes with the statement: both papers are at hand.
+        bill = _bill_debited(bills, label, amount, doc)
+        if bill is not None and bill.id is not None:
+            detail = T(
+                "double_debit_bill",
+                amount=amount,
+                date=document_date(doc),
+                bill=bill.title,
+                bill_date=document_date(bill),
+            )
+            ids, letter = [bill.id, doc.id], _letter_for(amount, [bill])
+        else:
+            detail = T("double_debit_detail", amount=amount, date=document_date(doc))
+            ids, letter = [doc.id], T("double_letter", amount=amount)
         found.append(
             Anomaly(
                 key=f"debit:{doc.id}:{label}:{amount}",
                 kind="double_payment",
                 title=T("double_debit_title", label=label.upper()),
-                detail=T("double_debit_detail", amount=amount, date=_when(doc)),
+                detail=detail,
                 amount=amount,
-                document_ids=[doc.id],
-                letter=T("double_letter", amount=amount),
+                document_ids=ids,
+                letter=letter,
             )
         )
     return found
@@ -238,13 +302,14 @@ def _usual(docs: list[Document], doc: Document) -> float | None:
         and d.amount
         and d.category == doc.category
         and normalize(d.issuer or "") == normalize(doc.issuer or "")
-        and _when(d) <= _when(doc)
+        and document_date(d) <= document_date(doc)
     ]
     return median(earlier) if earlier else None
 
 
 def _text_anomalies(docs: list[Document]) -> list[Anomaly]:
     found = []
+    bills = _bills(docs)
     for doc in docs:
         assert doc.id is not None
         norm = normalize(doc.text)
@@ -295,7 +360,7 @@ def _text_anomalies(docs: list[Document]) -> list[Anomaly]:
                     )
                 )
         if doc.doc_type == DocType.BANK_STATEMENT:
-            found += _double_debits(doc)
+            found += _double_debits(doc, bills)
     return found
 
 
@@ -332,7 +397,7 @@ def _increases(session: Session) -> list[Anomaly]:
 def _pay_drops(docs: list[Document]) -> list[Anomaly]:
     slips = sorted(
         (d for d in docs if d.doc_type == DocType.PAYSLIP and d.amount),
-        key=lambda d: (_when(d), d.id or 0),
+        key=lambda d: (document_date(d), d.id or 0),
     )
     if len(slips) < 3:
         return []
@@ -364,10 +429,24 @@ def check_new(session: Session, doc: Document) -> list[Anomaly]:
     # Price rises are already logged by subscriptions.check_increase.
     found = [a for a in detect(session) if doc.id in a.document_ids and a.kind != "price_increase"]
     for anomaly in found:
+        # The import report shows only the new paper: the message names the other one.
+        others = [
+            d for i in anomaly.document_ids if i != doc.id and (d := session.get(Document, i))
+        ]
+        msg = (
+            T.msg(
+                "logged_with",
+                title=anomaly.title,
+                other=others[0].title,
+                date=document_date(others[0]),
+            )
+            if others
+            else T.msg("logged", title=anomaly.title)
+        )
         activity.log(
             session,
             "anomaly",
-            T.msg("logged", title=anomaly.title),
+            msg,
             document=doc,
             details={"key": anomaly.key, "kind": anomaly.kind},
         )

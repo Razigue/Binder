@@ -94,8 +94,9 @@ export function Viewer({
     el.scrollTo({ top: 0, left: 0 })
   }
 
-  const point = (e: React.MouseEvent) => {
-    const r = pane.current!.getBoundingClientRect()
+  // Where the pointer is, inside the pane (the element the handler is on).
+  const point = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
     return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
 

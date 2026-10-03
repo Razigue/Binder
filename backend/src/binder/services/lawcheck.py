@@ -25,7 +25,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from binder import i18n
@@ -228,10 +228,11 @@ def references(sentence: str) -> str:
 
 def _extract_rules(text: str) -> list[tuple[str, str]]:
     """Sentences citing the law, searched by the reference they cite."""
-    found = []
-    for sentence in _sentences(text):
-        if LEGAL.search(sentence):
-            found.append((sentence, references(sentence) or sentence[:120]))
+    found = [
+        (sentence, references(sentence) or sentence[:120])
+        for sentence in _sentences(text)
+        if LEGAL.search(sentence)
+    ]
     return found[:MAX_POINTS]
 
 
@@ -242,19 +243,20 @@ def _extract_llm(text: str) -> list[tuple[str, str]] | None:
     try:
         reply = llm.chat([{"role": "user", "content": prompt}], fmt=EXTRACT_SCHEMA)
         points = json.loads(reply.get("content") or "{}").get("points") or []
-    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, KeyError, AttributeError):
+    except (*llm.FAILURES, AttributeError):
         log.exception("Legal points could not be listed by the model")
         return None
-    found = []
-    for item in points:
-        if isinstance(item, dict) and item.get("claim") and item.get("query"):
-            found.append((str(item["claim"]).strip(), str(item["query"]).strip()))
+    found = [
+        (str(item["claim"]).strip(), str(item["query"]).strip())
+        for item in points
+        if isinstance(item, dict) and item.get("claim") and item.get("query")
+    ]
     return found[:MAX_POINTS]
 
 
 def excerpt(body: str, claim: str) -> str:
     """The part of a page about the point: around the paragraph sharing most of its words."""
-    words = {w for w in re.findall(r"[a-z0-9]{4,}", normalize(claim))}
+    words = set(re.findall(r"[a-z0-9]{4,}", normalize(claim)))
     paragraphs = body.split("\n")
     if not words or len(body) <= EXCERPT_CHARS:
         return body[:EXCERPT_CHARS]
@@ -282,7 +284,7 @@ def _judge(claim: str, pages: list[tuple[Source, str]]) -> _Judged | None:
         # No reasoning step: as accurate here once the evidence is checked, and minutes faster.
         reply = llm.chat([{"role": "user", "content": prompt}], fmt=JUDGE_SCHEMA)
         return _Judged.model_validate(json.loads(reply.get("content") or "{}"))
-    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
+    except llm.FAILURES:
         log.exception("Legal point could not be judged")
         return None
 

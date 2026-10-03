@@ -16,7 +16,13 @@ if __name__ == "__main__":
     # normally, it returns at once.
     import velopack
 
-    velopack.App().run()
+    def before_uninstall(*_: object) -> None:
+        # No reminder task left behind pointing to a removed application.
+        from binder.services import os_task
+
+        os_task.unregister()
+
+    velopack.App().on_before_uninstall_fast_callback(before_uninstall).run()
     from binder import desktop
     from binder.cli import main
 

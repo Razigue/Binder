@@ -3,7 +3,7 @@ import type { Area } from "./api"
 import { cn } from "./utils"
 
 // Same hues as the categories they gather (lib/categories.tsx): colour says where it lives.
-export const AREA_STYLE: Record<Area, { icon: Icon; tone: string }> = {
+const AREA_STYLE: Record<Area, { icon: Icon; tone: string }> = {
   housing: { icon: HouseIcon, tone: "bg-emerald-50 text-emerald-600 dark:bg-emerald-400/12 dark:text-emerald-300" },
   money: { icon: WalletIcon, tone: "bg-indigo-50 text-indigo-500 dark:bg-indigo-400/12 dark:text-indigo-300" },
   work: { icon: BriefcaseIcon, tone: "bg-amber-50 text-amber-600 dark:bg-amber-400/12 dark:text-amber-300" },

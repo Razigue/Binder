@@ -24,7 +24,7 @@ function dayLabel(iso: string, t: Translate<(typeof activity)["en"]>): string {
   if (date.toDateString() === today.toDateString()) return t("today")
   if (date.toDateString() === yesterday.toDateString()) return t("yesterday")
   const label = formatDateTime(iso, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-  return label[0].toUpperCase() + label.slice(1)
+  return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
 /** Activity log grouped by day. `linkDocuments` links each entry to its document. */

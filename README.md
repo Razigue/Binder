@@ -63,7 +63,10 @@ way (Windows: Settings > Apps); your documents stay in place (see [Your data](#y
    the progress; Binder keeps working meanwhile. The engine is part of Binder: nothing else to
    start, and it stops when you close Binder.
 
-Language, country and theme follow your system. In **Settings**, **Text size** makes the whole
+**Settings** has two tabs: **You and your household** (your details, situation and household)
+and **The app** (language, appearance, import, local AI, backups, data).
+
+Language, country and theme follow your system. In **Settings > The app**, **Text size** makes the whole
 interface larger (Normal, Large, Larger).
 
 ## Adding documents
@@ -94,7 +97,8 @@ Once a document is in, Binder:
   Vehicle) and recognises its type (invoice, certificate, identity card, loan statement, donation
   receipt, childcare certificate, fine, purchase invoice and its warranty…);
 - reads the amount, dates, reference, sender and the person it concerns;
-- recognises the people of your household from the documents themselves;
+- recognises the people of your household from the documents themselves (correct it in
+  **Settings > You and your household**: rename, merge, remove or add someone);
 - gives it a clear name, "YYYY-MM-DD Title Sender.pdf", used when you download or export it;
 - ignores exact copies, and asks you about a probable duplicate;
 - keeps the latest version of a certificate or identity document and marks the older one as
@@ -119,18 +123,25 @@ the AI": Binder reads and files them on its own as soon as it is ready.
 ## Using Binder day to day
 
 Binder has three places: **To do**, **My papers** and **Life events**. The **＋ Add** button,
-on every page, adds a paper (scan it with your phone, or choose a file) or asks Binder a
-question (Ctrl K does too). **Settings**, **History** and **Trash** are in the profile menu.
+on every page, adds a paper (scan it with your phone, or choose a file). The **ask bar**
+at the bottom of every page asks Binder a question (Ctrl K does too). **Settings**, **History** and **Trash** are in the profile menu.
 The back and forward arrows at the top (or Alt + ← / →, or the mouse side buttons) move
-through the pages you opened, as in a browser. On a phone, the three places and ＋ sit in a bar at the bottom of the screen.
+through the pages you opened, as in a browser. On a phone, the three places and ＋ sit in a bar at the bottom of the screen, the ask bar just above.
 
 **To do** greets you with one sentence on your day, then a pile of cards, the most urgent on
 top. Each card says what it is, what to do and by when, with its button:
 - payments due soon or late ("It's paid"), documents to renew;
 - anomalies: billed or debited twice, an unusually high catch-up bill, an overpayment claimed by
   the CAF or owed to you, a price rise, a lower payslip; Binder offers to write the letter;
-- missing documents: a monthly bill that did not arrive, a missing payslip, this year's tax
-  notice, a new insurance certificate;
+- papers to fetch, as soon as they are out: last month's payslip, this year's tax notice (from
+  August) or property tax notice (from September), a monthly bill that did not arrive, a new
+  insurance certificate. **Get it on impots.gouv.fr** (or the issuer's customer account, found
+  on its own bills) opens the page in your browser, where you are signed in;
+- rights to check, when your situation and papers suggest them: the prime d'activité with a
+  first salary, housing aid as a tenant, the complémentaire santé solidaire as a student or job
+  seeker, your first income tax return, the Crous grant in the spring, the monthly France
+  Travail update before the 15th. Each opens the official page and its simulator; **Explain**
+  asks Binder. Binder never decides for you whether you are entitled: the simulator does;
 - suggestions: compare an insurance before it renews, archive old papers (past their retention
   period or replaced by a newer version), follow up a letter that got no answer;
 - at most three short questions from Binder (see above).
@@ -139,6 +150,11 @@ When nothing needs you, To do says **All in order ✓**.
 
 Binder also sends **system notifications** for urgent deadlines, anomalies, documents arriving
 by email and the weekly briefing, while it is open.
+
+**Even when Binder is closed**, the installed application reminds you: every day at 9:00 and
+when you log in, one notification if something needs you ("Binder: 2 things to do · Tax notice
+2026: fetch it"). It says nothing when all is in order, nor twice the same day, and Binder stays
+closed: no window, no local AI started. Turn it off in **Settings > The app > Reminders**.
 
 **Life events** starts from what is happening to you: "I'm moving", "I'm starting a job", "We're
 having a child", "I'm retiring", "A loved one has died", "I got a letter I don't understand",
@@ -180,9 +196,8 @@ long it is kept.
 Administrative words shown with a dotted underline (due date, VAT, direct debit, registered
 letter, tax notice…) explain themselves in one sentence when you tap them.
 
-**Ask Binder**: ＋ Add, then **Ask a question**, on every page, or Ctrl K. Ask in your own words,
-it looks
-through your documents and acts for you:
+**Ask Binder**: type in the ask bar at the bottom of every page, or press Ctrl K. Ask in your
+own words, it looks through your documents and acts for you:
 - questions: "What is my reference tax income?", "How much did I pay for electricity over my
   last two bills?";
 - follow-up: "Do I have papers to renew soon?", "Is anything wrong or missing?";

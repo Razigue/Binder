@@ -8,8 +8,6 @@ Without the model, search stays full-text only.
 
 import logging
 import threading
-import time
-from typing import Any
 
 import httpx
 import numpy as np
@@ -22,6 +20,8 @@ from binder.models import Document, DocumentStatus, Embedding
 from binder.services import llm
 
 log = logging.getLogger(__name__)
+
+type Vectors = np.ndarray[tuple[int, int], np.dtype[np.float32]]
 
 # Pieces of text embedded per document: administrative documents say what matters early.
 CHUNK_CHARS = 1200
@@ -37,10 +37,8 @@ MIN_SCORE = 0.42
 # Documents kept are also close to the best one: weaker matches are only shared vocabulary.
 MAX_GAP = 0.08
 
-_availability: tuple[float, bool] | None = None
-AVAILABILITY_TTL = 30.0
-# In-memory matrix of the vectors (model, version) → (document ids, matrix).
-_cache: dict[str, tuple[int, list[int], Any]] = {}
+# In-memory matrix of the vectors: model → (version, document ids, matrix).
+_cache: dict[str, tuple[int, list[int], Vectors]] = {}
 _version = 0
 _lock = threading.Lock()
 
@@ -49,37 +47,31 @@ def model() -> str:
     return get_settings().embed_model
 
 
+_available = llm.Availability(model)
+
+
 def is_available() -> bool:
     """The embedding model is installed in a responding Ollama (cached result)."""
-    global _availability
-    if not get_settings().llm_enabled:
-        return False
-    now = time.monotonic()
-    if _availability and now - _availability[0] < AVAILABILITY_TTL:
-        return _availability[1]
-    installed = llm.installed_models()
-    ok = installed is not None and llm.is_installed(model(), installed)
-    _availability = (now, ok)
-    return ok
+    return _available()
 
 
 def forget_availability() -> None:
-    global _availability
-    _availability = None
+    _available.forget()
 
 
-def embed(texts: list[str]) -> Any:
+def embed(texts: list[str]) -> Vectors:
     """Normalized vectors (one row per text). Raises httpx.HTTPError if Ollama fails."""
     settings = get_settings()
     with llm.client(timeout=settings.llm_timeout) as c:
         r = c.post(
             "/api/embed",
-            json={"model": model(), "input": texts, "keep_alive": settings.llm_keep_alive},
+            json={"model": model(), "input": texts, "keep_alive": settings.llm_keep_alive or "30m"},
         )
         r.raise_for_status()
         vectors = np.asarray(r.json()["embeddings"], dtype=np.float32)
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    return vectors / np.maximum(norms, 1e-9)
+    normalized: Vectors = vectors / np.maximum(norms, 1e-9)
+    return normalized
 
 
 def pieces(doc: Document) -> list[str]:
@@ -150,7 +142,7 @@ def backfill(session: Session, limit: int = 20) -> int:
     return count
 
 
-def _matrix(session: Session) -> tuple[list[int], Any]:
+def _matrix(session: Session) -> tuple[list[int], Vectors]:
     name = model()
     with _lock:
         cached = _cache.get(name)
@@ -161,7 +153,7 @@ def _matrix(session: Session) -> tuple[list[int], Any]:
         select(Embedding.document_id, Embedding.vector).where(Embedding.model == name)
     ).all()
     ids = [r[0] for r in rows]
-    matrix = (
+    matrix: Vectors = (
         np.vstack([np.frombuffer(r[1], dtype=np.float32) for r in rows])
         if rows
         else np.zeros((0, 1), dtype=np.float32)

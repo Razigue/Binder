@@ -5,6 +5,7 @@ Tesseract when installed. Pages are also rendered as images for the vision of th
 """
 
 import io
+import itertools
 import logging
 import re
 import unicodedata
@@ -159,6 +160,12 @@ def ocr_image(image: Image.Image) -> str:
     return ""
 
 
+def rendered(page: pymupdf.Page, dpi: int) -> Image.Image:
+    """A PDF page as an image, for the OCR."""
+    image: Image.Image = page.get_pixmap(dpi=dpi).pil_image()
+    return image
+
+
 def read_document(data: bytes, mime_type: str) -> ReadResult:
     if mime_type == "application/pdf":
         return _read_pdf(data)
@@ -176,8 +183,7 @@ def _read_pdf(data: bytes) -> ReadResult:
             # order the PDF happens to draw them.
             page_text = page.get_text("text", sort=True)
             if len(page_text.strip()) < MIN_TEXT_PER_PAGE:
-                pix = page.get_pixmap(dpi=200)
-                ocr_text = ocr_image(Image.open(io.BytesIO(pix.tobytes("png"))))
+                ocr_text = ocr_image(rendered(page, 200))
                 if ocr_text.strip():
                     page_text, ocr_used = ocr_text, True
             pages.append(page_text)
@@ -204,7 +210,7 @@ def several_documents(pages: list[str]) -> bool:
         head = "\n".join([line for line in norm.splitlines() if line.strip()][:LETTERHEAD_LINES])
         if issuer := detect_issuer(head):
             issuers.add(issuer)
-    restarts = any(n == 1 and before > 1 for before, n in zip(numbers, numbers[1:], strict=False))
+    restarts = any(n == 1 and before > 1 for before, n in itertools.pairwise(numbers))
     return restarts or len(issuers) > 1
 
 
@@ -248,7 +254,8 @@ def html_to_pdf(html: str, css: str, margin: float = 64) -> bytes:
     buffer = io.BytesIO()
     writer = pymupdf.DocumentWriter(buffer)
     page = pymupdf.paper_rect("a4")
-    where = page + (margin, margin, -margin, -margin)
+    # Rect arithmetic, not tuple concatenation: insets the page by the margin.
+    where = page + (margin, margin, -margin, -margin)  # noqa: RUF005
     more = True
     while more:
         device = writer.begin_page(page)

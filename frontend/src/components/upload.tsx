@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react"
-import { WarningCircleIcon, FileTextIcon, CircleNotchIcon, LockIcon, DeviceMobileIcon } from "@phosphor-icons/react"
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react"
+import { WarningCircleIcon, FileTextIcon, CircleNotchIcon, LockIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useInvalidateAll } from "@/hooks/queries"
@@ -7,31 +7,17 @@ import { useT } from "@/i18n"
 import { phoneScan } from "@/i18n/messages/phoneScan"
 import { upload } from "@/i18n/messages/upload"
 import { api, type Doc } from "@/lib/api"
+import { ACCEPT, fileKey } from "@/lib/files"
 import { cn } from "@/lib/utils"
-import { ReportView } from "./panels"
+import { ReportView } from "./panels/ReportView"
 import { PhoneScanPanel } from "./PhoneScan"
-
-export const ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+import { UploadContext, useUpload } from "./upload/context"
 
 interface UploadItem {
   key: string
   name: string
   doc?: Doc
   error?: string
-}
-
-interface UploadContextValue {
-  open: () => void
-  uploadFiles: (files: FileList | File[]) => void
-  scanWithPhone: () => void
-}
-
-const UploadContext = createContext<UploadContextValue | null>(null)
-
-export function useUpload() {
-  const ctx = useContext(UploadContext)
-  if (!ctx) throw new Error("useUpload must be used inside UploadProvider")
-  return ctx
 }
 
 export function UploadProvider({ children }: { children: ReactNode }) {
@@ -51,7 +37,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       setOpen(true)
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16)
       setBatch(`upload-${id}`)
-      const fresh = list.map((file, i) => ({ key: `${Date.now()}-${i}-${file.name}`, name: file.name, file }))
+      const fresh = list.map((file, i) => ({ key: fileKey(file, i), name: file.name, file }))
       setItems(fresh.map(({ key, name }) => ({ key, name })))
       for (const { file, ...item } of fresh) {
         api
@@ -71,7 +57,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     (ids: number[]) => {
       setScanning(false)
       setItems([])
-      if (ids.length)
+      if (ids[0] !== undefined)
         api
           .document(ids[0])
           .then((doc) => setBatch(doc.batch))
@@ -84,7 +70,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const onOpenChange = (open: boolean) => {
     setOpen(open)
     if (!open) {
-      if (batch) api.reportSeen(batch).finally(invalidate)
+      if (batch) void api.reportSeen(batch).finally(invalidate)
       setItems([])
       setBatch(null)
       setScanning(false)
@@ -96,11 +82,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setScanning(true)
   }, [])
 
+  const value = useMemo(() => ({ open: () => setOpen(true), uploadFiles, scanWithPhone }), [uploadFiles, scanWithPhone])
   const failed = items.filter((it) => it.error)
   const sent = items.some((it) => it.doc)
 
   return (
-    <UploadContext.Provider value={{ open: () => setOpen(true), uploadFiles, scanWithPhone }}>
+    <UploadContext value={value}>
       {children}
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className={cn("max-h-[90vh] gap-5 overflow-y-auto", scanning ? "sm:max-w-2xl" : "sm:max-w-xl")}>
@@ -111,7 +98,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             </DialogDescription>
           </DialogHeader>
           {scanning ? (
-            <PhoneScanPanel onImported={onScanned} onCancel={() => setScanning(false)} />
+            // Scanning is its own entry point (＋ menu): cancelling closes, it does not fall back to the drop zone.
+            <PhoneScanPanel onImported={onScanned} onCancel={() => onOpenChange(false)} />
           ) : (
             <>
               {!batch && <DropZone />}
@@ -139,14 +127,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           )}
         </DialogContent>
       </Dialog>
-    </UploadContext.Provider>
+    </UploadContext>
   )
 }
 
 export function DropZone({ compact = false, className }: { compact?: boolean; className?: string }) {
   const t = useT(upload)
-  const scanT = useT(phoneScan)
-  const { uploadFiles, scanWithPhone } = useUpload()
+  const { uploadFiles } = useUpload()
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   return (
@@ -171,14 +158,9 @@ export function DropZone({ compact = false, className }: { compact?: boolean; cl
       <FileTextIcon className={cn("text-primary", compact ? "size-5" : "size-8")} weight="light" />
       <p className="text-sm font-medium">{t("dropHere")}</p>
       <p className="text-xs text-muted-foreground">{t("dropHint")}</p>
-      <div className="mt-2 flex flex-wrap justify-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => input.current?.click()}>
-          {t("browse")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={scanWithPhone}>
-          <DeviceMobileIcon /> {scanT("action")}
-        </Button>
-      </div>
+      <Button variant="outline" size="sm" className="mt-2" onClick={() => input.current?.click()}>
+        {t("browse")}
+      </Button>
       <input
         ref={input}
         type="file"

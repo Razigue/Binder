@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import watchfiles
 from pydantic import BaseModel
@@ -132,9 +132,16 @@ def import_bytes(
 # --- Watched folder ------------------------------------------------------------------------
 
 _seen: dict[Path, tuple[int, int]] = {}
+# Bumped whenever the folder settings change: a pass started before stops between two files,
+# so stopping (or moving) the watch takes effect at once, not after the whole folder is read.
+_generation = 0
 
 
-def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
+def scan_folder(
+    session: Session, cfg: FolderConfig, generation: int | None = None
+) -> list[Document]:
+    if generation is None:
+        generation = _generation
     folder = Path(cfg.path).expanduser()
     if not folder.is_dir():
         raise FileNotFoundError(T("folder_not_found", path=folder))
@@ -142,6 +149,8 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
     now = time.time()
     batch = ingest.new_batch("folder")
     for path in sorted(folder.rglob("*")):
+        if _generation != generation:
+            break
         if path.suffix.lower() not in EXTENSIONS or any(p.startswith(".") for p in path.parts):
             continue
         try:
@@ -151,9 +160,14 @@ def scan_folder(session: Session, cfg: FolderConfig) -> list[Document]:
         key = (stat.st_size, stat.st_mtime_ns)
         if _seen.get(path) == key or now - stat.st_mtime < SETTLE_SECONDS or not path.is_file():
             continue
+        try:
+            data = path.read_bytes()
+        except OSError as exc:  # locked by the program writing it, removed meanwhile
+            log.info("Watched file %s not read yet: %s", path.name, exc)
+            continue
         doc = import_bytes(
             session,
-            path.read_bytes(),
+            data,
             path.name,
             actor="watcher",
             origin=T.msg("from_folder", path=path.relative_to(folder).as_posix()),
@@ -211,7 +225,11 @@ _wake = threading.Event()
 
 
 def folder_changed() -> None:
-    """The folder settings changed: the watcher moves to the new folder and imports it."""
+    """The folder settings changed: the watcher moves to the new folder (or stops), and a pass
+    still reading the old one ends after its current file."""
+    global _generation
+    _generation += 1
+    _seen.clear()
     _wake.set()
 
 
@@ -364,14 +382,24 @@ def fetch_mail(
 _lock = threading.Lock()
 
 
-def run(session: Session, *, folder: bool = True, mail: bool = True) -> dict[str, Any]:
-    """One pass over each enabled source. Errors are kept in the settings (shown in Settings)."""
-    result: dict[str, Any] = {"folder": None, "mail": None}
+class SourceResult(TypedDict):
+    imported: int
+    error: str | None
+
+
+def run(session: Session, *, folder: bool = True, mail: bool = True) -> dict[str, object]:
+    """One pass over each enabled source: {"folder": SourceResult | None, "mail": ...}. Errors
+    are kept in the settings (shown in Settings)."""
+    result: dict[str, object] = {"folder": None, "mail": None}
+    # Read before the settings: a change saved meanwhile then always stops this pass.
+    generation = _generation
     with _lock:
         if folder:
             cfg = settings_store.load(session, FOLDER_KEY, FolderConfig)
             if cfg.enabled and cfg.path:
-                result["folder"] = _run_source(session, FOLDER_KEY, cfg, scan_folder)
+                result["folder"] = _run_source(
+                    session, FOLDER_KEY, cfg, lambda s, c: scan_folder(s, c, generation)
+                )
         if mail:
             mcfg = settings_store.load(session, MAIL_KEY, MailConfig)
             if mcfg.enabled and mcfg.host and mcfg.user:
@@ -381,7 +409,7 @@ def run(session: Session, *, folder: bool = True, mail: bool = True) -> dict[str
 
 def _run_source[C: FolderConfig | MailConfig](
     session: Session, key: str, cfg: C, fn: Callable[[Session, C], list[Document]]
-) -> dict[str, Any]:
+) -> SourceResult:
     try:
         docs = fn(session, cfg)
         error = None

@@ -6,11 +6,9 @@ import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
-import { PageHeader } from "@/components/layout/AppLayout"
-import {
-  RowCheckbox, SelectionBar, SelectionMenu, selectableRow, selectedRowClass, useSelection, useSelectionKeys,
-  type SelectionAction,
-} from "@/components/selection"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { RowCheckbox, SelectionBar, SelectionMenu, type SelectionAction } from "@/components/selection"
+import { selectableRow, selectedRowClass, useSelection, useSelectionKeys } from "@/hooks/useSelection"
 import { useBulkDocuments, usePurgeDocument, useRestoreDocument, useTrash } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { selection as selectionMessages } from "@/i18n/messages/selection"

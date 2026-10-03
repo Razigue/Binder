@@ -1,38 +1,33 @@
-import { useEffect, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Viewer } from "@/components/viewer"
+import { useSources } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { documentDetail } from "@/i18n/messages/documentDetail"
-import { api, previewUrl, type Doc } from "@/lib/api"
+import { previewUrl, type Doc } from "@/lib/api"
 import { fieldLabel } from "@/lib/format"
-
-// An A4 page until the image tells its own proportions.
-const A4 = 297 / 210
+import { A4 } from "@/lib/letters"
 
 /** A page of the document, with the places Binder read each field outlined; the `active`
  * field is highlighted and its page brought into view. Zoom and drag in the `Viewer`. */
 export function DocumentPage({ doc, active, className }: { doc: Doc; active: string | null; className?: string }) {
   const t = useT(documentDetail)
   const [page, setPage] = useState(0)
+  // An A4 page until the image tells its own proportions.
   const [aspect, setAspect] = useState(A4)
   const pages = Math.max(doc.page_count, 1)
-  const sources = useQuery({
-    queryKey: ["sources", doc.id, doc.amount, doc.due_date, doc.issue_date, doc.expiry_date, doc.reference, doc.issuer],
-    queryFn: () => api.sources(doc.id),
-    enabled: doc.status !== "processing",
-    staleTime: Infinity,
-  })
+  const sources = useSources(doc)
   const boxes = (sources.data ?? []).flatMap((s) =>
     s.boxes.filter((b) => b.page === page).map((b) => ({ ...b, field: s.field })),
   )
-  // The active field's page comes into view.
-  const target = sources.data?.find((s) => s.field === active)?.boxes[0]
-  useEffect(() => {
-    if (target && target.page !== page) setPage(target.page)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, target?.page])
+  // The active field's page comes into view, once each time it changes.
+  const target = sources.data?.find((s) => s.field === active)?.boxes[0]?.page
+  const [followed, setFollowed] = useState<{ active: string | null; target?: number } | null>(null)
+  if (followed?.active !== active || followed.target !== target) {
+    setFollowed({ active, target })
+    if (target !== undefined && target !== page) setPage(target)
+  }
 
   const pager = pages > 1 && (
     <>

@@ -31,6 +31,7 @@ from binder.services import (
     household,
     missing,
     notify,
+    settings_store,
     setup,
 )
 from tests.conftest import upload
@@ -188,6 +189,48 @@ def test_areas_and_household(client: TestClient, demo: dict[str, Any]) -> None:
     assert members[0]["name"] == "Camille Martin" and members[0]["documents"] >= 3
 
 
+def test_user_corrects_household(client: TestClient, demo: dict[str, Any]) -> None:
+    def names() -> set[str]:
+        return {m["name"] for m in client.get("/api/household").json()}
+
+    def edit(**body: str) -> Any:
+        return client.post("/api/household", json=body)
+
+    assert "Hugo Martin" in names()
+    hugo = [d for d in client.get("/api/documents").json() if d["person"] == "Hugo Martin"]
+    assert hugo
+    # Renaming writes the new name on their documents, and undo puts it back.
+    renamed = edit(action="rename", name="Hugo Martin", new_name="hugo MARTIN-LEROY")
+    assert renamed.status_code == 200
+    assert "Hugo Martin-Leroy" in names() and "Hugo Martin" not in names()
+    doc = client.get(f"/api/documents/{hugo[0]['id']}").json()
+    assert doc["person"] == "Hugo Martin-Leroy"
+    client.post(f"/api/undo/{renamed.headers['X-Undo']}")
+    assert client.get(f"/api/documents/{hugo[0]['id']}").json()["person"] == "Hugo Martin"
+    # A name of another member merges both.
+    edit(action="rename", name="Hugo Martin", new_name="Thomas Martin")
+    assert "Hugo Martin" not in names() and "Thomas Martin" in names()
+    # Removed: no longer listed, nor taken as the sender; added back, it returns.
+    assert edit(action="remove", name="Thomas Martin").status_code == 200
+    assert "Thomas Martin" not in names()
+    edit(action="add", name="Thomas Martin")
+    assert "Thomas Martin" in names()
+    edit(action="add", name="Léa Martin")
+    added = next(m for m in client.get("/api/household").json() if m["name"] == "Léa Martin")
+    assert added["added"] and added["documents"] == 0
+    assert edit(action="remove", name="Nobody").status_code == 404
+    # Corrected: the "Binder recognised your household" card does not come back.
+    assert not [i for i in feed_items(client) if i["kind"] == "household"]
+
+
+def test_corrected_spelling_applies_to_new_documents(session: Session) -> None:
+    edits = household.load_edits(session)
+    edits.renamed["camille martin"] = "Camille Martin-Durand"
+    settings_store.save(session, household.EDITS_KEY, edits)
+    assert household.canonical(session, "MARTIN Camille") == "Camille Martin-Durand"
+    assert household.canonical(session, "Paul Durand") == "Paul Durand"
+
+
 def test_person_detection() -> None:
     assert household.detect("Nom : MARTIN — Prénom : Camille") == "Camille Martin"
     assert household.detect("Salarié : Paul DURAND\nPoste : technicien") == "Paul Durand"
@@ -289,6 +332,12 @@ def test_demo_tells_a_french_household_story(
     kinds = {(a.kind, a.title) for a in anomalies.detect(session)}
     assert ("overpayment_claim", "CAF claims an overpayment") in kinds
     assert ("double_payment", "Debited twice: ORANGE") in kinds
+    # The bill debited twice comes with the statement, and the letter names it.
+    debit = next(a for a in anomalies.detect(session) if a.title == "Debited twice: ORANGE")
+    orange, statement = (session.get(Document, i) for i in debit.document_ids)
+    assert orange is not None and orange.issuer == "Orange"
+    assert statement is not None and statement.doc_type == "bank_statement"
+    assert "2026-884512" in (debit.letter or "")
     assert any(kind == "price_increase" and "EDF" in title for kind, title in kinds)
     assert [m.key for m in missing.detect(session)] == ["essential:rib"]
     names = {m.name for m in household.members(session)}

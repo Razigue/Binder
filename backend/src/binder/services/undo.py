@@ -12,14 +12,16 @@ import secrets
 from collections.abc import Iterator
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Any
 
 from pydantic import TypeAdapter
-from sqlmodel import Session, col, select
+from sqlmodel import Session, SQLModel, col, select
 
-from binder import i18n
+from binder import i18n, models
+from binder.db import index_document
 from binder.models import Deadline, Document, Setting, UndoEntry
-from binder.services import activity
+from binder.services import activity, deadlines, organize
 
 T = i18n.catalog(
     "undo",
@@ -40,12 +42,15 @@ DOCUMENT_STATE = (
 )  # fmt: skip
 DEADLINE_STATE = ("title", "category", "due_date", "amount", "done", "source", "document_id")
 
-_steps: ContextVar[list[dict[str, Any]] | None] = ContextVar("undo_steps", default=None)
+# A step: its "kind" and what is needed to put things back (JSON values).
+type Step = dict[str, Any]
+
+_steps: ContextVar[list[Step] | None] = ContextVar("undo_steps", default=None)
 
 
 class Capture:
     def __init__(self) -> None:
-        self.steps: list[dict[str, Any]] = []
+        self.steps: list[Step] = []
         self.label: str | i18n.Msg = ""
 
 
@@ -98,15 +103,16 @@ def _cleanup(session: Session) -> None:
         session.delete(old)
 
 
-def _typed(model: type[Any], name: str, value: Any) -> Any:
-    annotation = model.model_fields[name].annotation
-    return TypeAdapter(annotation).validate_python(value)
+def _typed(model: type[SQLModel], name: str, value: Any) -> Any:
+    return _adapter(model, name).validate_python(value)
 
 
-def _restore_document(session: Session, step: dict[str, Any]) -> None:
-    from binder.db import index_document
-    from binder.services import deadlines, organize
+@cache
+def _adapter(model: type[SQLModel], name: str) -> TypeAdapter[Any]:
+    return TypeAdapter(model.model_fields[name].annotation)
 
+
+def _restore_document(session: Session, step: Step) -> None:
     doc = session.get(Document, step["id"])
     if doc is None:
         return
@@ -123,77 +129,70 @@ def _restore_document(session: Session, step: dict[str, Any]) -> None:
     organize.reorganize(session, doc, previous_key)
 
 
-def _apply(session: Session, step: dict[str, Any], actor: str) -> None:
-    from binder.services import ingest
+def _apply(session: Session, step: Step, actor: str) -> None:
+    # Imported here: these services push undo steps themselves.
+    from binder.services import archive, ingest
 
-    kind = step["kind"]
-    if kind == "document":
-        _restore_document(session, step)
-    elif kind == "trash":
-        doc = session.get(Document, step["id"])
-        if doc is not None and doc.deleted_at is not None:
-            ingest.restore(session, doc, actor=actor)
-    elif kind == "restore":
-        doc = session.get(Document, step["id"])
-        if doc is not None and doc.deleted_at is None:
-            ingest.trash(session, doc, actor=actor)
-    elif kind == "archive":
-        from binder.services import archive
+    match step["kind"]:
+        case "document":
+            _restore_document(session, step)
+        case "trash":
+            doc = session.get(Document, step["id"])
+            if doc is not None and doc.deleted_at is not None:
+                ingest.restore(session, doc, actor=actor)
+        case "restore":
+            doc = session.get(Document, step["id"])
+            if doc is not None and doc.deleted_at is None:
+                ingest.trash(session, doc, actor=actor)
+        case "archive":
+            doc = session.get(Document, step["id"])
+            if doc is not None:
+                archive.unarchive(session, doc, actor=actor)
+        case "unarchive":
+            doc = session.get(Document, step["id"])
+            if doc is not None:
+                archive.archive(session, doc, step.get("reason"), actor=actor)
+        case "deadline":
+            _restore_row(session, Deadline, step)
+        case "deadline_created":
+            _delete_row(session, Deadline, step)
+        case "deadline_deleted":
+            session.add(Deadline(**_state(Deadline, step)))
+        case "setting":
+            row = session.get(Setting, step["key"])
+            if step["value"] is None:
+                if row is not None:
+                    session.delete(row)
+            else:
+                row = row or Setting(key=step["key"])
+                row.value = step["value"]
+                session.add(row)
+        case "row_state":
+            _restore_row(session, getattr(models, step["model"]), step)
+        case "row_created":
+            _delete_row(session, getattr(models, step["model"]), step)
+        case "row_deleted":
+            table = getattr(models, step["model"])
+            if session.get(table, step["id"]) is None:
+                session.add(table(**_state(table, step)))
 
-        doc = session.get(Document, step["id"])
-        if doc is not None:
-            archive.unarchive(session, doc, actor=actor)
-    elif kind == "unarchive":
-        from binder.services import archive
 
-        doc = session.get(Document, step["id"])
-        if doc is not None:
-            archive.archive(session, doc, step.get("reason"), actor=actor)
-    elif kind == "deadline":
-        deadline = session.get(Deadline, step["id"])
-        if deadline is not None:
-            for name, value in step["state"].items():
-                setattr(deadline, name, _typed(Deadline, name, value))
-            session.add(deadline)
-    elif kind == "deadline_created":
-        deadline = session.get(Deadline, step["id"])
-        if deadline is not None:
-            session.delete(deadline)
-    elif kind == "deadline_deleted":
-        state = {k: _typed(Deadline, k, v) for k, v in step["state"].items()}
-        session.add(Deadline(**state))
-    elif kind == "setting":
-        row = session.get(Setting, step["key"])
-        if step["value"] is None:
-            if row is not None:
-                session.delete(row)
-        else:
-            row = row or Setting(key=step["key"])
-            row.value = step["value"]
-            session.add(row)
-    elif kind == "row_state":
-        from binder import models
+def _state(table: type[Any], step: Step) -> dict[str, Any]:
+    return {k: _typed(table, k, v) for k, v in step["state"].items()}
 
-        table = getattr(models, step["model"])
-        row = session.get(table, step["id"])
-        if row is not None:
-            for name, value in step["state"].items():
-                setattr(row, name, _typed(table, name, value))
-            session.add(row)
-    elif kind == "row_created":
-        from binder import models
 
-        table = getattr(models, step["model"])
-        row = session.get(table, step["id"])
-        if row is not None:
-            session.delete(row)
-    elif kind == "row_deleted":
-        from binder import models
+def _restore_row(session: Session, table: type[Any], step: Step) -> None:
+    row = session.get(table, step["id"])
+    if row is not None:
+        for name, value in _state(table, step).items():
+            setattr(row, name, value)
+        session.add(row)
 
-        table = getattr(models, step["model"])
-        if session.get(table, step["id"]) is None:
-            state = {k: _typed(table, k, v) for k, v in step["state"].items()}
-            session.add(table(**state))
+
+def _delete_row(session: Session, table: type[Any], step: Step) -> None:
+    row = session.get(table, step["id"])
+    if row is not None:
+        session.delete(row)
 
 
 def undo(session: Session, token: str, *, actor: str = "user") -> bool:

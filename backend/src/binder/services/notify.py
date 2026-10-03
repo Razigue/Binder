@@ -9,16 +9,16 @@ Best effort: a notification that cannot be shown is logged and skipped. Each ale
 """
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
 from datetime import date
-from typing import Any
 
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from binder.services import settings_store
+from binder.services import process, settings_store
 
 log = logging.getLogger(__name__)
 
@@ -45,8 +45,6 @@ class Sent(BaseModel):
 
 
 def _command(title: str, body: str) -> tuple[list[str], dict[str, str]] | None:
-    import os
-
     env = dict(os.environ)
     if sys.platform == "win32":
         powershell = shutil.which("powershell") or shutil.which("powershell.exe")
@@ -73,11 +71,8 @@ def send(title: str, body: str) -> bool:
     if command is None:
         return False
     args, env = command
-    kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
-        subprocess.run(args, env=env, timeout=15, check=True, capture_output=True, **kwargs)
+        process.run_hidden(args, env=env, timeout=15)
         return True
     except (OSError, subprocess.SubprocessError):
         log.warning("Notification not shown", exc_info=True)

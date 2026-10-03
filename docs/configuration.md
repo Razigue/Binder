@@ -9,7 +9,7 @@ Through environment variables, or in a `backend/.env` file:
 | `BINDER_LLM_MODEL` | `qwen3.5:9b` | default Ollama model (the choice made in Settings wins) |
 | `BINDER_LLM_ENABLED` | `true` | `false`: no model at all, the rules read every document (tests, demo on a modest machine; they are tuned on the demo documents only). With `true`, real documents imported before the model is ready wait for it |
 | `BINDER_LLM_CONTEXT` | the model's profile (16384, 32768 for the large models) | context window asked of Ollama (its own default, 4096, cuts agent conversations); see [models.md](models.md#what-each-model-is-given) |
-| `BINDER_LLM_KEEP_ALIVE` | `30m` | how long Ollama keeps the model loaded after a request |
+| `BINDER_LLM_KEEP_ALIVE` | session / `30m` | how long Ollama keeps the model loaded after a request (default: the whole session with Binder's own Ollama, 30 minutes on a shared one) |
 | `BINDER_LLM_VISION` | `true` | show scans, photos and pages to the model when it reads images |
 | `BINDER_LLM_THINK` | `false` | let the agent reason before each step (slower); also makes letters and second readings reason on any model |
 | `BINDER_WEB_SEARCH` | `true` | let the agent search the web for general facts (queries with personal data are refused) |
@@ -26,6 +26,22 @@ Through environment variables, or in a `backend/.env` file:
 | `BINDER_AUTO_UPDATE` | `true` | `false` not to update the application at launch |
 | `BINDER_UPDATE_REPO` | `https://github.com/Razigue/Binder` | releases read by the installed application (Velopack) |
 | `BINDER_LOCALE` | detected from the system | system locale override, e.g. `fr_FR` or `en_GB` |
+
+## Reminders while Binder is closed
+
+The installed application registers a task of the system's own scheduler that runs
+`Binder --remind` every day at 09:00 and after login (`services/os_task.py`): a Task Scheduler
+task "Binder reminders" on Windows (missed runs made up), a LaunchAgent `app.binder.reminders`
+on macOS, a systemd user timer `binder-reminders.timer` on Linux (an XDG autostart entry without
+systemd). It is registered again at each launch (the path follows the application), removed
+when the user turns reminders off in Settings and, on Windows, by the uninstaller. A development
+run (`uv run binder`) never registers it.
+
+The run (`services/reminders.py`) exits at once when Binder is open (lock file
+`DATA_DIR/binder.lock`, held by the server), when `BINDER_NOTIFICATIONS=false`, or when it has
+already spoken today. Otherwise it builds the To do feed without the local AI and shows one
+notification when a card is urgent or appeared since the last reminder. Try it with
+`uv run binder --remind` while Binder is closed.
 
 Default data folder: `~/.local/share/binder` (Linux, or `$XDG_DATA_HOME/binder`),
 `~/Library/Application Support/Binder` (macOS), `%LOCALAPPDATA%\Binder` (Windows).

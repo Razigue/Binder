@@ -8,7 +8,8 @@ them; document new dev topics in `docs/*.md`, keep `README.md` user-facing.
 
 ```
 backend/src/binder/   Python 3.12, FastAPI, SQLModel on SQLCipher
-  api/routes.py         REST API (`/api`); api/scan.py phone scan endpoints
+  api/                  REST API (`/api`): one router per domain, aggregated by routes.py;
+                        common.py (SessionDep, get_or_404, disposition); scan.py phone scan
   services/             ingest pipeline, rules, llm (Ollama), deadlines, folders, letters, ...
   agent/                tools.py + loop.py (LLM tool calling, or intent router without a model)
   i18n.py               locale detection, EN/FR catalogs, money/date formatting

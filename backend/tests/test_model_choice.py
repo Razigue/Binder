@@ -1,6 +1,7 @@
 """The best model for each machine: the memory ladder, Binder's Ollama, and the upgrades
-re-evaluated at each launch (offered, never silent, never a downgrade)."""
+re-evaluated at each launch (fetched in the background, never a downgrade)."""
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +80,7 @@ def serve_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(setup, "_state", setup._State())
     monkeypatch.setattr(setup.subprocess, "Popen", popen)
     monkeypatch.setattr(setup, "_tie", lambda process: None)
-    monkeypatch.setattr(llm, "installed_models", lambda: {})
+    monkeypatch.setattr(llm, "installed_models", dict)
     setup._serve(Path("ollama"))
     return seen
 
@@ -130,46 +131,60 @@ def chosen_by_binder(
     return ollama
 
 
-def test_better_model_is_offered_then_used(
+def test_better_model_is_downloaded_then_replaces_the_former_one(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
+    llm.set_owned(True)
     launch(32)
-    assert offer(client) == {
-        "name": "qwen3.6:35b-a3b",
-        "label": "Qwen 3.6 · 35B-A3B",
-        "size": int(22.6 * GB),
-        "accepted": False,
-        "download": None,
-    }
-    # Offered, not downloaded.
-    assert "qwen3.6:35b-a3b" not in chosen_by_binder.models
-    assert client.get("/api/llm").json()["active"] == "qwen3.5:9b"
-
-    assert client.post("/api/llm/upgrade").status_code == 202
+    # Binder chose the model: the better one is fetched without asking, and shown meanwhile.
+    upgrade = offer(client)
+    assert upgrade is None or (upgrade["name"] == "qwen3.6:35b-a3b" and upgrade["accepted"])
     llm_models.wait("qwen3.6:35b-a3b")
     data = client.get("/api/llm").json()
     assert data["active"] == "qwen3.6:35b-a3b" and data["upgrade"] is None
-    # The former model stays installed.
-    assert by_name(data, "qwen3.5:9b")["installed"] is True
+    # Only the model in use stays on the disk.
+    assert by_name(data, "qwen3.5:9b")["installed"] is False
     summaries = [e["summary"] for e in client.get("/api/activity").json()]
-    assert (
-        "Local AI upgraded: Qwen 3.5 · 9B → Qwen 3.6 · 35B-A3B (the former model stays installed)"
-        in summaries
-    )
+    assert "Local AI upgraded: Qwen 3.5 · 9B → Qwen 3.6 · 35B-A3B" in summaries
+    assert "Unused model Qwen 3.5 · 9B deleted (disk space freed)" in summaries
 
 
-def test_declined_upgrade_comes_back_only_when_the_advice_changes(
+def test_only_the_models_in_use_stay_on_the_disk(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
+    chosen_by_binder.models |= {
+        "qwen3.5:4b": GB,  # replaced earlier
+        "qwen3.5:27b": GB,  # dropped from the catalogue by an update
+        "qwen3-embedding:0.6b": GB,  # search by meaning
+        "mistral:7b": GB,  # installed outside Binder
+    }
+    with Session(get_engine()) as session:
+        # A shared Ollama serves other apps: nothing is deleted there.
+        assert llm_models.prune(session) == []
+        llm.set_owned(True)
+        assert sorted(llm_models.prune(session)) == ["qwen3.5:27b", "qwen3.5:4b"]
+    assert set(chosen_by_binder.models) == {"qwen3.5:9b", "qwen3-embedding:0.6b", "mistral:7b"}
+
+
+def test_stopped_upgrade_comes_back_only_when_the_advice_changes(
+    client: TestClient, chosen_by_binder: FakeOllama
+) -> None:
+    chosen_by_binder.gate = threading.Event()
     launch(32)
+    # Stopped by the user while it downloads.
     assert client.post("/api/llm/upgrade/decline").status_code == 200
+    chosen_by_binder.gate.set()
+    llm_models.wait("qwen3.6:35b-a3b")
     assert offer(client) is None
+    assert client.get("/api/llm").json()["active"] == "qwen3.5:9b"
     launch(32)  # next launch, same machine
     assert offer(client) is None
+    chosen_by_binder.gate = threading.Event()
     launch(64, vram=24)  # a graphics card was added
     upgrade = offer(client)
-    assert upgrade is not None and upgrade["name"] == "qwen3.6:27b"
-    assert "qwen3.6:27b" not in chosen_by_binder.models
+    assert upgrade is not None and upgrade["name"] == "qwen3.6:27b" and upgrade["accepted"]
+    chosen_by_binder.gate.set()
+    llm_models.wait("qwen3.6:27b")
 
 
 def test_weaker_machine_never_downgrades(client: TestClient, chosen_by_binder: FakeOllama) -> None:
@@ -196,3 +211,34 @@ def test_model_chosen_by_hand_is_left_alone(
     assert data["recommended"] == "qwen3.6:35b-a3b"
     assert data["recommended_label"] == "Qwen 3.6 · 35B-A3B"
     assert client.post("/api/llm/upgrade").status_code == 409
+
+
+def test_graphics_memory_is_read_from_ollama_for_every_vendor(tmp_path: Path) -> None:
+    log = tmp_path / "ollama.log"
+    start = 'level=INFO msg="server config" env="map[]"\n'
+    device = (
+        'level=INFO source=types.go:32 msg="inference compute" id={id} library={lib} '
+        'name={lib}0 description="{name}" type={kind} total="{total}" available="1.0 GiB"\n'
+    )
+    log.write_text(
+        start
+        + device.format(id=0, lib="CUDA", name="old card", kind="discrete", total="8.0 GiB")
+        + start
+        + device.format(id=0, lib="ROCm", name="Radeon RX 7900", kind="discrete", total="24.0 GiB")
+        + device.format(id=1, lib="Vulkan", name="Radeon 780M", kind="iGPU", total="4.0 GiB")
+        + device.format(id=2, lib="cpu", name="cpu", kind="", total="64.0 GiB"),
+        encoding="utf-8",
+    )
+    # The last start only, integrated graphics and the processor left out.
+    assert setup.ollama_gpu_bytes(log) == 24 * 1024**3
+    assert setup.ollama_gpu_bytes(tmp_path / "missing.log") == 0
+
+
+def test_download_progress_is_read_without_asking_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    name = "qwen3.5:2b"
+    download = llm_models._Download(phase="downloading", layers={"a": (1, 4), "b": (2, 6)})
+    monkeypatch.setitem(llm_models._downloads, name, download)
+    state = llm_models.download_state(name)
+    assert state is not None and (state.completed, state.total) == (3, 10)
+    monkeypatch.delitem(llm_models._downloads, name)
+    assert llm_models.download_state(name) is None

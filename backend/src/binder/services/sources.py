@@ -17,7 +17,7 @@ from binder.models import Document
 from binder.services import learning
 from binder.services.missing import MONTH_NAMES
 from binder.services.rules import normalize
-from binder.services.text import MIN_TEXT_PER_PAGE, ocr_boxes
+from binder.services.text import MIN_TEXT_PER_PAGE, ocr_boxes, rendered
 
 FIELDS = ("amount", "due_date", "issue_date", "expiry_date", "reference", "issuer", "person")
 # Pages searched: what matters is written up front.
@@ -42,13 +42,13 @@ def variants(doc: Document, field: str) -> list[str]:
     if value is None or value == "":
         return []
     if field == "amount":
-        found = learning._amount_variants(value)
+        found = learning.amount_variants(value)
         if float(value).is_integer():
             found += [f"{int(value):,}".replace(",", " "), str(int(value))]
         return found
     if field.endswith("_date"):
         month = MONTH_NAMES["fr"][value.month - 1]
-        return [*filter(None, learning._date_variants(value)), f"{value.day} {month} {value.year}"]
+        return [*filter(None, learning.date_variants(value)), f"{value.day} {month} {value.year}"]
     return [str(value)]
 
 
@@ -68,8 +68,7 @@ def _pdf_sources(doc: Document, data: bytes) -> list[FieldSource]:
                 for n, page in enumerate(pages):
                     if scanned[n]:
                         if n not in ocr:
-                            pix = page.get_pixmap(dpi=150)
-                            ocr[n] = ocr_boxes(Image.open(io.BytesIO(pix.tobytes("png"))))
+                            ocr[n] = ocr_boxes(rendered(page, 150))
                         boxes += _in_ocr(ocr[n], needle, n)
                         continue
                     width, height = page.rect.width, page.rect.height

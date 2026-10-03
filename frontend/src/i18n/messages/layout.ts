@@ -1,6 +1,6 @@
 import { defineMessages } from "@/i18n/core"
 
-// App shell: desktop title bar, sidebar, phone bars, the ＋ menu and the profile menu.
+// App shell: desktop title bar, sidebar, phone bars, the ＋ menu, the ask bar and the profile menu.
 export const layout = defineMessages({
   en: {
     navigation: "Navigation",
@@ -20,8 +20,9 @@ export const layout = defineMessages({
     "add.scanHint": "The easiest: photograph the letter, it arrives here.",
     "add.file": "Choose a file",
     "add.fileHint": "A PDF or a photo already on this computer.",
-    "add.ask": "Ask a question",
-    "add.askHint": "Binder answers from your papers. Shortcut: Ctrl K.",
+    ask: "Ask Binder",
+    askPlaceholder: "Ask a question about your papers…",
+    askShortcut: "Ctrl K",
     "history.back": "Back",
     "history.backHint": "Back (Alt + ←)",
     "history.forward": "Forward",
@@ -49,8 +50,9 @@ export const layout = defineMessages({
     "add.scanHint": "Le plus simple : photographiez le courrier, il arrive ici.",
     "add.file": "Choisir un fichier",
     "add.fileHint": "Un PDF ou une photo déjà sur cet ordinateur.",
-    "add.ask": "Poser une question",
-    "add.askHint": "Binder répond à partir de vos papiers. Raccourci : Ctrl K.",
+    ask: "Demander à Binder",
+    askPlaceholder: "Posez une question sur vos papiers…",
+    askShortcut: "Ctrl K",
     "history.back": "Précédent",
     "history.backHint": "Précédent (Alt + ←)",
     "history.forward": "Suivant",

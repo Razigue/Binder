@@ -9,7 +9,8 @@ import { localAi } from "@/i18n/messages/localAi"
 import { api, type ModelUpgrade } from "@/lib/api"
 import { formatSize } from "@/lib/format"
 
-/** A better model for this machine: offered with its size, downloaded only on a yes. */
+/** A better model for this machine: fetched in the background (the user can stop it), or offered
+ * again with its size after a failure or once stopped. */
 export function UpgradeOffer({ upgrade }: { upgrade: ModelUpgrade }) {
   const t = useT(localAi)
   const invalidate = useInvalidateAll()
@@ -29,8 +30,15 @@ export function UpgradeOffer({ upgrade }: { upgrade: ModelUpgrade }) {
     const ratio = download.total ? Math.min(100, (download.completed / download.total) * 100) : null
     return (
       <div className="space-y-2">
-        <p className="font-medium">{t("offer.downloading", { label: upgrade.label })}</p>
-        <p className="text-sm text-muted-foreground">{t("offer.switch")}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <p className="font-medium">{t("offer.downloading", { label: upgrade.label })}</p>
+            <p className="text-sm text-muted-foreground">{t("offer.switch")}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => decline.mutate()} disabled={busy}>
+            {t("offer.stop")}
+          </Button>
+        </div>
         {ratio !== null && (
           <div className="space-y-1">
             <Progress

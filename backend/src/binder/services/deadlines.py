@@ -28,6 +28,11 @@ NOTICE_DAYS: dict[str, int] = {
 DEFAULT_NOTICE_DAYS = 30
 
 
+def document_date(doc: Document) -> date:
+    """The date a document refers to: issued, else due, else added."""
+    return doc.issue_date or doc.due_date or doc.created_at.date()
+
+
 def notice_days(doc: Document) -> int:
     return NOTICE_DAYS.get(doc.doc_type or "", DEFAULT_NOTICE_DAYS)
 

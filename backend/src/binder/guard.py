@@ -61,6 +61,13 @@ def _same_origin(request: Request) -> bool:
     return origin.lower() == f"{request.url.scheme}://{request.headers.get('host', '')}".lower()
 
 
+def same_secret(given: str | None, expected: str) -> bool:
+    """Constant-time comparison; False (not a crash) for a value that is not ASCII."""
+    return given is not None and secrets.compare_digest(
+        given.encode("utf-8", "surrogateescape"), expected.encode()
+    )
+
+
 def _forbidden(detail: str, status: int = 403) -> Response:
     return JSONResponse({"detail": detail}, status_code=status)
 
@@ -104,7 +111,7 @@ def middleware(
         if expected:
             given = request.query_params.get(TOKEN_PARAM)
             if given is not None and not is_api:
-                if not secrets.compare_digest(given, expected):
+                if not same_secret(given, expected):
                     return _forbidden(T("bad_token"))
                 # The token leaves the URL (history, logs) and moves to a cookie.
                 rest = [(k, v) for k, v in request.query_params.multi_items() if k != TOKEN_PARAM]
@@ -112,7 +119,7 @@ def middleware(
                 redirect = RedirectResponse(target, status_code=303)
                 redirect.set_cookie(COOKIE, expected, httponly=True, samesite="strict", path="/")
                 return _harden(redirect, path)
-            if is_api and not secrets.compare_digest(request.cookies.get(COOKIE, ""), expected):
+            if is_api and not same_secret(request.cookies.get(COOKIE), expected):
                 return _forbidden(T("no_session"), 401)
 
         return _harden(await call_next(request), path)

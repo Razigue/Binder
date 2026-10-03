@@ -69,6 +69,7 @@ def model(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeModel]:
     fake = FakeModel()
     monkeypatch.setattr(llm, "is_available", lambda: True)
     monkeypatch.setattr(llm, "has_vision", lambda: True)
+    monkeypatch.setattr(llm, "loaded", lambda: True)
     monkeypatch.setattr(llm, "chat", fake)
     yield fake
 
@@ -201,6 +202,37 @@ def test_view_document_shows_the_page(library: dict[str, int], session: Session)
 # --- Harness -------------------------------------------------------------------------------
 
 
+def test_a_greeting_is_answered_in_one_turn(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    model.replies = [answer("Hello! How can I help with your paperwork?")]
+    events: list[dict[str, Any]] = []
+    response = loop.run(session, "Hello!", [], emit=events.append)
+    assert response.answer == "Hello! How can I help with your paperwork?"
+    assert len(model.requests) == 1 and response.stats and response.stats.turns == 1
+    # Shown as it is written, not held back for a check that will not come.
+    assert any(e["type"] == "token" for e in events)
+
+
+def test_a_model_still_loading_is_announced(
+    library: dict[str, int],
+    session: Session,
+    model: FakeModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm, "loaded", lambda: False)
+    model.replies = [
+        answer("Hi!")
+        | {"stats": {"eval_count": 2, "eval_duration": 10**8, "load_duration": 22 * 10**9}}
+    ]
+    events: list[dict[str, Any]] = []
+    response = loop.run(session, "hi", [], emit=events.append)
+    assert events[0] == {"type": "loading"}
+    # The load is told apart: the speed is the model's own.
+    assert response.stats and response.stats.load_seconds == 22.0
+    assert response.stats.tokens_per_second == 20.0
+
+
 def test_answer_without_looking_is_refused_once(
     library: dict[str, int], session: Session, model: FakeModel
 ) -> None:
@@ -325,7 +357,7 @@ def test_ollama_stats_are_read_from_the_last_chunk(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(llm, "client", lambda **_: Client())
     reply = llm.chat([{"role": "user", "content": "hi"}], on_token=lambda _: None)
     assert reply["content"] == "Hello"
-    assert reply["stats"] == {"eval_count": 2, "eval_duration": 10}
+    assert reply["stats"] == {"eval_count": 2, "eval_duration": 10, "load_duration": 5}
 
 
 def test_context_size_and_library_overview_are_sent(
@@ -552,7 +584,7 @@ def test_scans_are_shown_to_a_model_with_vision(
 
     def extract(text: str, images: list[bytes] | None = None, **_: Any) -> None:
         seen["images"] = images
-        return None
+        return
 
     monkeypatch.setattr(llm, "is_available", lambda: True)
     monkeypatch.setattr(llm, "has_vision", lambda: True)

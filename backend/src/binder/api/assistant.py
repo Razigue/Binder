@@ -4,24 +4,27 @@ areas, household, letters, packs, local AI setup and backups."""
 import contextlib
 import io
 import re
+import shutil
 import tempfile
 import zipfile
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from binder import i18n
-from binder.db import WITHOUT_TEXT, get_engine, get_session, in_use, reset_engine
+from binder.api.common import SessionDep, disposition, document_or_404, get_or_404
+from binder.db import WITHOUT_TEXT, get_engine, in_use, reset_engine
 from binder.models import Correspondence, Deadline, Document
 from binder.schemas import DeadlineOut, DocumentOut, Letter, LetterEdit, LetterRequest
 from binder.services import (
+    activity,
     areas,
     backup,
     calendar,
@@ -44,7 +47,6 @@ from binder.services import (
 )
 
 router = APIRouter(prefix="/api")
-SessionDep = Annotated[Session, Depends(get_session)]
 
 T = i18n.catalog(
     "assistant_api",
@@ -71,13 +73,16 @@ T = i18n.catalog(
         "letter_not_found": {"en": "Letter not found", "fr": "Courrier introuvable"},
         "not_sent": {"en": "This letter has not been sent", "fr": "Ce courrier n'est pas parti"},
         "unknown_area": {"en": "Unknown area", "fr": "Espace inconnu"},
+        "unknown_member": {
+            "en": "Nobody by that name in the household",
+            "fr": "Personne de ce nom dans le foyer",
+        },
         "unknown_folder": {"en": "Unknown folder", "fr": "Dossier inconnu"},
         "unknown_letter": {"en": "Unknown letter type", "fr": "Type de courrier inconnu"},
         "letter_needs_purpose": {
             "en": "Say what the letter is for",
             "fr": "Dites à quoi sert le courrier",
         },
-        "doc_not_found": {"en": "Document not found", "fr": "Document introuvable"},
         "library_not_empty": {
             "en": "A backup can only be restored into an empty library",
             "fr": "Une sauvegarde ne se restaure que dans une bibliothèque vide",
@@ -97,13 +102,6 @@ def undoable(session: Session, response: Response, actor: str = "user") -> Itera
     token = undo.save(session, cap, actor=actor)
     if token:
         response.headers[UNDO_HEADER] = token
-
-
-def _doc(session: Session, doc_id: int) -> Document:
-    doc = session.get(Document, doc_id)
-    if doc is None or doc.deleted_at is not None:
-        raise HTTPException(404, T("doc_not_found"))
-    return doc
 
 
 # --- To do feed ------------------------------------------------------------------------------
@@ -327,11 +325,39 @@ def get_household(session: SessionDep) -> list[household.Member]:
     return household.members(session)
 
 
+class MemberEdit(BaseModel):
+    action: Literal["add", "remove", "rename"]
+    name: str = Field(min_length=1, max_length=120)
+    # rename only; the name of another member merges both.
+    new_name: str = Field(default="", max_length=120)
+
+
+@router.post("/household")
+def edit_household(
+    body: MemberEdit, session: SessionDep, response: Response
+) -> list[household.Member]:
+    """The user corrects the household Binder found."""
+    try:
+        with undoable(session, response):
+            if body.action == "add":
+                household.add(session, body.name)
+            elif body.action == "remove":
+                household.remove(session, body.name)
+            else:
+                household.rename(session, body.name, body.new_name)
+            # The sender of letters follows the household while Binder fills it.
+            profile.learn(session)
+    except household.UnknownMember as e:
+        session.rollback()
+        raise HTTPException(404, T("unknown_member")) from e
+    session.commit()
+    return household.members(session)
+
+
 @router.get("/documents/{doc_id}/sources")
 def document_sources(doc_id: int, session: SessionDep) -> list[sources.FieldSource]:
-    doc = session.get(Document, doc_id)
-    if doc is None:
-        raise HTTPException(404, T("doc_not_found"))
+    # Trashed documents too: the Trash page shows where their fields were read.
+    doc = document_or_404(session, doc_id, trashed=True)
     return sources.locate(doc, ingest.load_file(doc))
 
 
@@ -339,10 +365,7 @@ def document_sources(doc_id: int, session: SessionDep) -> list[sources.FieldSour
 
 
 def _letter(session: Session, letter_id: int) -> Correspondence:
-    row = session.get(Correspondence, letter_id)
-    if row is None:
-        raise HTTPException(404, T("letter_not_found"))
-    return row
+    return get_or_404(session, Correspondence, letter_id, T("letter_not_found"))
 
 
 @router.post("/letters")
@@ -351,13 +374,13 @@ def write_letter(body: LetterRequest, session: SessionDep, response: Response) -
         raise HTTPException(400, T("unknown_letter"))
     if body.kind is None and not body.purpose.strip():
         raise HTTPException(400, T("letter_needs_purpose"))
-    doc = _doc(session, body.document_id) if body.document_id is not None else None
+    doc = document_or_404(session, body.document_id) if body.document_id is not None else None
     with undoable(session, response):
         if body.kind is not None and body.details:
-            profile = letters.profile_for(session)
-            address = letters.recipient_address(doc, profile)
+            sender = letters.profile_for(session)
+            address = letters.recipient_address(doc, sender)
             letter = letters.save(
-                session, letters.write(body.kind, doc, profile, body.details, address)
+                session, letters.write(body.kind, doc, sender, body.details, address)
             )
         else:
             letter = letters.compose(session, body.purpose, doc, kind=body.kind)
@@ -393,13 +416,11 @@ def edit_letter(
 
 @router.get("/letters/{letter_id}/pdf")
 def letter_pdf(letter_id: int, session: SessionDep) -> Response:
-    from binder.api.routes import _disposition
-
     row = _letter(session, letter_id)
     return Response(
         letters.pdf(row),
         media_type="application/pdf",
-        headers={"Content-Disposition": _disposition("attachment", letters.file_name(row))},
+        headers={"Content-Disposition": disposition("attachment", letters.file_name(row))},
     )
 
 
@@ -472,16 +493,14 @@ def folder_zip(session: Session, status: folders.FolderStatus) -> StreamingRespo
         for n, piece in enumerate(status.pieces, 1):
             if piece.status == "outdated":
                 continue
+            label = re.sub(r'[\\/:*?"<>|]+', " ", piece.label)
             for doc_id in piece.document_ids:
                 doc = session.get(Document, doc_id)
                 if doc is None:
                     continue
-                label = re.sub(r'[\\/:*?"<>|]+', " ", piece.label)
                 path = f"{n:02d} {label}/{organize.standard_name(doc)}"
                 archive.writestr(path, ingest.load_file(doc))
         archive.writestr(T("readme_name"), folders.readme(status))
-    from binder.services import activity
-
     activity.log(session, "export", folders.exported_msg(status), actor="user")
     session.commit()
     buffer.seek(0)
@@ -489,7 +508,7 @@ def folder_zip(session: Session, status: folders.FolderStatus) -> StreamingRespo
     return StreamingResponse(
         buffer,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        headers={"Content-Disposition": disposition("attachment", name)},
     )
 
 
@@ -536,8 +555,10 @@ def backup_new_code(session: SessionDep) -> backup.BackupInfo:
     return backup.info(session)
 
 
+# Not async: the copy, the decryption and the database swap block, so they run in FastAPI's
+# thread pool rather than on the event loop.
 @router.post("/backup/restore", status_code=204)
-async def backup_restore(file: UploadFile, code: Annotated[str, Form(max_length=64)]) -> None:
+def backup_restore(file: UploadFile, code: Annotated[str, Form(max_length=64)]) -> None:
     with Session(get_engine()) as session:
         count = session.exec(select(func.count()).select_from(Document)).one()
     if count:
@@ -545,8 +566,7 @@ async def backup_restore(file: UploadFile, code: Annotated[str, Form(max_length=
     with tempfile.TemporaryDirectory() as tmp:
         archive = Path(tmp) / "backup.zip"
         with archive.open("wb") as f:
-            while chunk := await file.read(1 << 20):
-                f.write(chunk)
+            shutil.copyfileobj(file.file, f, 1 << 20)
         reset_engine()
         try:
             backup.restore(archive, code)

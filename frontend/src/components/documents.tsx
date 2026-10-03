@@ -3,27 +3,15 @@ import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { ArchiveIcon, ArrowUUpLeftIcon, PushPinIcon, SealCheckIcon, CaretRightIcon, DownloadSimpleIcon, ArrowSquareOutIcon, TrayArrowDownIcon, HourglassIcon, CircleNotchIcon, ArrowsClockwiseIcon, TrashIcon } from "@phosphor-icons/react"
 import { CategoryIcon } from "@/components/CategoryIcon"
-import {
-  RowCheckbox, SelectionBar, SelectionMenu, selectableRow, selectedRowClass, useSelection, useSelectionKeys,
-  type SelectionAction,
-} from "@/components/selection"
+import { RowCheckbox, SelectionBar, SelectionMenu, type SelectionAction } from "@/components/selection"
+import { selectableRow, selectedRowClass, useSelection, useSelectionKeys } from "@/hooks/useSelection"
 import { useBulkDocuments } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { area as messages } from "@/i18n/messages/area"
 import { selection as selectionMessages } from "@/i18n/messages/selection"
 import { CATEGORIES, selectionExportUrl, type BulkPatch, type Doc } from "@/lib/api"
-import { categoryLabel, docTypeLabel, formatAmount, formatDate } from "@/lib/format"
+import { categoryLabel, formatAmount, formatDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
-
-const fold = (text: string) => text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")
-
-/** Whether a document matches every word typed, accents and case aside. */
-export function matches(d: Doc, filter: string): boolean {
-  const words = fold(filter).split(/\s+/).filter(Boolean)
-  if (!words.length) return true
-  const hay = fold(`${d.title} ${d.issuer ?? ""} ${d.reference ?? ""} ${docTypeLabel(d.doc_type)} ${d.person ?? ""}`)
-  return words.every((w) => hay.includes(w))
-}
 
 /** Documents by year, most recent first, as rows inside a card. Several can be selected (tick
  * boxes, Ctrl/Shift+click, right click) and handled together. */
@@ -120,13 +108,14 @@ function useDocumentActions(docs: Doc[], ids: number[], clear: () => void): Sele
   const update = (patch: BulkPatch) => bulk.update.mutate({ ids, patch }, { onError: fail })
   const kept = chosen.every((d) => d.keep_forever)
   const archived = chosen.every((d) => d.archived_at !== null)
-  const actions: (SelectionAction | false)[] = [
-    chosen.length === 1 && {
+  const only = chosen.length === 1 ? chosen[0] : undefined
+  const actions: (SelectionAction | false | undefined)[] = [
+    only && {
       key: "open",
       label: t("open"),
       icon: ArrowSquareOutIcon,
       menuOnly: true,
-      onSelect: () => navigate(`/documents/${chosen[0].id}`),
+      onSelect: () => navigate(`/documents/${only.id}`),
     },
     {
       key: "category",
@@ -184,5 +173,5 @@ function useDocumentActions(docs: Doc[], ids: number[], clear: () => void): Sele
       onSelect: () => bulk.trash.mutate(ids, { onSuccess: clear, onError: fail }),
     },
   ]
-  return actions.filter((a): a is SelectionAction => a !== false)
+  return actions.filter((a): a is SelectionAction => !!a)
 }

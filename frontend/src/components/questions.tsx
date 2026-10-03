@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { ArrowSquareOutIcon, CheckCircleIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentPage } from "@/components/DocumentPage"
-import { useDocument, useInvalidateAll } from "@/hooks/queries"
+import { useDocument, useInvalidateAll, useQuestions } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { questions as messages } from "@/i18n/messages/questions"
 import { api, type FeedAction, type FeedItem } from "@/lib/api"
@@ -34,17 +34,15 @@ function QuestionsSession({ initial, onClose }: { initial: QuestionsRequest; onC
   const t = useT(messages)
   const [request, setRequest] = useState(initial)
   const ids = request.documentIds
-  const list = useQuery({
-    queryKey: ["questions", ids ?? "all"],
-    queryFn: () => api.questions(ids),
-  })
+  const list = useQuestions(ids)
   // Answered or put off during this session: the next one comes up without waiting.
   const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set())
-  const total = useRef<number | null>(null)
-  if (list.data && total.current === null) total.current = list.data.length
+  // How many there were when the session began, for "3 of 7".
+  const [total, setTotal] = useState<number | null>(null)
+  if (list.data && total === null) setTotal(list.data.length)
   const remaining = (list.data ?? []).filter((q) => !settled.has(q.key))
   const current = remaining[0]
-  const done = total.current !== null ? total.current - remaining.length : 0
+  const done = total !== null ? total - remaining.length : 0
 
   const next = (key: string) => setSettled((s) => new Set([...s, key]))
 
@@ -71,10 +69,10 @@ function QuestionsSession({ initial, onClose }: { initial: QuestionsRequest; onC
     <QuestionScreen
       key={current.key}
       item={current}
-      position={{ current: done + 1, total: Math.max(total.current ?? 0, done + 1) }}
+      position={{ current: done + 1, total: Math.max(total ?? 0, done + 1) }}
       onSettled={() => next(current.key)}
       onDetail={(documentIds) => {
-        total.current = null
+        setTotal(null)
         setSettled(new Set())
         setRequest({ documentIds })
       }}
@@ -135,6 +133,7 @@ function QuestionScreen({
           <div className="flex gap-1.5 overflow-x-auto border-t px-3 py-2">
             {item.document_ids.map((id, i) => (
               <button
+                type="button"
                 key={id}
                 onClick={() => setShown(i)}
                 aria-pressed={i === shown}
