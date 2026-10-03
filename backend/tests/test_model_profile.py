@@ -69,13 +69,14 @@ def test_answers_are_greedy_reasoning_is_sampled_as_qwen_advises() -> None:
     assert {o["num_ctx"] for o in (exact, thinking)} == {llm.context_window()}
 
 
-def test_a_large_model_sees_every_tool_the_asked_ones_first() -> None:
+def test_a_large_model_sees_every_tool_always_in_the_same_order() -> None:
     message = "On déménage le 15 novembre"
     assert len(loop.select_tools(message, vision=True)) <= tools.MAX_TOOLS
     llm.select(LARGE)
     names = loop.select_tools(message, vision=True)
     assert set(names) == set(tools.NAMES) and len(names) == len(set(names))
-    assert names.index("start_journey") < names.index("trash_document")
+    # The same for any request: the schemas stay in Ollama's prompt cache.
+    assert names == loop.select_tools("Bonjour", vision=True)
 
 
 def test_reasoning_needs_a_large_model_on_a_graphics_card(
@@ -91,22 +92,50 @@ def test_reasoning_needs_a_large_model_on_a_graphics_card(
     assert llm.think_hard()
 
 
-def test_warming_loads_the_model_with_the_requests_window() -> None:
+def test_warming_reads_the_agent_prompt_start_with_the_requests_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sent: list[dict[str, Any]] = []
     _record(sent)
     llm.select(LARGE)
+    monkeypatch.setattr(llm, "has_vision", lambda: False)
+    llm._warming.acquire()
     llm._load(LARGE)
-    assert sent == [
-        {
-            "model": LARGE,
-            "messages": [],
-            "keep_alive": get_settings().llm_keep_alive,
-            "options": {"num_ctx": llm.LARGE.context},
-        }
-    ]
+    assert not llm.warming()
+    (payload,) = sent
+    system, schemas = loop.warm_prefix()
+    assert payload["messages"] == system and payload["tools"] == schemas
+    assert payload["options"]["num_ctx"] == llm.LARGE.context
+    assert payload["options"]["num_predict"] == 1 and payload["keep_alive"] == "30m"
     # Ollama failing: nothing raised, the first question loads the model instead.
     llm.transport = httpx.MockTransport(lambda r: httpx.Response(500))
+    llm._warming.acquire()
     llm._load(LARGE)
+    assert not llm.warming()
+
+
+def test_binder_s_own_ollama_keeps_the_model_for_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert llm.keep_alive() == "30m"
+    llm.set_owned(True)
+    try:
+        assert llm.keep_alive() == -1
+        monkeypatch.setattr(get_settings(), "llm_keep_alive", "10m")
+        assert llm.keep_alive() == "10m"
+    finally:
+        llm.set_owned(False)
+
+
+def test_loaded_follows_ollama_s_running_models() -> None:
+    running: list[dict[str, Any]] = []
+    llm.transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"models": running}))
+    llm.select(LARGE)
+    assert llm.loaded() is False
+    running.append({"name": LARGE})
+    assert llm.loaded() is True
+    llm.transport = httpx.MockTransport(lambda r: httpx.Response(500))
+    assert llm.loaded() is None
 
 
 def _filed(session: Session, n: int, issuer: str, title: str, **fields: Any) -> Document:
@@ -170,3 +199,12 @@ def test_the_example_reaches_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = sent[0]["messages"][0]["content"]
     assert prompt.startswith("A previous document from the same sender")
     assert '"title":"Facture EDF août"' in prompt
+
+
+@pytest.mark.parametrize("content", ["[1, 2]", '"facture"', "not json"])
+def test_an_extraction_that_is_not_an_object_falls_back_on_the_rules(content: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": content}})
+
+    llm.transport = httpx.MockTransport(handler)
+    assert llm.extract("Facture EDF") is None

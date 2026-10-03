@@ -1,23 +1,21 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
-import { useMutation, useQueries } from "@tanstack/react-query"
-import { toast } from "sonner"
-import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon, FileTextIcon, HourglassIcon, TrayIcon, LightbulbIcon, ListChecksIcon, EnvelopeIcon, NewspaperIcon, UsersIcon, CircleNotchIcon, EyeIcon, ArrowSquareOutIcon, type Icon } from "@phosphor-icons/react"
+import { Link } from "react-router-dom"
+import { useQueries } from "@tanstack/react-query"
+import { WarningIcon, ClockCountdownIcon, QuestionIcon, FileMagnifyingGlassIcon, FileTextIcon, HourglassIcon, TrayIcon, LightbulbIcon, ListChecksIcon, EnvelopeIcon, NewspaperIcon, UsersIcon, CircleNotchIcon, EyeIcon, ArrowSquareOutIcon, HandCoinsIcon, type Icon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { DocumentPage } from "@/components/DocumentPage"
-import { useAgent } from "@/components/agent"
-import { usePanels } from "@/components/panels"
-import { useUpload } from "@/components/upload"
-import { keys, useInvalidateAll } from "@/hooks/queries"
+import { usePanels } from "@/components/panels/context"
+import { queries } from "@/hooks/queries"
+import { useRunAction } from "@/hooks/useRunAction"
 import { useT } from "@/i18n"
 import { feed } from "@/i18n/messages/feed"
 import { viewer } from "@/i18n/messages/viewer"
-import { api, type FeedAction, type FeedItem } from "@/lib/api"
+import type { FeedAction, FeedItem } from "@/lib/api"
 import { AreaIcon } from "@/lib/areas"
-import { formatAmount } from "@/lib/format"
+import { formatAmount, formatDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 // Icon of a card without area or category.
@@ -35,6 +33,7 @@ const KIND_ICON: Record<FeedItem["kind"], Icon> = {
   journey: ListChecksIcon,
   waiting: HourglassIcon,
   questions: QuestionIcon,
+  right: HandCoinsIcon,
 }
 
 const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
@@ -47,62 +46,6 @@ const TONE_STYLE: Record<FeedItem["tone"], { dot: string; label: string }> = {
 const QUIET = ["dismiss", "mark_seen"]
 
 const actionRank = (action: FeedAction) => (action.primary ? 0 : QUIET.includes(action.type) ? 2 : 1)
-
-// Identifies one action among a card's actions, to spot which button is running.
-const actionKey = (action: FeedAction) => `${action.type}:${JSON.stringify(action.params)}`
-
-/** Runs a card's action: on the server (with undo), or in the interface (open, ask, add…). */
-export function useRunAction() {
-  const navigate = useNavigate()
-  const agent = useAgent()
-  const upload = useUpload()
-  const panels = usePanels()
-  const invalidate = useInvalidateAll()
-  const [runningKey, setRunningKey] = useState<string | null>(null)
-  const server = useMutation({
-    mutationFn: api.act,
-    onSuccess: (result) => {
-      invalidate()
-      if (result.letter) panels.showLetter(result.letter)
-    },
-    onError: (e) => toast.error(e.message),
-    onSettled: () => setRunningKey(null),
-  })
-  const run = (action: FeedAction) => {
-    const p = action.params
-    switch (action.type) {
-      case "open":
-        navigate(String(p.url))
-        return
-      case "agent":
-        agent.open(String(p.prompt))
-        return
-      case "upload":
-        upload.open()
-        return
-      case "report":
-        panels.showReport(String(p.batch))
-        return
-      case "journey":
-        panels.showJourney(Number(p.journey_id))
-        return
-      case "ask":
-        panels.showQuestions((p.document_ids as number[] | undefined) ?? [])
-        return
-      case "triage":
-        panels.showQuestions()
-        return
-      case "pdf":
-        window.location.assign(String(p.url))
-        return
-      default:
-        setRunningKey(actionKey(action))
-        server.mutate({ type: action.type, params: p })
-    }
-  }
-  const isRunning = (action: FeedAction) => server.isPending && runningKey === actionKey(action)
-  return { run, pending: server.isPending, isRunning }
-}
 
 export function FeedCard({ item }: { item: FeedItem }) {
   const t = useT(feed)
@@ -136,7 +79,13 @@ export function FeedCard({ item }: { item: FeedItem }) {
         disabled={pending}
         onClick={() => run(action)}
       >
-        {running ? <CircleNotchIcon className="animate-spin" /> : action.type === "open" && <FileTextIcon />}
+        {running ? (
+          <CircleNotchIcon className="animate-spin" />
+        ) : action.type === "open" ? (
+          <FileTextIcon />
+        ) : (
+          action.type === "link" && <ArrowSquareOutIcon />
+        )}
         {running ? t("working") : action.label}
       </Button>
     )
@@ -211,7 +160,7 @@ export function FeedCard({ item }: { item: FeedItem }) {
 function DocumentsPreview({ title, ids, onNavigate }: { title: string; ids: number[]; onNavigate: () => void }) {
   const tv = useT(viewer)
   const [shown, setShown] = useState(0)
-  const docs = useQueries({ queries: ids.map((id) => ({ queryKey: keys.document(id), queryFn: () => api.document(id) })) })
+  const docs = useQueries({ queries: ids.map((id) => queries.document(id)) })
   const doc = docs[shown]?.data
   return (
     <>
@@ -228,9 +177,13 @@ function DocumentsPreview({ title, ids, onNavigate }: { title: string; ids: numb
               variant={i === shown ? "secondary" : "ghost"}
               aria-pressed={i === shown}
               onClick={() => setShown(i)}
-              className="max-w-56"
+              className="max-w-72"
             >
               <span className="truncate">{docs[i]?.data?.title ?? "…"}</span>
+              {/* Two bills of the same sender share a title: the date tells them apart. */}
+              {docs[i]?.data?.issue_date && (
+                <span className="shrink-0 text-muted-foreground">{formatDate(docs[i].data.issue_date)}</span>
+              )}
             </Button>
           ))}
         </div>

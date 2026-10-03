@@ -28,14 +28,12 @@ class Sample:
     expected: dict[str, Any]
 
     def pdf(self) -> bytes:
-        doc = pymupdf.open()
-        page = doc.new_page(width=595, height=842)
-        page.insert_htmlbox(pymupdf.Rect(48, 48, 547, 794), self.html, css=CSS)
-        # Fixed metadata and no random identifier: same content, same bytes.
-        doc.set_metadata({})
-        data = doc.tobytes(no_new_id=True)
-        doc.close()
-        return bytes(data)
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=595, height=842)
+            page.insert_htmlbox(pymupdf.Rect(48, 48, 547, 794), self.html, css=CSS)
+            # Fixed metadata and no random identifier: same content, same bytes.
+            doc.set_metadata({})
+            return bytes(doc.tobytes(no_new_id=True))
 
 
 CSS = """

@@ -1,4 +1,5 @@
-"""Entry point: `binder` (server), `binder --desktop` (application) or `binder --seed`."""
+"""Entry point: `binder` (server), `binder --desktop` (application), `binder --seed` or
+`binder --remind` (the reminder the system runs while Binder is closed)."""
 
 import argparse
 
@@ -29,9 +30,16 @@ def main() -> None:
     )
     parser.add_argument("--desktop", action="store_true", help="open in a native window")
     parser.add_argument("--seed", action="store_true", help="import the demo documents")
+    parser.add_argument(
+        "--remind", action="store_true", help="show today's reminder (while Binder is closed)"
+    )
     args = parser.parse_args()
     if args.seed:
         _seed()
+    elif args.remind:
+        from binder.services import reminders
+
+        reminders.remind()
     elif args.desktop:
         from binder import desktop
 

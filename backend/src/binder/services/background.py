@@ -9,7 +9,6 @@ from collections.abc import Callable
 
 from sqlmodel import Session
 
-from binder import i18n
 from binder.config import get_settings
 from binder.db import get_engine
 from binder.services import backup, briefing, feed, importers, ingest, notify, reports
@@ -56,8 +55,6 @@ class Scheduler:
             if get_settings().auto_import
             else None
         )
-        # Language of the user at start (the thread renders notifications and briefings).
-        self._language = i18n.current_language()
 
     def start(self) -> None:
         self._thread.start()

@@ -1,7 +1,10 @@
 import re
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
+from binder.db import get_engine
+from binder.models import Deadline
 from binder.samples import Sample
 from tests.conftest import upload
 
@@ -124,3 +127,26 @@ def test_unknown_letter_kind(client: TestClient) -> None:
         "formal_notice",
         "address_change",
     }
+
+
+def test_answer_closes_follow_up_written_in_another_language(client: TestClient) -> None:
+    set_locale(client, "en", "GB")
+    letter = client.post("/api/letters", json={"kind": "complaint", "purpose": "x"}).json()
+    assert client.post(f"/api/letters/{letter['id']}/sent").status_code == 200
+    with Session(get_engine()) as session:
+        deadline = session.exec(select(Deadline).where(Deadline.source == "followup")).one()
+        assert deadline.title.startswith("Follow up")
+    set_locale(client, "fr", "FR")
+    assert client.post(f"/api/letters/{letter['id']}/answered").status_code == 200
+    with Session(get_engine()) as session:
+        assert session.exec(select(Deadline).where(Deadline.source == "followup")).one().done
+
+
+def test_feed_actions_reject_malformed_ids(client: TestClient) -> None:
+    for kind, params in (
+        ("archive_many", {"ids": ["x"]}),
+        ("letter", {"document_id": "x"}),
+        ("remind", {"due_date": "2026-10-03", "document_id": "x"}),
+    ):
+        r = client.post("/api/actions", json={"type": kind, "params": params})
+        assert r.status_code == 409, (kind, r.text)

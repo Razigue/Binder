@@ -15,12 +15,14 @@ from starlette.responses import Response
 from binder import __version__, guard
 from binder.agent import loop
 from binder.api import assistant
+from binder.api import conversations as conversations_api
 from binder.api import journeys as journeys_api
+from binder.api import reminders as reminders_api
 from binder.api import scan as scan_api
 from binder.api.routes import router
 from binder.config import get_settings
 from binder.db import get_engine
-from binder.services import areas, background, llm_models, scan, setup
+from binder.services import areas, background, instance, llm_models, reminders, scan, setup
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -36,10 +38,13 @@ class HashedAssets(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Binder is open: the system's reminder run stays silent (it notifies on its own).
+    instance.hold()
     with Session(get_engine()) as session:
         llm_models.restore(session)
         areas.backfill(session)
         loop.check_context(session)
+        reminders.sync(session)
     setup.start()
     scheduler = background.Scheduler() if background.enabled() else None
     if scheduler:
@@ -49,6 +54,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if scheduler:
         scheduler.stop()
     setup.shutdown()
+    instance.release()
 
 
 def create_app() -> FastAPI:
@@ -59,6 +65,8 @@ def create_app() -> FastAPI:
     app.include_router(router)
     app.include_router(assistant.router)
     app.include_router(journeys_api.router)
+    app.include_router(conversations_api.router)
+    app.include_router(reminders_api.router)
     app.include_router(scan_api.router)
 
     if (STATIC_DIR / "index.html").exists():

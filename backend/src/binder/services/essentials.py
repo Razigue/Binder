@@ -15,7 +15,8 @@ from sqlmodel import Session, col, select
 from binder import i18n
 from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, DocType, Document
-from binder.services import areas
+from binder.services import areas, portals
+from binder.services.portals import Portal
 from binder.services.profile import Profile
 
 T = i18n.catalog(
@@ -198,6 +199,16 @@ PAPERS: list[Paper] = [
 ]  # fmt: skip
 
 
+# Papers downloadable from a public online account (services/portals.py), to fetch a missing one.
+WHERE: dict[str, str] = {
+    "tax_notice": "impots",
+    "property_tax": "impots",
+    "health": "ameli",
+    "benefits": "france_travail",
+    "pension": "retraite",
+}
+
+
 class PaperOut(BaseModel):
     key: str
     area: str
@@ -207,6 +218,8 @@ class PaperOut(BaseModel):
     present: bool
     # The most recent matching document, to open it.
     document_id: int | None = None
+    # Where to download it when it is missing.
+    portal: Portal | None = None
 
 
 def _applies(paper: Paper, me: Profile) -> bool:
@@ -246,6 +259,9 @@ def papers(session: Session, me: Profile) -> list[PaperOut]:
                 keep=_keep(paper),
                 present=found is not None,
                 document_id=found.id if found else None,
+                portal=portals.public(WHERE[paper.key])
+                if not found and paper.key in WHERE
+                else None,
             )
         )
     return sorted(out, key=lambda p: p.present)

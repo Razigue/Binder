@@ -16,7 +16,16 @@ from binder import i18n
 from binder.db import WITHOUT_TEXT
 from binder.models import Activity, Deadline, Document, DocumentStatus
 from binder.schemas import DocumentOut
-from binder.services import activity, areas, questions, settings_store, undo
+from binder.services import (
+    activity,
+    archive,
+    areas,
+    deadlines,
+    questions,
+    retention,
+    settings_store,
+    undo,
+)
 
 T = i18n.catalog(
     "reports",
@@ -110,8 +119,6 @@ def _facts(doc: Document) -> list[str]:
     """Details under the brief line: what it does not say already (the payment and the renewal
     are in it)."""
     if doc.archived_at is not None:
-        from binder.services import archive
-
         return [T("archived", reason=archive.reason_msg(doc.archive_reason))]
     facts = []
     area = doc.area or areas.area_of(doc)
@@ -121,8 +128,6 @@ def _facts(doc: Document) -> list[str]:
     if not due and doc.amount is not None:
         facts.append(T("amount", amount=doc.amount))
     if doc.expiry_date and doc.superseded_by is None and doc.expiry_date >= date.today():
-        from binder.services import deadlines
-
         renew = deadlines.renew_from(doc)
         if renew and renew > date.today():
             facts.append(T("valid_until", date=doc.expiry_date))
@@ -134,8 +139,6 @@ def _facts(doc: Document) -> list[str]:
 def brief(doc: Document, today: date | None = None) -> str:
     """One line on a document just added: "Tax notice · $1,240 to pay by 7 Oct · kept: 3 years
     after the tax year"."""
-    from binder.services import deadlines, retention
-
     if doc.status in (DocumentStatus.PROCESSING, DocumentStatus.WAITING):
         return ""
     today = today or date.today()

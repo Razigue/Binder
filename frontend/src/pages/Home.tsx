@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AboutYou, answered, EssentialsList } from "@/components/essentials"
+import { AboutYou, EssentialsList } from "@/components/essentials"
+import { answered } from "@/lib/essentials"
 import { FeedCard } from "@/components/feed"
 import { UpgradeOffer } from "@/components/upgrade"
-import { PageHeader } from "@/components/layout/AppLayout"
-import { usePanels } from "@/components/panels"
-import { useUpload } from "@/components/upload"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { usePanels } from "@/components/panels/context"
+import { useUpload } from "@/components/upload/context"
 import { useFeed, useInvalidateAll, useProfile } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { essentials as essentialsMessages } from "@/i18n/messages/essentials"
@@ -61,7 +62,7 @@ export function HomePage() {
           <div className="space-y-3">
             {/* Cards rise in one after the other; a card that arrives later rises on its own. */}
             {needs.map((item, i) => (
-              <Card key={item.key} className="animate-rise gap-0 p-0" style={{ "--i": i } as React.CSSProperties}>
+              <Card key={item.key} className="animate-rise gap-0 p-0" style={{ "--i": i }}>
                 <ul>
                   <FeedCard item={item} />
                 </ul>
@@ -74,7 +75,7 @@ export function HomePage() {
               <h2 id="todo-notes" className="mb-3 font-semibold">
                 {t("notes")}
               </h2>
-              <Card className="animate-rise gap-0 p-0" style={{ "--i": needs.length } as React.CSSProperties}>
+              <Card className="animate-rise gap-0 p-0" style={{ "--i": needs.length }}>
                 <ul className="divide-y">
                   {notes.map((item) => (
                     <FeedCard key={item.key} item={item} />
@@ -248,7 +249,7 @@ function RestoreDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   const [file, setFile] = useState<File | null>(null)
   const [code, setCode] = useState("")
   const restore = useMutation({
-    mutationFn: () => api.restoreBackup(file!, code),
+    mutationFn: (backup: File) => api.restoreBackup(backup, code),
     onSuccess: () => {
       onOpenChange(false)
       invalidate()
@@ -283,7 +284,7 @@ function RestoreDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             spellCheck={false}
           />
         </div>
-        <Button onClick={() => restore.mutate()} disabled={!file || code.replace(/[^A-Z0-9]/g, "").length < 24 || restore.isPending}>
+        <Button onClick={() => file && restore.mutate(file)} disabled={!file || code.replace(/[^A-Z0-9]/g, "").length < 24 || restore.isPending}>
           {restore.isPending ? t("restoring") : t("restoreAction")}
         </Button>
       </DialogContent>

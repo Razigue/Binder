@@ -15,9 +15,9 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, func, select
 
 from binder import i18n
-from binder.db import in_use
+from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Correspondence, Deadline, Document
-from binder.services import llm, settings_store
+from binder.services import anomalies, deadlines, llm, missing, questions, settings_store
 
 log = logging.getLogger(__name__)
 
@@ -112,8 +112,6 @@ class _Stored(BaseModel):
 
 
 def figures(session: Session, today: date) -> dict[str, Any]:
-    from binder.services import anomalies, deadlines, missing, questions
-
     week_end = today + timedelta(days=6 - today.weekday())
     open_rows = session.exec(
         select(Deadline)
@@ -123,7 +121,9 @@ def figures(session: Session, today: date) -> dict[str, Any]:
     this_week = [d for d in open_rows if d.due_date >= today]
     late = [d for d in open_rows if d.due_date < today]
     expiring = session.exec(
-        select(Document).where(
+        select(Document)
+        .options(*WITHOUT_TEXT)
+        .where(
             in_use(),
             col(Document.expiry_date).is_not(None),
             col(Document.superseded_by).is_(None),

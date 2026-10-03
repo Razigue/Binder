@@ -7,6 +7,7 @@ papers, compare an insurance before it renews). Every action runs through `act`,
 routes wrap in an undo capture.
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
@@ -15,7 +16,15 @@ from sqlmodel import Session, col, select
 
 from binder import i18n
 from binder.db import WITHOUT_TEXT, in_use
-from binder.models import Category, Correspondence, Deadline, DocType, Document, DocumentStatus
+from binder.models import (
+    Category,
+    Correspondence,
+    Deadline,
+    DocType,
+    Document,
+    DocumentStatus,
+    Journey,
+)
 from binder.services import (
     activity,
     anomalies,
@@ -31,9 +40,11 @@ from binder.services import (
     missing,
     questions,
     reports,
+    rights,
     settings_store,
     undo,
 )
+from binder.services.rules import normalize
 
 T = i18n.catalog(
     "feed",
@@ -97,6 +108,8 @@ T = i18n.catalog(
         "write_letter": {"en": "Write the letter", "fr": "Écrire le courrier"},
         "all_good": {"en": "All good", "fr": "Tout va bien"},
         "add_it": {"en": "Add it", "fr": "L'ajouter"},
+        "fetch_on": {"en": "Get it on {site}", "fr": "Le récupérer sur {site}"},
+        "explain": {"en": "Explain", "fr": "M'expliquer"},
         "ask_for_it": {"en": "Ask for it", "fr": "Le demander"},
         "not_needed": {"en": "Not needed", "fr": "Pas besoin"},
         "sort_title_one": {
@@ -164,6 +177,7 @@ T = i18n.catalog(
             "en": "{names}. Each document is linked to the person it concerns.",
             "fr": "{names}. Chaque document est rattaché à la personne qu'il concerne.",
         },
+        "household_fix": {"en": "Correct", "fr": "Corriger"},
         "act_paid": {"en": "“{title}” marked as paid", "fr": "« {title} » marqué comme payé"},
         "act_answered": {"en": "Answer saved", "fr": "Réponse enregistrée"},
         "act_archived_one": {"en": "{n} document archived", "fr": "{n} document archivé"},
@@ -234,11 +248,6 @@ SOON = 7
 RENEWAL_WINDOW = 45
 DRAFT_WINDOW = 14
 TONE_RANK = {"urgent": 0, "soon": 1, "info": 2}
-# Actions run by the server; the others are handled by the interface (open, agent, upload…).
-SERVER_ACTIONS = {
-    "answer", "mark_paid", "archive_many", "letter", "letter_sent", "letter_answered",
-    "follow_up", "dismiss", "confirm_recovery", "remind", "mark_seen", "journey_step",
-}  # fmt: skip
 
 
 class Action(BaseModel):
@@ -380,10 +389,14 @@ def _questions(session: Session) -> list[FeedItem]:
     return items
 
 
+def _overdue(days: int) -> str:
+    return T("overdue_one") if days == 1 else T("overdue", days=days)
+
+
 def _when_label(d: Deadline, today: date) -> str:
     days = (d.due_date - today).days
     if days < 0:
-        return T("overdue_one") if days == -1 else T("overdue", days=-days)
+        return _overdue(-days)
     if d.source == "manual":
         return T("reminder_on", date=d.due_date)
     return T("due_today") if days == 0 else T("due_in", date=d.due_date)
@@ -396,10 +409,17 @@ def _deadlines(session: Session, today: date) -> list[FeedItem]:
         .where(col(Deadline.source).in_(["extracted", "manual"]))
         .order_by(col(Deadline.due_date))
     ).all()
+    linked = {d.document_id for d in rows if d.document_id is not None}
+    docs = {
+        doc.id: doc
+        for doc in session.exec(
+            select(Document).options(*WITHOUT_TEXT).where(col(Document.id).in_(linked))
+        )
+    }
     items = []
     for d in rows:
         assert d.id is not None
-        doc = session.get(Document, d.document_id) if d.document_id else None
+        doc = docs.get(d.document_id) if d.document_id else None
         actions = [
             Action(
                 type="mark_paid",
@@ -481,7 +501,16 @@ def _expirations(session: Session, today: date) -> list[FeedItem]:
 def _anomalies(session: Session) -> list[FeedItem]:
     items = []
     for a in anomalies.detect(session):
-        doc = session.get(Document, a.document_ids[-1]) if a.document_ids else None
+        # The paper the card is about: the latest one, or for a payment made twice the bill
+        # (first), whose sender the letter goes to, rather than the bank statement.
+        lead = (
+            None
+            if not a.document_ids
+            else a.document_ids[0]
+            if a.kind == "double_payment"
+            else a.document_ids[-1]
+        )
+        doc = session.get(Document, lead) if lead else None
         actions = []
         if a.letter:
             actions.append(
@@ -489,11 +518,11 @@ def _anomalies(session: Session) -> list[FeedItem]:
                     type="letter",
                     label=T("write_letter"),
                     primary=True,
-                    params={"purpose": a.letter, "document_id": a.document_ids[-1]},
+                    params={"purpose": a.letter, "document_id": lead},
                 )
             )
-        if a.document_ids:
-            actions.append(_open(a.document_ids[-1]))
+        if lead:
+            actions.append(_open(lead))
         actions.append(_dismiss_action(f"anomaly:{a.key}", T("all_good")))
         items.append(
             FeedItem(
@@ -512,23 +541,32 @@ def _anomalies(session: Session) -> list[FeedItem]:
     return items
 
 
+def _link(url: str, label: str, primary: bool = True) -> Action:
+    """Opens an official or customer website in the user's browser."""
+    return Action(type="link", label=label, primary=primary, params={"url": url})
+
+
 def _missing(session: Session) -> list[FeedItem]:
     items = []
     for m in missing.detect(session):
-        actions = [Action(type="upload", label=T("add_it"), primary=not m.letter)]
+        # Downloading it from the online account comes first when Binder knows where it is.
+        fetch = m.portal is not None
+        actions = [Action(type="upload", label=T("add_it"), primary=not m.letter and not fetch)]
         if m.letter:
             actions.insert(
                 0,
                 Action(
                     type="letter",
                     label=T("ask_for_it"),
-                    primary=True,
+                    primary=not fetch,
                     params={
                         "purpose": m.letter,
                         "document_id": m.document_ids[-1] if m.document_ids else None,
                     },
                 ),
             )
+        if m.portal is not None:
+            actions.insert(0, _link(m.portal.url, T("fetch_on", site=m.portal.name)))
         actions.append(_dismiss_action(f"missing:{m.key}", T("not_needed")))
         items.append(
             FeedItem(
@@ -541,6 +579,32 @@ def _missing(session: Session) -> list[FeedItem]:
                 when=m.expected,
                 document_ids=m.document_ids,
                 actions=actions,
+                extra={"portal": m.portal.model_dump()} if m.portal else {},
+            )
+        )
+    return items
+
+
+def _rights(session: Session, today: date) -> list[FeedItem]:
+    """Rights to check and duties without a letter (prime d'activité, monthly update…)."""
+    items = []
+    for r in rights.detect(session, today):
+        key = f"right:{r.key}"
+        items.append(
+            FeedItem(
+                key=key,
+                kind="right",
+                tone=r.tone,
+                title=r.title,
+                detail=r.detail,
+                area=r.area,
+                when=r.when,
+                actions=[
+                    _link(r.link.url, r.link_label),
+                    Action(type="agent", label=T("explain"), params={"prompt": r.prompt}),
+                    _dismiss_action(key, r.dismiss_label),
+                ],
+                extra={"portal": r.link.model_dump()},
             )
         )
     return items
@@ -624,6 +688,7 @@ def _letters(session: Session, today: date) -> list[FeedItem]:
         .order_by(col(Correspondence.created_at).desc())
         .limit(30)
     ).all()
+    arrivals = _arrivals(session, [r.sent_on for r in rows if r.sent_on is not None])
     for row in rows:
         assert row.id is not None
         if row.sent_on is None:
@@ -652,7 +717,7 @@ def _letters(session: Session, today: date) -> list[FeedItem]:
                 )
             )
             continue
-        reply = _reply(session, row)
+        reply = _reply(row, arrivals)
         if reply is not None and reply.id is not None:
             key = f"reply:{row.id}:{reply.id}"
             items.append(
@@ -703,27 +768,42 @@ def _letters(session: Session, today: date) -> list[FeedItem]:
     return items
 
 
-def _reply(session: Session, row: Correspondence) -> Document | None:
+def _arrivals(session: Session, sent: list[date]) -> list[Document]:
+    """Documents with a sender added since the oldest letter sent, oldest first: read once for
+    all the letters waiting for an answer."""
+    if not sent:
+        return []
+    return list(
+        session.exec(
+            select(Document)
+            .options(*WITHOUT_TEXT)
+            .where(in_use(), col(Document.issuer).is_not(None))
+            .where(col(Document.created_at) >= datetime.combine(min(sent), time.min, UTC))
+            .order_by(col(Document.created_at))
+        )
+    )
+
+
+def _reply(row: Correspondence, arrivals: list[Document]) -> Document | None:
     """A document from the letter's recipient that arrived after it was sent."""
     if row.sent_on is None:
         return None
-    from binder.services.rules import normalize
-
     who = normalize(row.recipient)
-    docs = session.exec(
-        select(Document)
-        .options(*WITHOUT_TEXT)
-        .where(in_use(), col(Document.issuer).is_not(None))
-        .where(col(Document.created_at) >= datetime.combine(row.sent_on, time.min, UTC))
-        .order_by(col(Document.created_at))
-    ).all()
-    return next((d for d in docs if normalize(d.issuer or "") == who), None)
+    since = datetime.combine(row.sent_on, time.min)
+    return next(
+        (
+            d
+            for d in arrivals
+            if d.created_at.replace(tzinfo=None) >= since and normalize(d.issuer or "") == who
+        ),
+        None,
+    )
 
 
 def _step_when(due: date, today: date) -> str:
     days = (due - today).days
     if days < 0:
-        return T("overdue_one") if days == -1 else T("overdue", days=-days)
+        return _overdue(-days)
     return T("step_today") if days == 0 else T("step_due_in", date=due)
 
 
@@ -792,7 +872,8 @@ def _waiting(session: Session) -> list[FeedItem]:
 def _household(session: Session) -> list[FeedItem]:
     members = household.members(session)
     full = [m for m in members if len(m.name.split()) >= 2]
-    if len(full) < 2:
+    # Once the user corrected the household, they have seen it: no card each time it changes.
+    if len(full) < 2 or household.load_edits(session) != household.Edits():
         return []
     names = T("list_separator").join(m.name for m in full[:4])
     key = f"household:{'|'.join(sorted(m.name for m in full))}"
@@ -803,7 +884,14 @@ def _household(session: Session) -> list[FeedItem]:
             tone="info",
             title=T("household_title"),
             detail=T("household_detail", names=names),
-            actions=[_dismiss_action(key)],
+            actions=[
+                Action(
+                    type="open",
+                    label=T("household_fix"),
+                    params={"url": "/settings?tab=you#household"},
+                ),
+                _dismiss_action(key),
+            ],
             extra={"members": [m.model_dump() for m in members]},
         )
     ]
@@ -821,6 +909,7 @@ def build(session: Session, today: date | None = None) -> list[FeedItem]:
         + _anomalies(session)
         + _letters(session, today)
         + _missing(session)
+        + _rights(session, today)
         + _renewals(session, today)
         + _sort_out(session)
         + _household(session)
@@ -841,7 +930,10 @@ class BadAction(ValueError):
     pass
 
 
-def _int(params: dict[str, Any], name: str) -> int:
+type Params = dict[str, Any]
+
+
+def _int(params: Params, name: str) -> int:
     try:
         return int(params[name])
     except (KeyError, TypeError, ValueError) as e:
@@ -855,7 +947,12 @@ def _doc(session: Session, doc_id: int) -> Document:
     return doc
 
 
-def _letter_row(session: Session, params: dict[str, Any]) -> Correspondence:
+def _related(session: Session, params: Params) -> Document | None:
+    """The document an action is about, when it names one."""
+    return _doc(session, _int(params, "document_id")) if params.get("document_id") else None
+
+
+def _letter_row(session: Session, params: Params) -> Correspondence:
     row = session.get(Correspondence, _int(params, "letter_id"))
     if row is None:
         raise BadAction("letter")
@@ -870,100 +967,147 @@ def dismiss(session: Session, key: str) -> None:
         settings_store.save(session, DISMISSED_KEY, current)
 
 
-def act(session: Session, kind: str, params: dict[str, Any], *, actor: str = "user") -> ActResult:
-    """Runs a server action of a feed card. Does not commit."""
-    if kind == "answer":
-        raw = params.get("document_ids") or [params.get("document_id")]
-        try:
-            docs = [_doc(session, int(i)) for i in raw]
-        except (TypeError, ValueError) as e:
-            raise BadAction("document_ids") from e
-        try:
-            questions.answer_all(session, docs, str(params.get("choice", "")))
-        except questions.UnknownChoice as e:
-            raise BadAction("choice") from e
-        if len(docs) > 1:
-            return ActResult(message=T.plural("act_answered_many", len(docs)))
-        return ActResult(message=T("act_answered"))
-    if kind == "mark_paid":
-        deadline = session.get(Deadline, _int(params, "deadline_id"))
-        if deadline is None:
-            raise BadAction("deadline")
-        editing.update_deadline(session, deadline, {"done": True}, actor=actor)
-        return ActResult(message=T("act_paid", title=deadline.title))
-    if kind == "archive_many":
-        count = 0
-        for raw in params.get("ids") or []:
-            old = session.get(Document, int(raw))
-            reason = archive.archivable(old) if old else None
-            if old is not None and reason is not None:
-                count += archive.archive(session, old, reason, actor=actor)
-        return ActResult(message=T.plural("act_archived", count))
-    if kind == "letter":
-        doc_id = params.get("document_id")
-        related = _doc(session, int(doc_id)) if doc_id else None
-        letter_kind = params.get("kind")
-        if letter_kind is not None and letter_kind not in letters.KINDS:
-            raise BadAction("kind")
-        letter = letters.compose(
-            session, str(params.get("purpose") or ""), related, kind=letter_kind, actor=actor
-        )
-        return ActResult(message=T("act_letter"), letter=letter)
-    if kind == "letter_sent":
-        row = _letter_row(session, params)
-        letters.mark_sent(session, row, actor=actor)
-        assert row.follow_up_on is not None
-        return ActResult(message=T("act_sent", date=row.follow_up_on))
-    if kind == "letter_answered":
-        letters.mark_answered(session, _letter_row(session, params), actor=actor)
-        return ActResult(message=T("act_answered"))
-    if kind == "follow_up":
-        letter = letters.follow_up(session, _letter_row(session, params), actor=actor)
-        return ActResult(message=T("act_letter"), letter=letter)
-    if kind == "dismiss":
-        dismiss(session, str(params.get("key") or ""))
-        return ActResult(message=T("act_dismissed"))
-    if kind == "journey_step":
-        from binder.models import Journey
+def _answer(session: Session, params: Params, actor: str) -> ActResult:
+    raw = params.get("document_ids") or [params.get("document_id")]
+    try:
+        docs = [_doc(session, int(i)) for i in raw]
+    except (TypeError, ValueError) as e:
+        raise BadAction("document_ids") from e
+    try:
+        questions.answer_all(session, docs, str(params.get("choice", "")))
+    except questions.UnknownChoice as e:
+        raise BadAction("choice") from e
+    if len(docs) > 1:
+        return ActResult(message=T.plural("act_answered_many", len(docs)))
+    return ActResult(message=T("act_answered"))
 
-        journey = session.get(Journey, _int(params, "journey_id"))
-        if journey is None:
-            raise BadAction("journey")
-        key = str(params.get("step") or "")
-        try:
-            step = journeys.set_step(session, journey, key, True, actor=actor)
-        except journeys.UnknownStep as e:
-            raise BadAction("step") from e
-        return ActResult(message=T("act_step", title=step.title))
-    if kind == "mark_seen":
-        reports.mark_seen(session, str(params.get("batch") or ""))
-        return ActResult(message=T("act_dismissed"))
-    if kind == "confirm_recovery":
-        backup.confirm(session)
-        return ActResult(message=T("act_recovery"))
-    if kind == "remind":
-        try:
-            when = date.fromisoformat(str(params.get("due_date")))
-        except ValueError as e:
-            raise BadAction("due_date") from e
-        doc_id = params.get("document_id")
-        related = _doc(session, int(doc_id)) if doc_id else None
-        reminder = Deadline(
-            title=str(params.get("title") or "")[:200],
-            due_date=when,
-            source="manual",
-            document_id=related.id if related else None,
-            category=related.category if related else Category.OTHER,
-        )
-        session.add(reminder)
-        session.flush()
-        undo.push("deadline_created", id=reminder.id)
-        activity.log(
-            session,
-            "reminder",
-            T.msg("act_reminder", date=when),
-            actor=actor,
-            document_id=reminder.document_id,
-        )
-        return ActResult(message=T("act_reminder", date=when))
-    raise BadAction(kind)
+
+def _mark_paid(session: Session, params: Params, actor: str) -> ActResult:
+    deadline = session.get(Deadline, _int(params, "deadline_id"))
+    if deadline is None:
+        raise BadAction("deadline")
+    editing.update_deadline(session, deadline, {"done": True}, actor=actor)
+    return ActResult(message=T("act_paid", title=deadline.title))
+
+
+def _archive_many(session: Session, params: Params, actor: str) -> ActResult:
+    try:
+        ids = [int(raw) for raw in params.get("ids") or []]
+    except (TypeError, ValueError) as e:
+        raise BadAction("ids") from e
+    count = 0
+    for doc_id in ids:
+        old = session.get(Document, doc_id)
+        reason = archive.archivable(old) if old else None
+        if old is not None and reason is not None:
+            count += archive.archive(session, old, reason, actor=actor)
+    return ActResult(message=T.plural("act_archived", count))
+
+
+def _letter(session: Session, params: Params, actor: str) -> ActResult:
+    related = _related(session, params)
+    letter_kind = params.get("kind")
+    if letter_kind is not None and letter_kind not in letters.KINDS:
+        raise BadAction("kind")
+    letter = letters.compose(
+        session, str(params.get("purpose") or ""), related, kind=letter_kind, actor=actor
+    )
+    return ActResult(message=T("act_letter"), letter=letter)
+
+
+def _letter_sent(session: Session, params: Params, actor: str) -> ActResult:
+    row = _letter_row(session, params)
+    letters.mark_sent(session, row, actor=actor)
+    assert row.follow_up_on is not None
+    return ActResult(message=T("act_sent", date=row.follow_up_on))
+
+
+def _letter_answered(session: Session, params: Params, actor: str) -> ActResult:
+    letters.mark_answered(session, _letter_row(session, params), actor=actor)
+    return ActResult(message=T("act_answered"))
+
+
+def _follow_up(session: Session, params: Params, actor: str) -> ActResult:
+    letter = letters.follow_up(session, _letter_row(session, params), actor=actor)
+    return ActResult(message=T("act_letter"), letter=letter)
+
+
+def _dismiss(session: Session, params: Params, actor: str) -> ActResult:
+    dismiss(session, str(params.get("key") or ""))
+    return ActResult(message=T("act_dismissed"))
+
+
+def _journey_step(session: Session, params: Params, actor: str) -> ActResult:
+    journey = session.get(Journey, _int(params, "journey_id"))
+    if journey is None:
+        raise BadAction("journey")
+    key = str(params.get("step") or "")
+    try:
+        step = journeys.set_step(session, journey, key, True, actor=actor)
+    except journeys.UnknownStep as e:
+        raise BadAction("step") from e
+    return ActResult(message=T("act_step", title=step.title))
+
+
+def _mark_seen(session: Session, params: Params, actor: str) -> ActResult:
+    reports.mark_seen(session, str(params.get("batch") or ""))
+    return ActResult(message=T("act_dismissed"))
+
+
+def _confirm_recovery(session: Session, params: Params, actor: str) -> ActResult:
+    backup.confirm(session)
+    return ActResult(message=T("act_recovery"))
+
+
+def _remind(session: Session, params: Params, actor: str) -> ActResult:
+    try:
+        when = date.fromisoformat(str(params.get("due_date")))
+    except ValueError as e:
+        raise BadAction("due_date") from e
+    related = _related(session, params)
+    reminder = Deadline(
+        title=str(params.get("title") or "")[:200],
+        due_date=when,
+        source="manual",
+        document_id=related.id if related else None,
+        category=related.category if related else Category.OTHER,
+    )
+    session.add(reminder)
+    session.flush()
+    undo.push("deadline_created", id=reminder.id)
+    activity.log(
+        session,
+        "reminder",
+        T.msg("act_reminder", date=when),
+        actor=actor,
+        document_id=reminder.document_id,
+    )
+    return ActResult(message=T("act_reminder", date=when))
+
+
+type Handler = Callable[[Session, Params, str], ActResult]
+
+HANDLERS: dict[str, Handler] = {
+    "answer": _answer,
+    "mark_paid": _mark_paid,
+    "archive_many": _archive_many,
+    "letter": _letter,
+    "letter_sent": _letter_sent,
+    "letter_answered": _letter_answered,
+    "follow_up": _follow_up,
+    "dismiss": _dismiss,
+    "journey_step": _journey_step,
+    "mark_seen": _mark_seen,
+    "confirm_recovery": _confirm_recovery,
+    "remind": _remind,
+}
+# Actions run by the server; the others are handled by the interface (open, agent, upload…).
+SERVER_ACTIONS = frozenset(HANDLERS)
+
+
+def act(session: Session, kind: str, params: Params, *, actor: str = "user") -> ActResult:
+    """Runs a server action of a feed card. Does not commit."""
+    handler = HANDLERS.get(kind)
+    if handler is None:
+        raise BadAction(kind)
+    return handler(session, params, actor)

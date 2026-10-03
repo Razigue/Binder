@@ -19,9 +19,9 @@ def _load_master_secret() -> bytes:
     key_file = settings.data_dir / "key"
     if not key_file.exists():
         fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(secrets.token_urlsafe(48))
-    return key_file.read_text().strip().encode()
+    return key_file.read_text(encoding="utf-8").strip().encode()
 
 
 def master_secret() -> bytes:

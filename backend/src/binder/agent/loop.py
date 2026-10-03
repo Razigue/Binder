@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -20,7 +20,7 @@ from sqlmodel import Session, col, select
 from binder import i18n
 from binder.agent import confirm, tools
 from binder.config import get_settings
-from binder.db import WITHOUT_TEXT
+from binder.db import WITHOUT_TEXT, get_engine
 from binder.models import Category, Deadline, Document
 from binder.schemas import (
     ChatMessage,
@@ -109,6 +109,14 @@ TOOLS_FIRST = (
     "You have not checked anything yet: call the tools first (app_help for a question about "
     "the app), then answer from what they return."
 )
+# A greeting, thanks or a goodbye alone: the answer states no fact, so no tool is asked first
+# (a second model turn, and nothing shown meanwhile, for a "hello").
+SMALL_TALK = re.compile(
+    r"^(?:(?:bonjour|bonsoir|salut|coucou|hello|hi|hey|yo|merci(?: beaucoup| bien)?|thanks?"
+    r"(?: you)?|thx|ok(?:ay)?|d'accord|super|parfait|top|cool|genial|great|perfect|nice|"
+    r"au revoir|bye|a plus|bonne (?:journee|soiree|nuit)|good (?:morning|evening|night)|"
+    r"ca va|comment ca va|how are you|binder)[\s!.,?]*)+$"
+)
 # Asked when the model says it will act but called no tool to do it.
 DO_IT = "You said you would do it, but no tool was called: call the tool now, then confirm."
 # "I'll move it to the trash", "je la mets à la corbeille", "je vais créer un rappel"…
@@ -179,6 +187,8 @@ LOOSE_CITATION = re.compile(
 BRACKETED = re.compile(r"\s*\(\s*((?:\[#\d+\][\s,]*(?:et|and|&)?[\s,]*)+)\)")
 
 Emit = Callable[[dict[str, Any]], None]
+# Ollama counts a few milliseconds of loading on every request: shown from a real (re)load.
+LOAD_SHOWN_NS = 500_000_000
 # Opening of an answer held back before streaming it: long enough to see a promise or a
 # question to the user, which the loop would discard.
 OPENING_CHARS = 120
@@ -479,6 +489,9 @@ class _Collector:
         stats.output_tokens += raw.get("eval_count", 0)
         self._prompt_ns += raw.get("prompt_eval_duration", 0)
         self._eval_ns += raw.get("eval_duration", 0)
+        # Loading the model into memory: told apart, it is not the model's speed.
+        if raw.get("load_duration", 0) >= LOAD_SHOWN_NS:
+            stats.load_seconds = round((stats.load_seconds or 0) + raw["load_duration"] / 1e9, 1)
         if self._eval_ns:
             stats.tokens_per_second = round(stats.output_tokens / self._eval_ns * 1e9, 1)
         if self._prompt_ns:
@@ -776,9 +789,10 @@ def select_tools(message: str, *, vision: bool) -> list[str]:
     if re.search(HELP, norm) and re.search(APP_WORDS, norm):
         wanted.insert(0, "app_help")
     if llm.profile().all_tools:
-        rest = [n for n in tools.NAMES if n not in core and n not in web]
-        asked = [n for n in dict.fromkeys(wanted) if n in rest]
-        return [*core, *asked, *web, *(n for n in rest if n not in asked)]
+        # Always the same order: the tool schemas then stay in Ollama's prompt cache from one
+        # question to the next (thousands of tokens not read again); a large model finds the
+        # tool it needs wherever it is.
+        return [*core, *web, *(n for n in tools.NAMES if n not in core and n not in web)]
     room = tools.MAX_TOOLS - len(core) - len(web)
     asked = list(dict.fromkeys(wanted))[:room]
     others = [n for n in DEFAULT_TOOLS if n not in asked][: room - len(asked)]
@@ -789,6 +803,60 @@ def _states_unchecked_law(collector: _Collector, answer: str) -> bool:
     if not websearch.enabled() or not LAW_CLAIM.search(answer):
         return False
     return not any(c.name in LAW_CHECKED for c in collector.calls)
+
+
+def _nudge(
+    collector: _Collector, answer: str, nudged: set[str], language: i18n.Language
+) -> str | None:
+    """What the model is asked about its answer before it stands, each at most once a turn: do
+    what it promised, do what it handed back to the user, check the law it states online, write
+    in the user's language. None when the answer stands."""
+    if not answer:
+        return None
+    acted = collector.changed
+    checks: list[tuple[str, Callable[[], bool]]] = [
+        (DO_IT, lambda: not acted and bool(PROMISE.search(answer))),
+        (JUST_DO_IT, lambda: not acted and bool(ASKS_USER.search(answer))),
+        (VERIFY_LAW, lambda: _states_unchecked_law(collector, answer)),
+        (
+            WRONG_LANGUAGE.format(language=i18n.language_name(language)),
+            lambda: i18n.guess_language(answer) not in (None, language),
+        ),
+    ]
+    for nudge, applies in checks:
+        if nudge not in nudged and applies():
+            nudged.add(nudge)
+            return nudge
+    return None
+
+
+def _run_calls(
+    session: Session, collector: _Collector, calls: list[dict[str, Any]], seen: set[str]
+) -> list[dict[str, Any]]:
+    """Runs the model's tool calls; the tool messages that carry their results back. `seen`:
+    the calls already made this turn (same tool, same arguments)."""
+    messages: list[dict[str, Any]] = []
+    for call in calls:
+        fn = call.get("function") or {}
+        name = str(fn.get("name") or "")
+        try:
+            args = _arguments(fn.get("arguments"))
+        except ValueError:
+            error = {"error": "Arguments are not valid JSON: call the tool again."}
+            messages.append({"role": "tool", "tool_name": name, "content": llm.dumps(error)})
+            continue
+        key = f"{name}:{json.dumps(args, sort_keys=True)}"
+        result = collector.run(session, name, args)
+        payload = result.payload
+        if key in seen:
+            # The model is looping: it gets the result again with a nudge.
+            payload = {"note": "Same call as before, same result: answer now.", **payload}
+        seen.add(key)
+        message: dict[str, Any] = {"role": "tool", "tool_name": name, "content": llm.dumps(payload)}
+        if result.images:
+            message["images"] = [llm.image(i) for i in result.images]
+        messages.append(message)
+    return messages
 
 
 def _run_llm(
@@ -820,16 +888,24 @@ def _run_llm(
             "turn": True,
         },
     ]
-    # Same call, same arguments: the model is looping, it gets the result again with a nudge.
     seen: set[str] = set()
-    checked = bool(attached) or viewing is not None
-    reminded = pushed = verified = translated = False
+    checked = (
+        bool(attached) or viewing is not None or bool(SMALL_TALK.match(normalize(message.strip())))
+    )
+    if emit and llm.loaded() is False:
+        # The model is loading (first question, or after a long pause): said, rather than
+        # counted as a slow answer.
+        emit({"type": "loading"})
+    # Nudges already sent back this turn (_nudge).
+    nudged: set[str] = set()
     language = i18n.current_language()
     retries = 0
     # The last step is kept for the final answer.
     for _ in range(MAX_STEPS - 1):
         stream = _Stream(
-            emit, hold=not checked, check=not collector.changed and not (reminded and pushed)
+            emit,
+            hold=not checked,
+            check=not collector.changed and not {DO_IT, JUST_DO_IT} <= nudged,
         )
         fit_context(messages, schemas)
         try:
@@ -861,35 +937,10 @@ def _run_llm(
         checked = True
         messages.append({"role": "assistant", "content": content, "tool_calls": calls})
         if not calls:
-            if content and not reminded and not collector.changed and PROMISE.search(content):
-                # Announced an action without doing it: asked once to actually do it.
-                reminded = True
+            nudge = _nudge(collector, content, nudged, language)
+            if nudge is not None:
                 stream.drop()
-                messages.append({"role": "user", "content": DO_IT})
-                continue
-            if content and not pushed and not collector.changed and ASKS_USER.search(content):
-                # Handed the request back: asked once to do it with what it has.
-                pushed = True
-                stream.drop()
-                messages.append({"role": "user", "content": JUST_DO_IT})
-                continue
-            if content and not verified and _states_unchecked_law(collector, content):
-                # Law quoted from the model's memory may be out of date: checked online once.
-                verified = True
-                stream.drop()
-                messages.append({"role": "user", "content": VERIFY_LAW})
-                continue
-            written_in = i18n.guess_language(content)
-            if content and not translated and written_in not in (None, language):
-                # Answered in another language (often English on French documents): asked once.
-                translated = True
-                stream.drop()
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": WRONG_LANGUAGE.format(language=i18n.language_name(language)),
-                    }
-                )
+                messages.append({"role": "user", "content": nudge})
                 continue
             if content:
                 stream.flush()
@@ -900,29 +951,7 @@ def _run_llm(
             break
         # Text written alongside tool calls ("let me look…") is not the answer.
         stream.drop()
-        for call in calls:
-            fn = call.get("function") or {}
-            name = str(fn.get("name") or "")
-            try:
-                args = _arguments(fn.get("arguments"))
-            except ValueError:
-                payload: Any = {"error": "Arguments are not valid JSON: call the tool again."}
-                messages.append({"role": "tool", "tool_name": name, "content": llm.dumps(payload)})
-                continue
-            key = f"{name}:{json.dumps(args, sort_keys=True)}"
-            result = collector.run(session, name, args)
-            payload = result.payload
-            if key in seen:
-                payload = {"note": "Same call as before, same result: answer now.", **payload}
-            seen.add(key)
-            tool_message: dict[str, Any] = {
-                "role": "tool",
-                "tool_name": name,
-                "content": llm.dumps(payload),
-            }
-            if result.images:
-                tool_message["images"] = [llm.image(i) for i in result.images]
-            messages.append(tool_message)
+        messages += _run_calls(session, collector, calls, seen)
     # Out of steps, or an empty answer: one last turn without tools.
     messages.append({"role": "user", "content": FINAL_NUDGE})
     fit_context(messages, None)
@@ -931,6 +960,20 @@ def _run_llm(
     collector.count(reply)
     answer = str(reply.get("content") or "").strip()
     return collector.response(answer or T("unfinished"), "llm")
+
+
+def warm_prefix() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The fixed start of the next agent request (system prompt and tool schemas), to warm the
+    model with: the same text, so Ollama finds it in its prompt cache."""
+    vision = llm.has_vision()
+    with Session(get_engine()) as session:
+        system = system_prompt(session, vision=vision)
+    return [{"role": "system", "content": system}], tools.schemas(
+        vision, select_tools("", vision=vision)
+    )
+
+
+llm.warm_prefix = warm_prefix
 
 
 # --- Router without a model ---------------------------------------------------------------
@@ -942,10 +985,9 @@ _MONTH_NAMES = "|".join(tools.ALL_MONTHS)
 def _month_range(norm: str, today: date) -> tuple[date, date] | None:
     for name, month in tools.ALL_MONTHS.items():
         if re.search(rf"\b{name}\b", norm):
-            year = today.year
-            start = date(year, month, 1)
-            end = date(year + (month == 12), month % 12 + 1, 1)
-            return start, date.fromordinal(end.toordinal() - 1)
+            start = date(today.year, month, 1)
+            end = date(today.year + (month == 12), month % 12 + 1, 1)
+            return start, end - timedelta(days=1)
     return None
 
 
@@ -1106,7 +1148,9 @@ ALERTS = (
 )
 UNDO = r"\bannule|\bdefais|\bundo\b|revert|cancel (?:that|what you did|it)\b"
 # Words before what a letter must obtain: "écris à la CAF pour …", "write to EDF to …".
-LETTER_PURPOSE = re.compile(r"^.*?\b(?:pour|afin de|to ask|in order to|asking|to)\s+", re.I)
+LETTER_PURPOSE = re.compile(
+    r"^.*?\b(?:pour|afin de|to ask|in order to|asking|to)\s+", re.IGNORECASE
+)
 SUBSCRIPTIONS = r"abonnement|recurrent|subscription|recurring|hausse|augment|price rise|increase"
 RENEW = r"renouvel|perime|plus valable|papiers|renew|expired|still valid"
 SORT_OUT = r"jeter|trier|faire le tri|me debarrasser|archiv|throw (?:away|out)|sort out|get rid"
@@ -1169,7 +1213,7 @@ def _loose_dates(norm: str, today: date) -> list[date]:
         n = int(rel[1])
         unit = rel[2]
         days = n * 7 if unit[0] in "sw" else n * 30 if unit[0] == "m" else n
-        return [date.fromordinal(today.toordinal() + days)]
+        return [today + timedelta(days=days)]
     return []
 
 
@@ -1184,94 +1228,145 @@ def _document_named(
     return found.documents[0] if found.documents else None
 
 
-def _router_intents(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
-    """Requests about packs, letters, payments, subscriptions, renewals and sorting."""
-    sep = T.get("list_separator")
+Intent = Callable[[Session, _Collector, str, str], str | None]
+
+
+def _intent_paid(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
     # "How much have I paid…" is a question, not a payment to record.
-    if re.search(PAID, norm) and not re.search(QUESTION, norm):
-        doc = _document_named(session, collector, message, PAID_WORDS)
-        if doc is None:
-            return T("no_match")
-        result = collector.run(session, "mark_deadline_paid", {"document_id": doc.id})
-        if "error" in result.payload:
-            return T("paid_not_found")
-        return T("paid_done", title=doc.title) + f" [#{doc.id}]"
-    if re.search(UNDO, norm):
-        result = collector.run(session, "undo_last_action", {})
-        return T("nothing_to_undo") if "error" in result.payload else T("undone")
-    if re.search(LETTER, norm):
-        guessed = letters.guess_kind(message)
-        kind = guessed if guessed != "custom" else None
-        doc = _document_named(session, collector, message, LETTER_WORDS)
-        purpose = LETTER_PURPOSE.sub("", message, count=1).strip(" .?!") or message
-        args: dict[str, Any] = {"purpose": purpose}
-        if kind:
-            args["kind"] = kind
-        if doc is not None:
-            args["document_id"] = doc.id
-        letter = collector.run(session, "write_letter", args).letters[0]
-        cite = f" [#{doc.id}]" if doc is not None else ""
-        return T("letter_ready", subject=letter.subject, recipient=letter.recipient) + cite
-    journey = next((k for pattern, k in JOURNEY_KINDS if re.search(pattern, norm)), None)
-    if journey:
-        return _start_journey(session, collector, journey, message, norm)
+    if not re.search(PAID, norm) or re.search(QUESTION, norm):
+        return None
+    doc = _document_named(session, collector, message, PAID_WORDS)
+    if doc is None:
+        return T("no_match")
+    result = collector.run(session, "mark_deadline_paid", {"document_id": doc.id})
+    if "error" in result.payload:
+        return T("paid_not_found")
+    return T("paid_done", title=doc.title) + f" [#{doc.id}]"
+
+
+def _intent_undo(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    if not re.search(UNDO, norm):
+        return None
+    result = collector.run(session, "undo_last_action", {})
+    return T("nothing_to_undo") if "error" in result.payload else T("undone")
+
+
+def _intent_letter(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    if not re.search(LETTER, norm):
+        return None
+    guessed = letters.guess_kind(message)
+    doc = _document_named(session, collector, message, LETTER_WORDS)
+    purpose = LETTER_PURPOSE.sub("", message, count=1).strip(" .?!") or message
+    args: dict[str, Any] = {"purpose": purpose}
+    if guessed != "custom":
+        args["kind"] = guessed
+    if doc is not None:
+        args["document_id"] = doc.id
+    letter = collector.run(session, "write_letter", args).letters[0]
+    cite = f" [#{doc.id}]" if doc is not None else ""
+    return T("letter_ready", subject=letter.subject, recipient=letter.recipient) + cite
+
+
+def _intent_journey(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    kind = next((k for pattern, k in JOURNEY_KINDS if re.search(pattern, norm)), None)
+    return _start_journey(session, collector, kind, message, norm) if kind else None
+
+
+def _intent_folder(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
     pack = next((k for pattern, k in FOLDER_KINDS if re.search(pattern, norm)), None)
-    custom = re.search(PREPARE, norm)
-    if (pack and re.search(FOLDER, norm)) or custom:
-        payload = collector.run(session, "prepare_folder", {"purpose": pack or message}).payload
-        answer = T(
-            "folder_status",
-            title=payload["title"],
-            ready=payload["ready"].split("/")[0],
-            total=payload["ready"].split("/")[1],
-        )
-        missing = [
-            p["piece"]
-            for p in payload["pieces"]
-            if p["status"] == "missing" and not p.get("optional")
-        ]
-        renew = [p["piece"] for p in payload["pieces"] if p["status"] == "outdated"]
-        if missing:
-            answer += T("folder_missing", pieces=sep.join(missing))
-        if renew:
-            answer += T("folder_renew", pieces=sep.join(renew))
-        return answer + T("folder_link", link=payload["export_link"])
-    if re.search(ALERTS, norm):
-        payload = collector.run(session, "list_alerts", {}).payload
-        found = [a["title"] for a in payload["anomalies"]]
-        absent = [m["title"] for m in payload["missing_documents"]]
-        if not found and not absent:
-            return T("alerts_none")
-        answer = T("alerts_found", items=sep.join(found)) if found else ""
-        if absent:
-            answer += T("missing_found", items=sep.join(absent))
-        return answer.strip()
-    if re.search(SORT_OUT, norm):
-        payload = collector.run(session, "documents_to_archive", {}).payload
-        found = payload["can_be_archived"]
-        if not found:
-            return T("nothing_to_sort")
-        titles = sep.join(f"{d['title']} [#{d['id']}]" for d in found[:5])
-        return T.plural("to_sort", len(found), titles=titles)
-    if re.search(SUBSCRIPTIONS, norm):
-        payload = collector.run(session, "list_subscriptions", {}).payload
-        subs = payload["subscriptions"]
-        if not subs:
-            return T("subscriptions_none")
-        answer = T.plural("subscriptions", len(subs), amount=payload["yearly_total"])
-        rises = [s["name"] for s in subs if s.get("price_increase")]
-        return answer + (T("price_rise", names=sep.join(rises)) if rises else "")
-    if re.search(RENEW, norm):
-        payload = collector.run(session, "list_expirations", {}).payload
-        due = [d for d in payload["documents"] if d["state"] != "valid"]
-        if not due:
-            return T("nothing_to_renew")
-        items = sep.join(
-            T("renew_item", title=d["title"], date=date.fromisoformat(d["expiry_date"]))
-            + f" [#{d['id']}]"
-            for d in due
-        )
-        return T("to_renew", items=items)
+    if not (pack and re.search(FOLDER, norm)) and not re.search(PREPARE, norm):
+        return None
+    payload = collector.run(session, "prepare_folder", {"purpose": pack or message}).payload
+    ready, total = payload["ready"].split("/")
+    answer = T("folder_status", title=payload["title"], ready=ready, total=total)
+    missing = [
+        p["piece"] for p in payload["pieces"] if p["status"] == "missing" and not p.get("optional")
+    ]
+    renew = [p["piece"] for p in payload["pieces"] if p["status"] == "outdated"]
+    sep = T.get("list_separator")
+    if missing:
+        answer += T("folder_missing", pieces=sep.join(missing))
+    if renew:
+        answer += T("folder_renew", pieces=sep.join(renew))
+    return answer + T("folder_link", link=payload["export_link"])
+
+
+def _intent_alerts(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    if not re.search(ALERTS, norm):
+        return None
+    payload = collector.run(session, "list_alerts", {}).payload
+    found = [a["title"] for a in payload["anomalies"]]
+    absent = [m["title"] for m in payload["missing_documents"]]
+    if not found and not absent:
+        return T("alerts_none")
+    sep = T.get("list_separator")
+    answer = T("alerts_found", items=sep.join(found)) if found else ""
+    if absent:
+        answer += T("missing_found", items=sep.join(absent))
+    return answer.strip()
+
+
+def _intent_sort_out(
+    session: Session, collector: _Collector, message: str, norm: str
+) -> str | None:
+    if not re.search(SORT_OUT, norm):
+        return None
+    found = collector.run(session, "documents_to_archive", {}).payload["can_be_archived"]
+    if not found:
+        return T("nothing_to_sort")
+    titles = T.get("list_separator").join(f"{d['title']} [#{d['id']}]" for d in found[:5])
+    return T.plural("to_sort", len(found), titles=titles)
+
+
+def _intent_subscriptions(
+    session: Session, collector: _Collector, message: str, norm: str
+) -> str | None:
+    if not re.search(SUBSCRIPTIONS, norm):
+        return None
+    payload = collector.run(session, "list_subscriptions", {}).payload
+    subs = payload["subscriptions"]
+    if not subs:
+        return T("subscriptions_none")
+    answer = T.plural("subscriptions", len(subs), amount=payload["yearly_total"])
+    rises = [s["name"] for s in subs if s.get("price_increase")]
+    return answer + (T("price_rise", names=T.get("list_separator").join(rises)) if rises else "")
+
+
+def _intent_renew(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    if not re.search(RENEW, norm):
+        return None
+    payload = collector.run(session, "list_expirations", {}).payload
+    due = [d for d in payload["documents"] if d["state"] != "valid"]
+    if not due:
+        return T("nothing_to_renew")
+    items = T.get("list_separator").join(
+        T("renew_item", title=d["title"], date=date.fromisoformat(d["expiry_date"]))
+        + f" [#{d['id']}]"
+        for d in due
+    )
+    return T("to_renew", items=items)
+
+
+# Requests about payments, undo, letters, life events, packs, alerts, sorting, subscriptions
+# and renewals, in order of priority: the first that recognises the request answers it.
+INTENTS: list[Intent] = [
+    _intent_paid,
+    _intent_undo,
+    _intent_letter,
+    _intent_journey,
+    _intent_folder,
+    _intent_alerts,
+    _intent_sort_out,
+    _intent_subscriptions,
+    _intent_renew,
+]
+
+
+def _router_intents(session: Session, collector: _Collector, message: str, norm: str) -> str | None:
+    for intent in INTENTS:
+        answer = intent(session, collector, message, norm)
+        if answer is not None:
+            return answer
     return None
 
 

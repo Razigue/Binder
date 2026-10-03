@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import zipfile
@@ -254,6 +255,10 @@ def run_if_due(session: Session) -> Path | None:
         return None
 
 
+# Entries a backup holds besides the database (ingest.store names them `<hex>.bin`).
+STORED_FILE = re.compile(r"files/[A-Za-z0-9_-]+(\.[A-Za-z0-9]+)?")
+
+
 def restore(archive_path: Path, code: str) -> None:
     """Replaces the (empty) library with the archive's. The database engine must be closed."""
     settings = get_settings()
@@ -267,15 +272,22 @@ def restore(archive_path: Path, code: str) -> None:
         names = set(archive.namelist())
         if not {"binder.db", "recovery.json"} <= names:
             raise ValueError(T("not_backup"))
-        recovery = json.loads(archive.read("recovery.json"))
-        secret = unwrap(code, recovery["salt"], recovery["wrapped"])
+        try:
+            recovery = json.loads(archive.read("recovery.json"))
+            salt, wrapped = recovery["salt"], recovery["wrapped"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise ValueError(T("not_backup")) from e
+        if not isinstance(salt, str) or not isinstance(wrapped, str):
+            raise ValueError(T("not_backup"))
+        secret = unwrap(code, salt, wrapped)
         data = settings.data_dir
         data.mkdir(parents=True, exist_ok=True)
         staging = data / "restore.partial"
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir()
         for name in names:
-            if name == "binder.db" or (name.startswith("files/") and "/" not in name[6:]):
+            # Only the names Binder writes: "files/..\evil" would leave the folder on Windows.
+            if name == "binder.db" or STORED_FILE.fullmatch(name):
                 target = staging / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(name) as src, target.open("wb") as dst:
@@ -292,7 +304,7 @@ def restore(archive_path: Path, code: str) -> None:
     key_file = data / "key"
     key_file.unlink(missing_ok=True)
     fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(secret.decode())
     security.reset_caches()
 

@@ -8,8 +8,13 @@ let locale = "en"
 let money = new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" })
 let moneyRound = new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", maximumFractionDigits: 0 })
 let t = translate(common, language)
+let current = ""
 
+/** Called on every render of I18nProvider: only a change of locale rebuilds the formatters. */
 export function setFormatLocale(lang: Language, country: string | null, currency: string) {
+  const next = `${lang}|${country ?? ""}|${currency}`
+  if (next === current) return
+  current = next
   language = lang
   locale = country ? `${lang}-${country}` : lang
   try {
@@ -46,11 +51,12 @@ export function parseDate(iso: string): Date {
     const local = new Date(iso)
     return new Date(local.getFullYear(), local.getMonth(), local.getDate())
   }
-  const [y, m, d] = iso.split("-").map(Number)
+  const [y = 0, m = 1, d = 1] = iso.split("-").map(Number)
   return new Date(y, m - 1, d)
 }
 
-export function formatDate(iso: string | null | undefined, style: "short" | "long" | "day" = "short"): string {  if (!iso) return "—"
+export function formatDate(iso: string | null | undefined, style: "short" | "long" | "day" = "short"): string {
+  if (!iso) return "—"
   const date = parseDate(iso)
   if (style === "long") return date.toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" })
   // "short" and "day" share the abbreviated month: an all-numeric date reads differently in

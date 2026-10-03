@@ -1,76 +1,39 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { Link } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
-import { CheckCircleIcon, CircleDashedIcon, ArrowLeftIcon, CaretRightIcon, ListChecksIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, CircleDashedIcon, ArrowLeftIcon, ArrowSquareOutIcon, CaretRightIcon, ListChecksIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Glossed } from "@/components/glossary"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { useEssentials, useProfile, useSaveSituation } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { essentials as messages } from "@/i18n/messages/essentials"
-import { api, type Profile } from "@/lib/api"
 import { AreaIcon } from "@/lib/areas"
+import { OPTIONS, QUESTIONS } from "@/lib/essentials"
+import { openExternal } from "@/lib/external"
 import { cn } from "@/lib/utils"
-
-type Question = "situation" | "housing" | "vehicle"
-const QUESTIONS: Question[] = ["situation", "housing", "vehicle"]
-// Each answer and its label.
-const OPTIONS = {
-  situation: [
-    ["student", "situation.student"],
-    ["employee", "situation.employee"],
-    ["self_employed", "situation.self_employed"],
-    ["job_seeker", "situation.job_seeker"],
-    ["retired", "situation.retired"],
-  ],
-  housing: [
-    ["tenant", "housing.tenant"],
-    ["owner", "housing.owner"],
-    ["hosted", "housing.hosted"],
-  ],
-  vehicle: [
-    ["yes", "vehicle.yes"],
-    ["no", "vehicle.no"],
-  ],
-} as const
-
-/** Whether the three questions of the first launch were answered. */
-export function answered(profile: Profile | undefined) {
-  return !!profile && QUESTIONS.every((q) => !!profile[q])
-}
 
 /** "Tell me about yourself": three taps, one question per screen, saved in the profile. */
 export function AboutYou({ onDone }: { onDone: () => void }) {
   const t = useT(messages)
-  const qc = useQueryClient()
-  const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile })
+  const profile = useProfile({ fresh: true })
   const [step, setStep] = useState(0)
-  const save = useMutation({
-    mutationFn: async (answer: Partial<Profile>) => api.saveProfile({ ...(await api.profile()), ...answer }),
-    onSuccess: (saved) => {
-      qc.setQueryData(["profile"], saved)
-      void qc.invalidateQueries({ queryKey: ["essentials"] })
-      if (step < QUESTIONS.length - 1) setStep(step + 1)
-      else onDone()
-    },
-    onError: (e) => toast.error(e.message),
-  })
-  const question = QUESTIONS[step]
-  const current = profile.data?.[question]
   // The answer pressed goes away with its question: focus moves to the next question instead.
   const heading = useRef<HTMLHeadingElement>(null)
-  const first = useRef(true)
-  useEffect(() => {
-    if (first.current) first.current = false
-    else heading.current?.focus()
-  }, [step])
+  const goTo = (next: number) => {
+    flushSync(() => setStep(next))
+    heading.current?.focus()
+  }
+  const save = useSaveSituation(() => (step < QUESTIONS.length - 1 ? goTo(step + 1) : onDone()))
+  const question = QUESTIONS[step] ?? "situation"
+  const current = profile.data?.[question]
   return (
     <Card className="gap-5 p-5 sm:p-7">
       <div className="flex min-h-8 items-center gap-3 text-xs font-medium text-muted-foreground">
         {step > 0 && (
-          <Button variant="ghost" size="icon-sm" onClick={() => setStep(step - 1)} aria-label={t("previous")}>
+          <Button variant="ghost" size="icon-sm" onClick={() => goTo(step - 1)} aria-label={t("previous")}>
             <ArrowLeftIcon />
           </Button>
         )}
@@ -105,7 +68,7 @@ export function AboutYou({ onDone }: { onDone: () => void }) {
           ))}
         </div>
       </div>
-      <button onClick={onDone} className="self-start text-sm text-muted-foreground underline-offset-2 hover:underline">
+      <button type="button" onClick={onDone} className="self-start text-sm text-muted-foreground underline-offset-2 hover:underline">
         {t("skip")}
       </button>
     </Card>
@@ -116,7 +79,7 @@ export function AboutYou({ onDone }: { onDone: () => void }) {
  * Binder already holds. */
 export function EssentialsList({ onChange }: { onChange?: () => void }) {
   const t = useT(messages)
-  const papers = useQuery({ queryKey: ["essentials"], queryFn: api.essentials })
+  const papers = useEssentials()
   if (!papers.data)
     return (
       <div className="space-y-2">
@@ -131,7 +94,7 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm text-muted-foreground">{t("count", { present, total: papers.data.length })}</p>
         {onChange && (
-          <button onClick={onChange} className="text-sm font-medium text-primary hover:underline">
+          <button type="button" onClick={onChange} className="text-sm font-medium text-primary hover:underline">
             {t("change")}
           </button>
         )}
@@ -155,6 +118,15 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
                   <Glossed text={p.why} />
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">{t("keep", { keep: p.keep })}</p>
+                {p.portal && (
+                  <button
+                    type="button"
+                    onClick={() => p.portal && openExternal(p.portal.url)}
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <ArrowSquareOutIcon className="size-3.5" /> {t("fetchOn", { site: p.portal.name })}
+                  </button>
+                )}
               </div>
               {p.present ? (
                 <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -177,7 +149,7 @@ export function EssentialsList({ onChange }: { onChange?: () => void }) {
  * opens the list (and the three questions, to change the answers) in a side panel. */
 export function EssentialsLink() {
   const t = useT(messages)
-  const papers = useQuery({ queryKey: ["essentials"], queryFn: api.essentials })
+  const papers = useEssentials()
   const [open, setOpen] = useState(false)
   const [asking, setAsking] = useState(false)
   if (!papers.data?.length) return null
@@ -185,6 +157,7 @@ export function EssentialsLink() {
   return (
     <>
       <button
+        type="button"
         onClick={() => {
           setAsking(false)
           setOpen(true)

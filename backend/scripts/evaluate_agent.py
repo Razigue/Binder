@@ -449,8 +449,10 @@ def check(
         if not any(ids.get(n) in response.citations for n in names.split("|")):
             errors.append(f"{names} not cited")
     answer = flat(response.answer)
-    errors += [f"answer lacks /{p}/" for p in scenario.answer if not re.search(p, answer, re.I)]
-    errors += [f"answer has /{p}/" for p in scenario.forbid if re.search(p, answer, re.I)]
+    errors += [
+        f"answer lacks /{p}/" for p in scenario.answer if not re.search(p, answer, re.IGNORECASE)
+    ]
+    errors += [f"answer has /{p}/" for p in scenario.forbid if re.search(p, answer, re.IGNORECASE)]
     if scenario.effect and not scenario.effect(session, ids):
         errors.append("expected change not made")
     if scenario.letter:
@@ -487,7 +489,7 @@ def main() -> None:
     for scenario in chosen:
         try:
             errors, response, elapsed = run(scenario, library, args.rules)
-        except Exception as exc:  # noqa: BLE001 - one broken scenario must not stop the run
+        except Exception as exc:
             errors, response, elapsed = [f"crash: {exc!r}"], ChatResponse(answer="", engine=""), 0
         total_time += elapsed
         passed += not errors

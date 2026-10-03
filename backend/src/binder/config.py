@@ -5,7 +5,11 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The main server holds every document in clear: it never listens beyond this machine.
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _default_data_dir() -> Path:
@@ -37,8 +41,9 @@ class Settings(BaseSettings):
     # agent conversation: system prompt, tools, page images). None: the active model's profile
     # (llm.PROFILES), larger for the models of powerful machines.
     llm_context: int | None = None
-    # How long Ollama keeps the model in memory after a request (fast follow-up questions).
-    llm_keep_alive: str = "30m"
+    # How long Ollama keeps the model in memory after a request ("30m", "-1": forever). None:
+    # the whole session with Binder's own Ollama, 30 minutes on a shared one (llm.keep_alive).
+    llm_keep_alive: str | None = None
     # Vision: scans and photos are also shown to the model as images, when it supports them.
     llm_vision: bool = True
     # Small multilingual model for semantic search ("proof of address" finds the EDF bill).
@@ -78,6 +83,14 @@ class Settings(BaseSettings):
     port: int = 8765
     # Phone scanning: HTTPS server on the local network, open only during a scan session.
     scan_port: int = 8766
+
+    @field_validator("host")
+    @classmethod
+    def _loopback_only(cls, value: str) -> str:
+        # Bound to the network, anyone there could send `Host: 127.0.0.1` and pass the guard.
+        if value.strip().lower() not in LOOPBACK_HOSTS:
+            raise ValueError("BINDER_HOST must be a loopback address (127.0.0.1, ::1, localhost)")
+        return value.strip()
 
     @property
     def db_path(self) -> Path:

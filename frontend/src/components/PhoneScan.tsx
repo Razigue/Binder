@@ -4,11 +4,16 @@ import { WarningCircleIcon, WarningIcon, CircleNotchIcon, ScanIcon, DeviceMobile
 import { Button } from "@/components/ui/button"
 import { useT } from "@/i18n"
 import { phoneScan } from "@/i18n/messages/phoneScan"
+import { keys } from "@/hooks/queries"
 import { api, scanThumbUrl, type ScanSession } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 // Session calls run one after the other: under StrictMode, the close sent by the first unmount
 // must reach the server before the session of the second mount is opened.
+const STALL_DELAY = 25_000
+// The app runs on the computer itself: its browser tells which system the firewall belongs to.
+const IS_WINDOWS = navigator.userAgent.includes("Windows")
+
 let pending: Promise<unknown> = Promise.resolve()
 function serial<T>(call: () => Promise<T>): Promise<T> {
   const next = pending.then(call, call)
@@ -23,6 +28,9 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [importing, setImporting] = useState(false)
+  // No sign of the phone a while after opening: it most likely cannot reach this computer.
+  const [stalledUrl, setStalledUrl] = useState<string | null>(null)
+  const [seen, setSeen] = useState(false)
   const done = useRef(false)
 
   useEffect(() => {
@@ -38,13 +46,23 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
   }, [attempt])
 
   const live = useQuery({
-    queryKey: ["scan-session", opened?.url],
+    queryKey: keys.scanSession(opened?.url),
     queryFn: api.scanSession,
     enabled: !!opened && !error,
     refetchInterval: 1200,
     initialData: opened ?? undefined,
   })
   const session = live.data ?? opened
+  // Once the phone showed up, it can reach this computer: no warning about the network after that.
+  if (session?.phone_connected && !seen) setSeen(true)
+
+  const openedUrl = opened?.url
+  useEffect(() => {
+    if (!openedUrl) return
+    const timer = setTimeout(() => setStalledUrl(openedUrl), STALL_DELAY)
+    return () => clearTimeout(timer)
+  }, [openedUrl])
+  const unreachable = !!openedUrl && stalledUrl === openedUrl && !seen && !session?.phone_connected
 
   // Sent from the phone, or imported from here: hand the documents over and close the server.
   const imported = session?.imported
@@ -126,6 +144,16 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
         </div>
       </div>
 
+      {unreachable && (
+        <div role="alert" className="space-y-1 rounded-lg border border-amber-300/60 bg-amber-50/60 px-3 py-2.5 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="flex items-center gap-2 font-medium">
+            <WarningIcon weight="fill" className="size-4 shrink-0 text-amber-500" />
+            {t("unreachableTitle")}
+          </p>
+          <p className="text-muted-foreground">{t(IS_WINDOWS ? "unreachableWindows" : "unreachable")}</p>
+        </div>
+      )}
+
       {/* Pages arrive from the phone: say so, not only show them. */}
       <p role="status" className="sr-only">
         {pageCount > 0 ? t("pages", { count: pageCount }) : ""}
@@ -160,7 +188,7 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
                     <button
                       type="button"
                       aria-label={t("deletePage", { n: i + 1 })}
-                      onClick={() => api.deleteScanPage(page.id).then(() => live.refetch())}
+                      onClick={() => void api.deleteScanPage(page.id).then(() => live.refetch())}
                       className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                     >
                       <XIcon className="size-3" />
@@ -173,17 +201,14 @@ export function PhoneScanPanel({ onImported, onCancel }: { onImported: (ids: num
         </div>
       )}
 
-      <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">{t("firewall")}</p>
-        <div className="flex shrink-0 justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel}>
-            {t("cancel")}
-          </Button>
-          <Button disabled={!pageCount || importing} onClick={importNow}>
-            {importing ? <CircleNotchIcon className="animate-spin" /> : <ScanIcon />}
-            {pageCount ? t("import", { count: documents.length }) : t("importEmpty")}
-          </Button>
-        </div>
+      <div className="flex justify-end gap-2 border-t pt-4">
+        <Button variant="ghost" onClick={onCancel}>
+          {t("cancel")}
+        </Button>
+        <Button disabled={!pageCount || importing} onClick={importNow}>
+          {importing ? <CircleNotchIcon className="animate-spin" /> : <ScanIcon />}
+          {pageCount ? t("import", { count: documents.length }) : t("importEmpty")}
+        </Button>
       </div>
     </div>
   )

@@ -11,6 +11,7 @@ from typing import Any
 
 from binder import i18n
 from binder.models import Category, DocType, Document
+from binder.services.deadlines import document_date
 
 T = i18n.catalog(
     "retention",
@@ -166,7 +167,7 @@ def keep_until(doc: Document) -> date | None:
         return doc.expiry_date
     if rule is None or rule.years is None:
         return None
-    base = doc.issue_date or doc.due_date or doc.created_at.date()
+    base = document_date(doc)
     if rule.end_of_year:
         return date(base.year + rule.years, 12, 31)
     return _add_years(base, rule.years)

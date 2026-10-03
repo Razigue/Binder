@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlmodel import Session
 
-from binder import i18n
+from binder import guard, i18n
 from binder.config import get_settings
 from binder.db import get_engine
 from binder.services import ingest, scan_image
@@ -41,6 +41,20 @@ T = i18n.catalog(
     {
         "from_phone": {"en": "from the phone", "fr": "depuis le téléphone"},
         "filename": {"en": "Scan {stamp}", "fr": "Scan {stamp}"},
+        "no_network": {"en": "No local network", "fr": "Aucun réseau local"},
+        "no_port": {"en": "No port available", "fr": "Aucun port disponible"},
+        "not_started": {
+            "en": "The scanning server did not start",
+            "fr": "Le serveur de numérisation n'a pas démarré",
+        },
+        "already_imported": {
+            "en": "These pages were already imported",
+            "fr": "Ces pages ont déjà été importées",
+        },
+        "too_many_pages": {
+            "en": "Too many pages (at most {max})",
+            "fr": "Trop de pages ({max} au plus)",
+        },
     },
 )
 
@@ -180,7 +194,7 @@ def _bind(port: int) -> socket.socket:
             return sock
         except OSError:
             sock.close()
-    raise ScanError("No port available")
+    raise ScanError(T("no_port"))
 
 
 class _Server:
@@ -212,7 +226,7 @@ class _Server:
             time.sleep(0.02)
         if not self.server.started:
             self.stop()
-            raise ScanError("The scanning server did not start")
+            raise ScanError(T("not_started"))
 
     def stop(self) -> None:
         self.server.should_exit = True
@@ -244,7 +258,7 @@ def start() -> ScanSession:
             return _session
         address = lan_address()
         if address is None:
-            raise NoNetwork("No local network")
+            raise NoNetwork(T("no_network"))
         if _server is None:
             server = _Server(address)
             server.start()
@@ -270,7 +284,7 @@ def stop() -> None:
 
 def check_token(token: str | None) -> ScanSession | None:
     session = _session
-    if session is None or token is None or not secrets.compare_digest(token, session.token):
+    if session is None or not guard.same_secret(token, session.token):
         return None
     return session
 
@@ -299,16 +313,23 @@ def _start_watchdog() -> None:
 def add_page(
     session: ScanSession, document: int, data: bytes, hint: scan_image.Quad | None = None
 ) -> ScanPage:
-    if session.imported is not None:
-        raise ScanError("Session already imported")
-    if len(session.pages) >= MAX_PAGES:
-        raise ScanError("Too many pages")
+    _check_open(session)
+    # Outside the lock: a photo takes a moment to straighten, other requests go on meanwhile.
     processed = scan_image.process(data, hint)
     page = ScanPage(id=uuid.uuid4().hex[:12], document=document, page=processed)
     with _lock:
+        # Checked again: the import, or other pages, may have come in the meantime.
+        _check_open(session)
         session.pages.append(page)
     session.touch()
     return page
+
+
+def _check_open(session: ScanSession) -> None:
+    if session.imported is not None:
+        raise ScanError(T("already_imported"))
+    if len(session.pages) >= MAX_PAGES:
+        raise ScanError(T("too_many_pages", max=MAX_PAGES))
 
 
 def remove_page(session: ScanSession, page_id: str) -> bool:

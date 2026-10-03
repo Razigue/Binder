@@ -142,8 +142,8 @@ class ExpirationOut(BaseModel):
     expiry_date: date
     renew_from: date
     days_left: int
-    # "expired", "renew" (within the renewal period) or "valid".
-    state: str
+    # "renew": within the renewal period.
+    state: Literal["expired", "renew", "valid"]
 
 
 class DocumentIds(BaseModel):
@@ -244,6 +244,8 @@ class ChatStats(BaseModel):
     tokens_per_second: float | None = None
     # Prompt reading speed.
     prompt_tokens_per_second: float | None = None
+    # Time spent loading the model into memory first (None: it was ready).
+    load_seconds: float | None = None
     # Whole answer, tools included.
     seconds: float = 0
 
@@ -497,3 +499,33 @@ class PreferencesOut(BaseModel):
     currency: str
     system_language: str
     system_country: str | None
+
+
+class FolderChoice(BaseModel):
+    """Folder picked in the system dialog, None if cancelled."""
+
+    path: str | None
+
+
+class Changes(BaseModel):
+    revision: int
+
+
+class DemoImported(BaseModel):
+    imported: int
+    # Import batch of the new documents (import report), None if all were already there.
+    batch: str | None
+
+
+class DemoStatus(BaseModel):
+    documents: int
+    leftovers: int
+
+
+class DemoCleared(BaseModel):
+    removed: int
+    files: int
+
+
+class ErasedData(BaseModel):
+    removed: int

@@ -80,6 +80,8 @@ components:
 Source of truth: `frontend/src/index.css` (CSS variables, light `:root` and `.dark`). Tokens above
 mirror it; if they disagree, the CSS wins. Stack: Tailwind v4 + shadcn/ui (`base-nova`, Base UI
 primitives), Phosphor icons (`@phosphor-icons/react`, `*Icon` names), Geist Variable.
+Icon weights: regular, bold, fill, light only; the build drops the others (`ICON_WEIGHTS` in
+`vite.config.ts`), so a new weight must be added there first or its icons render empty.
 
 ## Overview
 
@@ -145,12 +147,13 @@ the root size): a layout that must stack when the text grows uses a container qu
 ## Layout
 
 Fixed 240px sidebar (`md`+): the navy **＋ Add** button first (a menu: "Scan with your phone",
-highlighted, "Choose a file", then "Ask a question"), then three 44px rows: To do (with the count
+highlighted, then "Choose a file"), then three 44px rows: To do (with the count
 of cards that need the user), My papers, Life events; the profile row pinned bottom opens a menu
 with Settings, History and Trash. Below `md`: a slim top bar (logo, profile button) and a fixed
-bottom bar of four 64px cells: the three places (icon over label) and a round navy ＋. No ask bar:
-the agent opens from ＋ or Ctrl K. Content `px-4 pt-6 pb-28` mobile (room for the bottom bar),
-`px-8 py-8` desktop. Page header then content, `mb-7`. To do: full width and left-aligned like every page (detail sentences capped at 70ch),
+bottom bar of four 64px cells: the three places (icon over label) and a round navy ＋. The ask bar
+(robot icon, input, Ctrl K hint, navy send button; `max-w-2xl`, centred on the content) is fixed at
+the bottom of every page, just above the bottom bar on a phone; it opens the agent with the typed
+question. Content `px-4 pt-6 pb-44` mobile (room for both bars), `px-8 pb-28` desktop. Page header then content, `mb-7`. To do: full width and left-aligned like every page (detail sentences capped at 70ch),
 greeting and one-sentence summary, then one card per item that needs the user, urgent first,
 the import report on top; what is only worth knowing comes after, quieter, as rows of one card
 under "Good to know"; nothing to do: a large green check and "All in order ✓". First launch (no document yet):
@@ -216,7 +219,7 @@ Use `frontend/src/components/ui/*` (shadcn) before writing new primitives.
   turns red or amber only when it is non-zero and calls for action.
 - **Badges:** 20px pill, 12px/500.
 - **Navigation:** 14px/500 rows with 16px Phosphor icon, `gap-3`, at least 40px high; active = `sidebar-accent` fill.
-- **Agent:** opened from the nav or the ask bar as a side sheet, not a route.
+- **Agent:** opened from the ask bar or Ctrl K as a side sheet, not a route.
 - **Feed card:** area or category tile (urgency dot for urgent/soon), title, detail sentence
   (the urgency in words), amount right-aligned, then its actions as buttons, under the text
   from `sm` and full width on a phone: the primary first, "See the document" (a preview, so no

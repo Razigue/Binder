@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from binder.samples import Sample
@@ -175,3 +176,43 @@ def test_erase_all_data_deletes_leftover_files(client: TestClient) -> None:
     (files_dir / "orphan.bin").write_bytes(b"old")
     client.delete("/api/data", params={"confirm": "true"})
     assert not any(files_dir.iterdir())
+
+
+def test_upload_size_limits(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from binder.api import documents
+
+    empty = client.post("/api/documents", files={"file": ("a.pdf", b"", "application/pdf")})
+    assert empty.status_code == 400
+    monkeypatch.setattr(documents, "MAX_UPLOAD", 10)
+    big = client.post("/api/documents", files={"file": ("a.pdf", b"x" * 11, "application/pdf")})
+    assert big.status_code == 413
+
+
+def test_download_names_the_file_in_ascii_and_utf8(client: TestClient) -> None:
+    from binder.api import routes
+    from binder.api.common import disposition
+
+    # Kept where api/assistant.py imports it from.
+    assert routes._disposition is disposition
+    header = disposition("attachment", "Échéance été.pdf")
+    assert header == (
+        'attachment; filename="Echeance ete.pdf"; '
+        "filename*=UTF-8''%C3%89ch%C3%A9ance%20%C3%A9t%C3%A9.pdf"
+    )
+
+
+def test_unknown_ids_answer_404(client: TestClient) -> None:
+    assert client.patch("/api/deadlines/999", json={"done": True}).status_code == 404
+    r = client.delete("/api/deadlines/999")
+    assert (r.status_code, r.json()["detail"]) == (404, "Deadline not found")
+    assert client.get("/api/journeys/999").status_code == 404
+    assert (
+        client.post("/api/agent/chat", json={"message": "?", "attachments": [999]}).status_code
+        == 404
+    )
+
+
+def test_bulk_routes_are_not_taken_for_a_document_id(client: TestClient) -> None:
+    r = client.post("/api/documents/bulk/reanalyze", json={"ids": [999]})
+    assert r.status_code == 202
+    assert r.json()["count"] == 0

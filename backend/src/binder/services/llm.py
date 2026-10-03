@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,7 +21,6 @@ from binder.schemas import Extraction
 
 log = logging.getLogger(__name__)
 
-_availability: tuple[float, bool] | None = None
 # Capabilities reported by Ollama per model ("vision", "tools", "thinking"…).
 _capabilities: dict[str, set[str]] = {}
 AVAILABILITY_TTL = 30.0
@@ -77,6 +76,14 @@ LARGE = Profile(context=32768, doc_chars=24000, all_tools=True, think_hard=True)
 PROFILES = {"qwen3.6:35b-a3b": LARGE, "qwen3.6:27b": LARGE}
 # Set from the machine measured at launch (setup.py): a graphics card, or Apple silicon.
 _accelerated = False
+# Binder started this Ollama for itself (setup.py): it ends with Binder, so the model can stay
+# in memory for the whole session instead of reloading after a pause (30 s for a large one).
+_owned = False
+# Builds the fixed start of every agent request (system prompt, tool schemas): warming the model
+# with it lets Ollama keep it in its prompt cache, so a question only reads its own words. Set by
+# agent/loop.py, which knows that prompt.
+warm_prefix: Callable[[], tuple[list[dict[str, Any]], list[dict[str, Any]]]] | None = None
+_warming = threading.Lock()
 
 # Model chosen in the settings; otherwise the configured one (BINDER_LLM_MODEL).
 _selected: str | None = None
@@ -246,6 +253,14 @@ def client(timeout: float | httpx.Timeout = 10.0) -> httpx.Client:
     return httpx.Client(base_url=get_settings().ollama_url, timeout=timeout, transport=transport)
 
 
+def _ask(method: str, path: str, timeout: float, body: dict[str, Any] | None = None) -> Any:
+    """JSON answer of an Ollama endpoint. Raises httpx.HTTPError, or ValueError if unreadable."""
+    with client(timeout=timeout) as c:
+        r = c.request(method, path, json=body)
+        r.raise_for_status()
+        return r.json()
+
+
 def model() -> str:
     """Model used for extraction, explanations and the agent."""
     return _selected or get_settings().llm_model
@@ -274,37 +289,91 @@ def set_accelerated(value: bool) -> None:
     _accelerated = value
 
 
+def set_owned(value: bool) -> None:
+    global _owned
+    _owned = value
+
+
+def owned() -> bool:
+    """Binder runs its own Ollama, whose models only Binder uses."""
+    return _owned
+
+
+def keep_alive() -> str | int:
+    """How long Ollama keeps the model loaded: BINDER_LLM_KEEP_ALIVE, otherwise for the whole
+    session when Binder runs its own Ollama (-1, a number: Ollama rejects "-1" without a unit),
+    30 minutes on an Ollama shared with other apps."""
+    return get_settings().llm_keep_alive or (-1 if _owned else "30m")
+
+
 def think_hard() -> bool:
     """Reason before a difficult task: a large model the graphics card runs, or asked for."""
     return get_settings().llm_think or (profile().think_hard and _accelerated)
 
 
 def _load(name: str) -> None:
+    """Loads the model, then reads the fixed start of the agent's requests once: the first
+    question neither waits for the weights nor for the system prompt and tools (thousands of
+    tokens), and the graphics card's kernels are ready."""
+    messages: list[dict[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    if warm_prefix is not None:
+        try:
+            messages, tools = warm_prefix()
+        except Exception:  # the plain load below still helps
+            log.exception("Could not build the prompt to warm the model with")
+    payload: dict[str, Any] = {
+        "model": name,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "keep_alive": keep_alive(),
+        "options": {**EXACT, "seed": SEED, "num_ctx": context_window(), "num_predict": 1},
+    }
+    if tools:
+        payload["tools"] = tools
+    started = time.monotonic()
     try:
         with client(timeout=get_settings().llm_timeout) as c:
-            payload = {
-                "model": name,
-                "messages": [],
-                "keep_alive": get_settings().llm_keep_alive,
-                "options": {"num_ctx": context_window()},
-            }
             c.post("/api/chat", json=payload).raise_for_status()
-        log.info("Model %s loaded", name)
+        log.info("Model %s ready in %.1f s", name, time.monotonic() - started)
     except httpx.HTTPError as e:
         log.info("Could not preload %s: %s", name, e)
+    finally:
+        _warming.release()
 
 
 def warm() -> None:
-    """Loads the active model in the background, with the context window of the requests to
-    come: the first question does not wait for it (up to a minute on a processor)."""
-    if is_available():
+    """Loads the active model in the background, with the context window and the prompt start
+    of the requests to come (up to a minute on a processor). Once at a time."""
+    if is_available() and _warming.acquire(blocking=False):
         threading.Thread(target=_load, args=(model(),), name="llm-warm", daemon=True).start()
+
+
+def warming() -> bool:
+    return _warming.locked()
+
+
+def loaded() -> bool | None:
+    """The active model is in memory and ready (None: Ollama does not say)."""
+    try:
+        running = _ask("GET", "/api/ps", 2).get("models") or []
+        names = {str(m.get("name") or m.get("model")) for m in running}
+    except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+        return None
+    name = model()
+    return not warming() and (name in names or f"{name}:latest" in names)
+
+
+def ensure_loaded() -> None:
+    """Warms the model if Ollama unloaded it (the chat opening, the app coming back)."""
+    if is_available() and loaded() is False and not warming():
+        warm()
 
 
 def forget_availability() -> None:
     """To call when the installed models change."""
-    global _availability
-    _availability = None
+    _available.forget()
     _capabilities.clear()
 
 
@@ -313,11 +382,9 @@ def capabilities() -> set[str]:
     name = model()
     if name not in _capabilities:
         try:
-            with client(timeout=5) as c:
-                r = c.post("/api/show", json={"model": name})
-                r.raise_for_status()
-                _capabilities[name] = set(r.json().get("capabilities") or [])
-        except (httpx.HTTPError, ValueError, TypeError):
+            shown = _ask("POST", "/api/show", 5, {"model": name})
+            _capabilities[name] = set(shown.get("capabilities") or [])
+        except (httpx.HTTPError, ValueError, AttributeError, TypeError):
             return set()
     return _capabilities[name]
 
@@ -335,11 +402,9 @@ def image(data: bytes) -> str:
 def installed_models() -> dict[str, int] | None:
     """Models installed in Ollama (name → size in bytes), None if Ollama does not respond."""
     try:
-        with client(timeout=2) as c:
-            r = c.get("/api/tags")
-            r.raise_for_status()
-            return {m["name"]: int(m.get("size") or 0) for m in r.json().get("models", [])}
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        models = _ask("GET", "/api/tags", 2).get("models", [])
+        return {m["name"]: int(m.get("size") or 0) for m in models}
+    except (httpx.HTTPError, ValueError, KeyError, AttributeError, TypeError):
         return None
 
 
@@ -347,18 +412,35 @@ def is_installed(name: str, installed: dict[str, int]) -> bool:
     return name in installed or f"{name}:latest" in installed
 
 
+class Availability:
+    """Whether a model is installed in a responding Ollama, checked at most every
+    AVAILABILITY_TTL seconds (asked before every reading and every search)."""
+
+    def __init__(self, name: Callable[[], str]) -> None:
+        self._name = name
+        self._checked: tuple[float, bool] | None = None
+
+    def __call__(self) -> bool:
+        if not get_settings().llm_enabled:
+            return False
+        now = time.monotonic()
+        if self._checked and now - self._checked[0] < AVAILABILITY_TTL:
+            return self._checked[1]
+        installed = installed_models()
+        ok = installed is not None and is_installed(self._name(), installed)
+        self._checked = (now, ok)
+        return ok
+
+    def forget(self) -> None:
+        self._checked = None
+
+
+_available = Availability(model)
+
+
 def is_available() -> bool:
     """Checks that Ollama responds and the active model is installed (cached result)."""
-    global _availability
-    if not get_settings().llm_enabled:
-        return False
-    now = time.monotonic()
-    if _availability and now - _availability[0] < AVAILABILITY_TTL:
-        return _availability[1]
-    installed = installed_models()
-    ok = installed is not None and is_installed(model(), installed)
-    _availability = (now, ok)
-    return ok
+    return _available()
 
 
 class ModelError(ValueError):
@@ -372,6 +454,11 @@ class ModelError(ValueError):
         return "pars" in text or "tool" in text
 
 
+# What a model call that should answer structured data can fail with: no answer, an error
+# from Ollama, or an answer that does not fit. Callers then fall back to their rules.
+FAILURES = (httpx.HTTPError, ModelError, json.JSONDecodeError, ValidationError, KeyError)
+
+
 def _error_of(r: httpx.Response) -> str | None:
     try:
         error = r.json().get("error")
@@ -383,10 +470,7 @@ def _error_of(r: httpx.Response) -> str | None:
 def ollama_version() -> str | None:
     """Version reported by Ollama ("0.17.5"), None if it does not answer."""
     try:
-        with client(timeout=5) as c:
-            r = c.get("/api/version")
-            r.raise_for_status()
-            return str(r.json().get("version") or "") or None
+        return str(_ask("GET", "/api/version", 5).get("version") or "") or None
     except (httpx.HTTPError, ValueError, AttributeError):
         return None
 
@@ -446,7 +530,7 @@ def chat(
         "messages": messages,
         "stream": on_token is not None,
         "think": think,
-        "keep_alive": settings.llm_keep_alive,
+        "keep_alive": keep_alive(),
         "options": {**sampling, "seed": SEED, "num_ctx": context_window()},
     }
     if tools:
@@ -467,7 +551,9 @@ def chat(
 
 
 # Counters Ollama sends with the last chunk of an answer (durations in nanoseconds).
-STATS = ("prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration")
+STATS = (
+    "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration", "load_duration",
+)  # fmt: skip
 
 
 def _with_stats(message: dict[str, Any], chunk: dict[str, Any]) -> dict[str, Any]:
@@ -520,7 +606,7 @@ def extract(
     text: str,
     images: list[bytes] | None = None,
     *,
-    example: dict[str, Any] | None = None,
+    example: Mapping[str, object] | None = None,
     think: bool = False,
 ) -> Extraction | None:
     """Extraction by the local model. None on failure: the pipeline keeps the rules.
@@ -544,6 +630,8 @@ def extract(
     try:
         message = chat([request], fmt=EXTRACTION_SCHEMA, think=think)
         data = json.loads(message.get("content") or "{}")
+        if not isinstance(data, dict):
+            raise ValueError(f"Extraction is not an object: {type(data).__name__}")
         # The model's own confidence means nothing: it is computed from the checks.
         for ignored in ("missing_fields", "doubts", "confidence", "amount"):
             data.pop(ignored, None)
@@ -553,7 +641,7 @@ def extract(
         if isinstance(data.get("reference"), str) and ":" in data["reference"]:
             data["reference"] = data["reference"].split(":", 1)[1].strip() or None
         return Extraction.model_validate({**data, "extractor": "llm"})
-    except (httpx.HTTPError, ModelError, json.JSONDecodeError, ValidationError, KeyError):
+    except (httpx.HTTPError, ValueError, KeyError):
         log.exception("LLM extraction failed, falling back to rules")
         return None
 

@@ -9,7 +9,7 @@ entries whose message no longer exists.
 """
 
 import json
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlmodel import Session
 
@@ -30,6 +30,14 @@ T = i18n.catalog(
         "separator": {"en": "; ", "fr": " ; "},
     },
 )
+
+
+class Change(TypedDict):
+    """One edited field, as stored in the parameters of the "changes" message."""
+
+    field: str
+    old: Any
+    new: Any
 
 
 def display(value: object) -> str:
@@ -69,17 +77,14 @@ def summary(entry: Activity, details: dict[str, Any]) -> str:
 
 
 def changes_summary(title: str, changes: dict[str, tuple[object, object]]) -> i18n.Msg:
-    return T.msg(
-        "changes",
-        title=title,
-        changes=[
-            {"field": name, "old": i18n.jsonable(old), "new": i18n.jsonable(new)}
-            for name, (old, new) in changes.items()
-        ],
-    )
+    rows = [
+        Change(field=name, old=i18n.jsonable(old), new=i18n.jsonable(new))
+        for name, (old, new) in changes.items()
+    ]
+    return T.msg("changes", title=title, changes=rows)
 
 
-def _render_changes(changes: list[dict[str, Any]], language: i18n.Language) -> str:
+def _render_changes(changes: list[Change], language: i18n.Language) -> str:
     return T.get("separator", language).join(
         i18n.render(
             "activity.change",

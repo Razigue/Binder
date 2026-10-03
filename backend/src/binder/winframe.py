@@ -43,7 +43,7 @@ WNDPROC = ctypes.WINFUNCTYPE(
 )
 
 
-class NCCALCSIZE_PARAMS(ctypes.Structure):  # noqa: N801 (Win32 name)
+class NCCALCSIZE_PARAMS(ctypes.Structure):
     _fields_ = [("rgrc", wintypes.RECT * 3), ("lppos", ctypes.c_void_p)]
 
 

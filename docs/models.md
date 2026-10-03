@@ -1,7 +1,7 @@
 # Local models
 
 Binder runs the best chat model each machine supports, and checks again at every launch. Code:
-`services/llm_models.py` (catalogue, choice, downloads, upgrade offer), `services/setup.py`
+`services/llm_models.py` (catalogue, choice, downloads, upgrades, cleanup), `services/setup.py`
 (measuring the machine, `pick_model`, Binder's own Ollama).
 
 ## Choosing the model
@@ -41,8 +41,19 @@ profile and a machine measured with a graphics card of 8 GB or more, or Apple si
 on for any model. The legal check's judgement does not reason: measured as accurate without it,
 and minutes faster.
 
-**Loaded ahead.** Once setup is ready, and when the active model changes, `llm.warm()` loads the
-model in the background with the requests' window: the first question does not wait for it.
+**Loaded ahead, kept loaded.** Once setup is ready, when the active model changes and when the
+chat opens (`POST /api/llm/warm`, only if Ollama let the model go), `llm.warm()` loads the model
+in the background with the requests' window and reads the agent's fixed prompt start once
+(`loop.warm_prefix`: system prompt and tool schemas, `num_predict: 1`). Ollama keeps it in its
+prompt cache, so a question only reads its own words instead of ~4,000 tokens, and the graphics
+card's kernels and the speculative decoding are warmed up. Measured on an RTX 4080 Super with the
+35B-A3B: a cold "hello" took 37 s (8 tok/s shown), the warm path answers in about a second at
+~80 tok/s. Keep the prefix stable for this to work: the large profile sends every tool in a fixed
+order, never reordered per request. With Binder's own Ollama the model stays loaded for the whole
+session (`llm.keep_alive()`: `-1`; 30 minutes on a shared Ollama; `BINDER_LLM_KEEP_ALIVE`
+overrides). A question asked while the model loads shows "Loading the local AI" (stream event
+`loading`), and the load time appears apart in the answer's details (`ChatStats.load_seconds`),
+never mixed into the model's speed.
 
 **Same sender, same reading.** Before reading a document, `learning.example` looks for the issuer
 of the library that its first lines name (the longest, so "EDF Entreprises" beats "EDF") and
@@ -53,15 +64,20 @@ without the example.
 
 ## Every launch
 
-`setup._run` measures the machine (`setup.measure()`: RAM, NVIDIA VRAM, free disk, Ollama
-version; never cached), installs a model if none is there, then `llm_models.advise`:
+`setup._run` measures the machine (`setup.measure()`: RAM, graphics memory, free disk, Ollama
+version; never cached), installs a model if none is there, then `llm_models.advise`. Graphics
+memory is what Binder's Ollama reported at its start (`setup.ollama_gpu_bytes`, the
+`inference compute` lines of `ollama.log`: NVIDIA, AMD, Intel, Vulkan alike, integrated graphics
+left out), or `nvidia-smi`, whichever is larger.
+
+Every user gets the best local AI their machine runs without thinking about it:
 
 - The active model was **chosen by Binder** (`LlmConfig.auto`) and the recommendation ranks
-  higher: the upgrade is **offered** (`/api/setup` and `/api/llm` carry `upgrade`, with its
-  size), never downloaded silently. `POST /api/llm/upgrade` downloads it; Binder switches once it
-  is ready, keeps the former model installed and logs the switch in the activity.
-- `POST /api/llm/upgrade/decline` stores the model in `LlmConfig.declined`: not offered again
-  until the recommendation becomes another model.
+  higher: the upgrade **downloads in the background** right away (`/api/setup` and `/api/llm`
+  carry `upgrade`, `accepted`, with its progress). Binder switches once it is ready, deletes the
+  former model and logs both in the activity.
+- `POST /api/llm/upgrade/decline` stops it and stores the model in `LlmConfig.declined`: not
+  fetched again until the recommendation becomes another model.
 - **Never a downgrade**: when the active model ranks above what the memory runs, only a warning
   (`SetupStatus.warning`).
 - A model **chosen by the user** (`PUT /api/llm/model`, or `BINDER_LLM_MODEL`): no offer and no
@@ -69,6 +85,12 @@ version; never cached), installs a model if none is there, then `llm_models.advi
 
 Settings saved before `auto` existed count as Binder's choice. Models outside the catalogue
 (rank 0) are never compared.
+
+**Only the models in use stay on the disk** (`llm_models.prune`, at each launch and after an
+upgrade): every catalogue model and every `RETIRED` one other than the active chat model is
+deleted from Binder's own Ollama, and logged. Never in a shared Ollama (other apps use it), never
+a model installed outside Binder, never while a download runs (layers are shared), and never
+before the active model is installed.
 
 ## Adding a model
 
@@ -86,8 +108,9 @@ At each new generation of models:
    quality: renumber so the new model sits where it belongs; they must stay distinct.
 4. **Thresholds** (`setup.memory_tier`): give the model its rung, as a named constant with a
    comment saying why (weights size, active parameters, what must fit in VRAM). A model that
-   replaces another takes its rung; drop the old one from the catalogue (installed copies stay
-   usable, shown as installed outside Binder).
+   replaces another takes its rung; move the old one from the catalogue to
+   `llm_models.RETIRED`, so the next launch deletes it from users' disks once they have the new
+   one (they get the upgrade automatically).
 5. **Measure** before switching the default: `scripts/evaluate.py --llm --model <tag>` and
    `scripts/evaluate_agent.py --model <tag>` (see [evaluation.md](evaluation.md),
    [agent.md](agent.md)).

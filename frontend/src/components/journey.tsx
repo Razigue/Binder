@@ -10,8 +10,9 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { FolderView, usePanels } from "@/components/panels"
-import { useInvalidateAll, useJourney } from "@/hooks/queries"
+import { usePanels } from "@/components/panels/context"
+import { FolderView } from "@/components/panels/FolderView"
+import { keys, useInvalidateAll, useJourney } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { journey as messages } from "@/i18n/messages/journey"
 import { api, type Folder, type Journey, type JourneyKindInfo, type JourneyStep, type Letter, type StepAction } from "@/lib/api"
@@ -49,7 +50,7 @@ function JourneyView({ id, onNavigate }: { id: number; onNavigate: () => void })
   const qc = useQueryClient()
   const invalidate = useInvalidateAll()
   const saved = (j: Journey) => {
-    qc.setQueryData(["journey", id], j)
+    qc.setQueryData(keys.journey(id), j)
     invalidate()
   }
   const toggle = useMutation({
@@ -192,6 +193,7 @@ function StepRow({
   return (
     <li className="flex gap-3 px-4 py-3">
       <button
+        type="button"
         onClick={onToggle}
         disabled={pending || step.auto}
         role="checkbox"
@@ -221,7 +223,7 @@ function StepRow({
         {(step.document_ids.length > 0 || (step.action && !step.done)) && (
           <div className="flex flex-wrap gap-2 pt-1">
             {step.action && !step.done && (
-              <Button size="xs" variant="outline" disabled={act.isPending} onClick={() => run(step.action!)}>
+              <Button size="xs" variant="outline" disabled={act.isPending} onClick={() => step.action && run(step.action)}>
                 {act.isPending ? (
                   <CircleNotchIcon className="animate-spin" />
                 ) : step.action.type === "folder" ? (

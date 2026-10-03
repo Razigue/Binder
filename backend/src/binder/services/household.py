@@ -4,6 +4,7 @@ Each document may name the person it concerns: the holder of an identity card, t
 on a payslip, the tenant on a rent receipt, the insured person… The local model reads it
 (extraction field `person`); the patterns below fill in when it is absent. Members are the
 distinct people found; "M. Martin" joins "Camille Martin" when only one Martin is known.
+The user corrects that list (add, rename or merge, remove): their edits win over the reading.
 """
 
 import re
@@ -12,9 +13,27 @@ from collections import Counter
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
+from binder import i18n
 from binder.models import Document
-from binder.services import areas
+from binder.services import activity, areas, settings_store, undo
 from binder.services.rules import normalize
+
+T = i18n.catalog(
+    "household",
+    {
+        "added": {
+            "en": "{name} added to the household",
+            "fr": "{name} ajouté(e) au foyer",
+        },
+        "removed": {
+            "en": "{name} is no longer part of the household",
+            "fr": "{name} ne fait plus partie du foyer",
+        },
+        "renamed": {"en": "“{old}” renamed “{new}”", "fr": "« {old} » renommé « {new} »"},
+    },
+)
+
+EDITS_KEY = "household"
 
 _NAME = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]+"
 # "Nom : MARTIN — Prénom : Camille" (identity documents).
@@ -34,10 +53,13 @@ _NOT_NAMES = {"monsieur", "madame", "le", "la", "les", "votre", "vous"}
 
 
 def display(name: str) -> str:
-    """ "MARTIN Camille", "camille martin" → "Camille Martin"."""
+    """ "MARTIN Camille", "camille martin" → "Camille Martin"; "MARTIN-LEROY" → "Martin-Leroy"."""
     parts = [p for p in re.split(r"\s+", name.strip()) if p]
     return " ".join(
-        p[:1].upper() + p[1:].lower() if p.isupper() or p.islower() else p for p in parts
+        "-".join(w[:1].upper() + w[1:].lower() for w in p.split("-"))
+        if p.isupper() or p.islower()
+        else p
+        for p in parts
     )
 
 
@@ -58,14 +80,46 @@ def _key(name: str) -> tuple[str, ...]:
     return tuple(sorted(normalize(name).replace("-", " ").split()))
 
 
+def _id(name: str) -> str:
+    return " ".join(_key(name))
+
+
 class Member(BaseModel):
     name: str
     documents: int
     areas: list[str]
+    # Added by the user (not, or not yet, named in a document).
+    added: bool = False
 
 
-def members(session: Session) -> list[Member]:
-    """Distinct people named in the active documents, most documents first."""
+class Edits(BaseModel):
+    """The user's corrections to the household Binder found."""
+
+    # Spellings replaced by the user's (`_id` of the spelling → name): later documents follow.
+    renamed: dict[str, str] = {}
+    # People named in documents who are not in the household (a landlord, a doctor…), by `_id`.
+    removed: list[str] = []
+    # Members the user added.
+    added: list[str] = []
+
+
+class UnknownMember(ValueError):
+    pass
+
+
+def load_edits(session: Session) -> Edits:
+    return settings_store.load(session, EDITS_KEY, Edits)
+
+
+def canonical(session: Session, name: str | None) -> str | None:
+    """A name as the user wrote it, when they corrected that spelling."""
+    if not name:
+        return name
+    return load_edits(session).renamed.get(_id(name), name)
+
+
+def _found(session: Session) -> tuple[list[Member], dict[str, str]]:
+    """Distinct people named in the active documents, and the member each spelling belongs to."""
     rows = session.exec(
         select(Document.person, Document.area).where(
             col(Document.deleted_at).is_(None), col(Document.person).is_not(None)
@@ -91,9 +145,11 @@ def members(session: Session) -> list[Member]:
         if area:
             found_areas.setdefault(key, set()).add(area)
     out = []
+    owner: dict[str, str] = {}
     for key, names in full.items():
         # The fullest spelling names the member.
         name = max(names, key=lambda n: (len(n.split()), names[n]))
+        owner.update(dict.fromkeys(names, name))
         out.append(
             Member(
                 name=name,
@@ -101,6 +157,20 @@ def members(session: Session) -> list[Member]:
                 areas=[a for a in areas.AREAS if a in found_areas.get(key, set())],
             )
         )
+    return out, owner
+
+
+def members(session: Session, *, everyone: bool = False) -> list[Member]:
+    """The household, most documents first: the people named in the documents, as the user
+    corrected it. `everyone` keeps the people the user said are not in it."""
+    found, _ = _found(session)
+    edits = load_edits(session)
+    out = [m for m in found if everyone or _id(m.name) not in edits.removed]
+    out.extend(
+        Member(name=name, documents=0, areas=[], added=True)
+        for name in edits.added
+        if not any(same_person(name, m.name) for m in found)
+    )
     return sorted(out, key=lambda m: -m.documents)
 
 
@@ -109,6 +179,72 @@ def main_person(session: Session) -> str | None:
     found = members(session)
     full = [m for m in found if len(m.name.split()) >= 2]
     return (full or found)[0].name if found else None
+
+
+def _save(session: Session, edits: Edits, msg: i18n.Msg) -> None:
+    undo.setting_changed(session, EDITS_KEY)
+    settings_store.save(session, EDITS_KEY, edits)
+    activity.log(session, "settings", msg)
+
+
+def add(session: Session, name: str) -> None:
+    """Adds someone to the household (or takes them back after a removal)."""
+    name = display(name)
+    if not name:
+        raise UnknownMember(name)
+    edits = load_edits(session)
+    edits.removed = [r for r in edits.removed if r != _id(name)]
+    if not any(same_person(name, a) for a in edits.added):
+        edits.added.append(name)
+    _save(session, edits, T.msg("added", name=name))
+
+
+def remove(session: Session, name: str) -> None:
+    """Not in the household: no longer listed, nor taken as the user. Their documents stay as
+    they are (they do concern that person)."""
+    if not any(m.name == name for m in members(session)):
+        raise UnknownMember(name)
+    edits = load_edits(session)
+    edits.added = [a for a in edits.added if a != name]
+    if _id(name) not in edits.removed:
+        edits.removed.append(_id(name))
+    _save(session, edits, T.msg("removed", name=name))
+
+
+def rename(session: Session, old: str, new: str) -> int:
+    """Corrects a member's name on their documents, and for the documents to come. Giving the
+    name of another member merges both. Returns how many documents changed."""
+    new = display(new)
+    if not new or not any(m.name == old for m in members(session)):
+        raise UnknownMember(old)
+    _, owner = _found(session)
+    spellings = [s for s, member in owner.items() if member == old]
+    changed = 0
+    if spellings:
+        docs = session.exec(
+            select(Document).where(
+                col(Document.deleted_at).is_(None), col(Document.person).in_(spellings)
+            )
+        )
+        for doc in docs:
+            if doc.person == new:
+                continue
+            before = undo.snapshot(doc)
+            doc.person = new
+            undo.document_changed(doc, before)
+            session.add(doc)
+            changed += 1
+    edits = load_edits(session)
+    # Names that led to the old one now lead to the new one, and so do its spellings.
+    edits.renamed = {k: new if v == old else v for k, v in edits.renamed.items()}
+    for spelling in {*spellings, old}:
+        if _id(spelling) != _id(new):
+            edits.renamed[_id(spelling)] = new
+    edits.renamed.pop(_id(new), None)
+    edits.added = [new if a == old else a for a in edits.added]
+    edits.removed = [r for r in edits.removed if r != _id(new)]
+    _save(session, edits, T.msg("renamed", old=old, new=new))
+    return changed
 
 
 def same_person(a: str | None, b: str | None) -> bool:

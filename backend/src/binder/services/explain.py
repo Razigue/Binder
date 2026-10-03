@@ -11,7 +11,6 @@ import logging
 import re
 from datetime import date
 
-import httpx
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
 
@@ -358,7 +357,7 @@ def explain_llm(doc: Document) -> Explanation | None:
         )
         explanation.action_required = explanation.action_required or bool(explanation.actions)
         return explanation
-    except (httpx.HTTPError, llm.ModelError, json.JSONDecodeError, ValidationError, KeyError):
+    except llm.FAILURES:
         log.exception("Explanation by the model failed, falling back to rules")
         return None
 

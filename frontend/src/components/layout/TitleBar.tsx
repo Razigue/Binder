@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { BinderMark } from "@/components/layout/BinderMark"
-import { useLocale, useT } from "@/i18n"
+import { useT } from "@/i18n"
 import { layout } from "@/i18n/messages/layout"
-import { HistoryButtons, type HistoryPosition } from "@/components/layout/HistoryNav"
+import { HistoryButtons } from "@/components/layout/HistoryNav"
+import type { HistoryPosition } from "@/components/layout/history"
+import { callDesktop as call } from "@/lib/desktop"
 import { cn } from "@/lib/utils"
 
 // Desktop window title bar. On Windows the shell keeps the native frame (Snap, Win + arrows,
@@ -11,129 +13,10 @@ import { cn } from "@/lib/utils"
 // the native title bar stays and only takes the app's colours. In a browser there is no
 // `window.pywebview`: nothing happens.
 
-interface WindowState {
-  custom: boolean
-  maximized: boolean
-}
-
-interface DesktopApi {
-  set_title_bar?: (background: string, foreground: string, dark: boolean) => Promise<void>
-  window_state?: () => Promise<WindowState>
-  drag?: () => Promise<void>
-  minimize?: () => Promise<void>
-  toggle_maximize?: () => Promise<void>
-  snap_layouts?: () => Promise<void>
-  close?: () => Promise<void>
-  choose_folder?: (initial: string) => Promise<string | null>
-}
-
-declare global {
-  interface Window {
-    pywebview?: { api?: DesktopApi }
-  }
-}
-
-// Same height as the `h-9` bar: full-window layers (dialogs, sheets) start below it.
-const TITLE_BAR_HEIGHT = "2.25rem"
 // Windows' default double-click time.
 const DOUBLE_CLICK_MS = 500
 // Hover delay before the Snap Layouts flyout, as on the native maximise button.
 const SNAP_LAYOUTS_DELAY_MS = 400
-
-let canvas: CanvasRenderingContext2D | null = null
-
-/** Any CSS colour (oklch included) as #rrggbb, via a 1×1 canvas. */
-function toHex(color: string): string | null {
-  canvas ??= document.createElement("canvas").getContext("2d", { willReadFrequently: true })
-  if (!canvas || !color) return null
-  canvas.clearRect(0, 0, 1, 1)
-  canvas.fillStyle = "#000"
-  canvas.fillStyle = color
-  canvas.fillRect(0, 0, 1, 1)
-  const [r, g, b] = canvas.getImageData(0, 0, 1, 1).data
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`
-}
-
-function themeColor(name: string): string | null {
-  return toHex(getComputedStyle(document.documentElement).getPropertyValue(name).trim())
-}
-
-const call = (method: keyof Omit<DesktopApi, "set_title_bar" | "window_state" | "choose_folder">) => {
-  window.pywebview?.api?.[method]?.().catch(() => {
-    // The window is closing, or an older shell: nothing to do.
-  })
-}
-
-/** Window state from the desktop shell; null in a browser or until the shell answers. */
-export function useDesktopWindow(): WindowState | null {
-  const { resolvedTheme } = useLocale()
-  const [ready, setReady] = useState(() => Boolean(window.pywebview?.api))
-  const [state, setState] = useState<WindowState | null>(null)
-
-  useEffect(() => {
-    if (ready) return
-    const onReady = () => setReady(true)
-    window.addEventListener("pywebviewready", onReady)
-    return () => window.removeEventListener("pywebviewready", onReady)
-  }, [ready])
-
-  useEffect(() => {
-    const api = window.pywebview?.api
-    if (!ready || !api) return
-    let cancelled = false
-    const refresh = () => {
-      const pending = api.window_state?.() ?? Promise.resolve({ custom: false, maximized: false })
-      pending
-        .catch(() => ({ custom: false, maximized: false }))
-        .then((next) => {
-          if (!cancelled) setState((prev) => (prev?.custom === next.custom && prev.maximized === next.maximized ? prev : next))
-        })
-    }
-    refresh()
-    // Maximising, restoring and snapping (buttons, Win + arrows, dragging) all resize the page.
-    let timer = 0
-    const onResize = () => {
-      clearTimeout(timer)
-      timer = window.setTimeout(refresh, 50)
-    }
-    window.addEventListener("resize", onResize)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-      window.removeEventListener("resize", onResize)
-    }
-  }, [ready])
-
-  const custom = state?.custom === true
-  useEffect(() => {
-    if (!custom) return
-    document.documentElement.style.setProperty("--titlebar-height", TITLE_BAR_HEIGHT)
-    return () => {
-      document.documentElement.style.removeProperty("--titlebar-height")
-    }
-  }, [custom])
-
-  // The shell shows the window once the colours arrive: send them after the bar is in place.
-  const known = state !== null
-  useEffect(() => {
-    const api = window.pywebview?.api
-    if (!known || !api?.set_title_bar) return
-    // I18nProvider toggles `.dark` in its own effect, which runs after this one (parent effects
-    // run last): read the colours on the next frame.
-    const frame = requestAnimationFrame(() => {
-      const background = themeColor("--sidebar")
-      const foreground = themeColor("--sidebar-foreground")
-      if (background && foreground) {
-        api.set_title_bar?.(background, foreground, resolvedTheme === "dark").catch(() => {
-          // Older shell without this API: keep the native colours.
-        })
-      }
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [known, resolvedTheme])
-
-  return state
-}
 
 /** Whether this window is the active one: the title dims otherwise, as in native captions. */
 function useWindowActive() {
@@ -163,7 +46,7 @@ export function TitleBar({ maximized, history }: { maximized: boolean; history: 
   useEffect(() => () => clearTimeout(snapTimer.current), [])
 
   const onMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0 || (e.target as Element).closest("button, a, input, select, textarea")) return
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest("button, a, input, select, textarea"))) return
     e.preventDefault()
     // Windows' move loop swallows the first click's mouseup, so `dblclick` never fires: spot the
     // second press ourselves.

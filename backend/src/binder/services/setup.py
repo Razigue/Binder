@@ -22,6 +22,7 @@ import hashlib
 import logging
 import os
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -44,7 +45,7 @@ from binder import __version__, i18n
 from binder.config import get_settings
 from binder.db import get_engine
 from binder.schemas import ModelUpgrade
-from binder.services import llm, llm_models
+from binder.services import llm, llm_models, process
 
 log = logging.getLogger(__name__)
 
@@ -263,6 +264,7 @@ def _run() -> None:
             _set(phase="starting", completed=0, total=0)
             _serve(binary)
             served = True
+        llm.set_owned(_owned())
         check_version()
         # Measured at each launch: memory, a graphics card or free space may have changed.
         machine = measure()
@@ -340,8 +342,50 @@ def memory_bytes() -> int:
         return 0
 
 
+# What Ollama found at startup, in its log: one line per device it can run models on.
+INFERENCE_COMPUTE = re.compile(r'msg="inference compute".*')
+_FIELD = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
+_UNITS = {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3, "TiB": 1024**4}
+# Tail of ollama.log read for them: the last start is near its end.
+LOG_TAIL = 2_000_000
+
+
+def _bytes(size: str) -> int:
+    number, _, unit = size.partition(" ")
+    try:
+        return int(float(number) * _UNITS.get(unit, 1))
+    except ValueError:
+        return 0
+
+
+def ollama_gpu_bytes(log_file: Path | None = None) -> int:
+    """Graphics memory Ollama reported at its last start, all vendors (CUDA, ROCm, Vulkan,
+    Metal): integrated graphics and the processor left out. 0 when it reported none."""
+    path = log_file or get_settings().data_dir / "ollama.log"
+    try:
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - LOG_TAIL))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return 0
+    # Only the devices of the last start (one "server config" line per start).
+    text = text[text.rfind('msg="server config"') + 1 :]
+    devices: dict[str, int] = {}
+    for line in INFERENCE_COMPUTE.findall(text):
+        fields = {k: a or b for k, a, b in _FIELD.findall(line)}
+        if fields.get("library", "").lower() == "cpu" or fields.get("type", "").lower() == "igpu":
+            continue
+        key = fields.get("pci_id") or fields.get("id") or str(len(devices))
+        devices[key] = _bytes(fields.get("total", ""))
+    return sum(devices.values())
+
+
 def gpu_memory_bytes() -> int:
-    """Memory of an NVIDIA graphics card (0 without one)."""
+    """Graphics card memory: what Ollama found, or an NVIDIA card's (0 without one)."""
+    return max(ollama_gpu_bytes() if _owned() else 0, _nvidia_bytes())
+
+
+def _nvidia_bytes() -> int:
     nvidia = shutil.which("nvidia-smi")
     if nvidia is None:
         return 0
@@ -555,6 +599,28 @@ def _install(target: Path, foreground: bool) -> Path:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     archive = staging / name
+    try:
+        if _fetch(url, archive, foreground) != sha256:
+            raise RuntimeError(T("corrupted"))
+        _extract(archive, staging)
+        archive.unlink()
+        (staging / VERSION_FILE).write_text(OLLAMA_VERSION, encoding="utf-8")
+    except BaseException:
+        # Never a half-written Ollama: a disk full or a bad archive leaves nothing behind.
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    shutil.rmtree(target, ignore_errors=True)
+    staging.rename(target)
+    binary = _binary_in(target)
+    if binary is None:
+        raise RuntimeError(T("unsupported"))
+    if sys.platform != "win32":
+        binary.chmod(0o755)
+    return binary
+
+
+def _fetch(url: str, archive: Path, foreground: bool) -> str:
+    """Downloads `url` into `archive`; returns its SHA-256."""
     digest = hashlib.sha256()
     done = 0
     try:
@@ -578,25 +644,8 @@ def _install(target: Path, foreground: bool) -> Path:
                     if foreground:
                         _set(completed=done)
     except httpx.HTTPError as e:
-        shutil.rmtree(staging, ignore_errors=True)
         raise RuntimeError(T("download_failed")) from e
-    except RuntimeError:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-    if digest.hexdigest() != sha256:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise RuntimeError(T("corrupted"))
-    _extract(archive, staging)
-    archive.unlink()
-    (staging / VERSION_FILE).write_text(OLLAMA_VERSION, encoding="utf-8")
-    shutil.rmtree(target, ignore_errors=True)
-    staging.rename(target)
-    binary = _binary_in(target)
-    if binary is None:
-        raise RuntimeError(T("unsupported"))
-    if sys.platform != "win32":
-        binary.chmod(0o755)
-    return binary
+    return digest.hexdigest()
 
 
 def _upgrade() -> None:
@@ -747,20 +796,19 @@ def _serve(binary: Path) -> None:
     if _owned():
         adopt_models(_user_models_dir(), get_settings().data_dir / "models")
         env["OLLAMA_MODELS"] = str(_models_dir())
-    log_file = (get_settings().data_dir / "ollama.log").open("ab")
-    kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    else:
+    kwargs = process.no_window()
+    if sys.platform != "win32":
         kwargs["start_new_session"] = True
-    _state.process = subprocess.Popen(
-        [str(binary), "serve"],
-        env=env,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        **kwargs,
-    )
+    # Ollama writes to its own copy of the handle: Binder's is closed once it started.
+    with (get_settings().data_dir / "ollama.log").open("ab") as log_file:
+        _state.process = subprocess.Popen(
+            [str(binary), "serve"],
+            env=env,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            **kwargs,
+        )
     _tie(_state.process)
     with contextlib.suppress(OSError):
         _pid_file().write_text(str(_state.process.pid), encoding="utf-8")
@@ -788,8 +836,10 @@ def _ensure_models(machine: Machine) -> None:
         _download(name)
     embed = get_settings().embed_model
     if not llm.is_installed(embed, llm.installed_models() or {}):
-        with contextlib.suppress(Exception):  # search by meaning is a bonus
+        try:
             _download(embed)
+        except Exception as e:  # search by meaning is a bonus
+            log.info("Search model %s not installed: %s", embed, e)
 
 
 def _advise(machine: Machine) -> None:
@@ -798,6 +848,9 @@ def _advise(machine: Machine) -> None:
     fits = memory_tier(machine.ram, machine.vram, machine.apple) if machine.ram else None
     with Session(get_engine()) as session:
         too_large = llm_models.advise(session, machine.pick(), fits)
+        # Models no longer used (dropped from the catalogue, replaced) leave the disk.
+        llm_models.prune(session)
+        session.commit()
     if too_large:
         heavy = T("too_large", label=llm_models.label(llm.model()))
         _set(warning=" ".join(w for w in (_state.warning, heavy) if w))
@@ -806,14 +859,10 @@ def _advise(machine: Machine) -> None:
 def _download(name: str) -> None:
     _set(phase="downloading", model=name, completed=0, total=0)
     llm_models.start_download(name)
-    while True:
-        overview = {m.name: m for m in llm_models.overview().models}
-        model = overview.get(name)
-        if model is None or model.download is None:
-            break
-        if model.download.phase == "error":
-            raise RuntimeError(model.download.error or T("download_failed"))
-        _set(completed=model.download.completed, total=model.download.total)
+    while (download := llm_models.download_state(name)) is not None:
+        if download.phase == "error":
+            raise RuntimeError(download.error or T("download_failed"))
+        _set(completed=download.completed, total=download.total)
         if _state.stop.wait(1.0):
             return
     if not llm.is_installed(name, llm.installed_models() or {}):

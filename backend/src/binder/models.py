@@ -326,3 +326,19 @@ class Journey(SQLModel, table=True):
     # JSON list of the keys of the steps marked done.
     done: str = "[]"
     closed: bool = False
+
+
+class Conversation(SQLModel, table=True):
+    """A conversation with the agent, kept so the user can go back to it.
+
+    The turns are the interface's record (question, attachments, answer) as JSON: the agent
+    itself only receives the last ones as history with each question."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now, index=True)
+    title: str = ""
+    # Document open on screen when it started: a question about another one starts a new
+    # conversation.
+    document_id: int | None = Field(default=None, index=True)
+    turns: str = "[]"

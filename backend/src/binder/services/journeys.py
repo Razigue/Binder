@@ -25,6 +25,7 @@ from sqlmodel import Session, col, select
 from binder import i18n
 from binder.models import Category, Correspondence, DocType, Document, Journey
 from binder.services import activity, folders, household, letters, undo
+from binder.services.deadlines import document_date
 from binder.services.rules import normalize
 
 T = i18n.catalog(
@@ -634,7 +635,9 @@ class _Context:
         return self.journey.event_date
 
     def of_type(self, *types: DocType) -> list[Document]:
-        return sorted((d for d in self.docs if d.doc_type in types), key=_date_of, reverse=True)
+        return sorted(
+            (d for d in self.docs if d.doc_type in types), key=document_date, reverse=True
+        )
 
     def add(
         self,
@@ -683,10 +686,6 @@ class _Context:
         return None
 
 
-def _date_of(doc: Document) -> date:
-    return doc.issue_date or doc.due_date or doc.created_at.date()
-
-
 def _letter(
     *,
     doc: Document | None = None,
@@ -719,7 +718,7 @@ def _organisations(docs: list[Document]) -> list[Document]:
     """One document per organisation the user has a running relationship with (most recent
     first), skipping one-off documents."""
     latest: dict[str, Document] = {}
-    for doc in sorted(docs, key=_date_of, reverse=True):
+    for doc in sorted(docs, key=document_date, reverse=True):
         if not doc.issuer or doc.category not in RELATIONSHIPS:
             continue
         latest.setdefault(normalize(doc.issuer), doc)
@@ -809,7 +808,7 @@ def _employer(docs: list[Document]) -> Document | None:
             for d in docs
             if d.doc_type in (DocType.PAYSLIP, DocType.EMPLOYMENT_CONTRACT) and d.issuer
         ),
-        key=_date_of,
+        key=document_date,
         reverse=True,
     )
     return slips[0] if slips else None
@@ -842,7 +841,7 @@ def _birth(ctx: _Context) -> None:
         day + timedelta(days=5),
         documents=papers[:3],
     )
-    records = [d for d in _arrived_since(ctx, DocType.CIVIL_STATUS) if _date_of(d) >= day]
+    records = [d for d in _arrived_since(ctx, DocType.CIVIL_STATUS) if document_date(d) >= day]
     ctx.add(
         "record",
         T("birth_record_title"),
@@ -870,7 +869,7 @@ def _birth(ctx: _Context) -> None:
         T("caf_birth_title"),
         T("caf_birth_detail"),
         day + timedelta(days=30),
-        documents=sorted(caf, key=_date_of, reverse=True)[:1],
+        documents=sorted(caf, key=document_date, reverse=True)[:1],
     )
     ctx.add("tax", T("tax_birth_title"), T("tax_birth_detail"), day + timedelta(days=60))
 
@@ -938,7 +937,7 @@ def _death(ctx: _Context) -> None:
 
 
 def _in_year(docs: list[Document], year: int) -> list[Document]:
-    return [d for d in docs if _date_of(d).year == year]
+    return [d for d in docs if document_date(d).year == year]
 
 
 def _for_income_year(docs: list[Document], year: int) -> list[Document]:
@@ -947,7 +946,8 @@ def _for_income_year(docs: list[Document], year: int) -> list[Document]:
     return [
         d
         for d in docs
-        if _date_of(d).year == year or (_date_of(d).year == year + 1 and _date_of(d).month <= 3)
+        if document_date(d).year == year
+        or (document_date(d).year == year + 1 and document_date(d).month <= 3)
     ]
 
 
@@ -1000,7 +1000,7 @@ def _tax_return(ctx: _Context, session: Session) -> None:
             deadline,
         )
     ctx.add("file", T("file_title"), T("file_detail"), deadline)
-    notices = [d for d in ctx.of_type(DocType.TAX_NOTICE) if _date_of(d).year == deadline.year]
+    notices = [d for d in ctx.of_type(DocType.TAX_NOTICE) if document_date(d).year == deadline.year]
     ctx.add(
         "notice",
         T("tax_notice_title"),
@@ -1049,7 +1049,14 @@ def title(row: Journey) -> str:
     return T("titled", title=base, name=name) if name else base
 
 
-def steps(session: Session, row: Journey, today: date | None = None) -> list[Step]:
+def steps(
+    session: Session,
+    row: Journey,
+    today: date | None = None,
+    *,
+    docs: list[Document] | None = None,
+) -> list[Step]:
+    """`docs`: the current documents, when the caller already has them (several journeys)."""
     if row.kind not in BUILDERS:
         return []
     letters_since = list(
@@ -1062,7 +1069,7 @@ def steps(session: Session, row: Journey, today: date | None = None) -> list[Ste
     ctx = _Context(
         journey=row,
         details=_details(row),
-        docs=folders.current_documents(session),
+        docs=folders.current_documents(session) if docs is None else docs,
         letters=letters_since,
         done=set(json.loads(row.done or "[]")),
         today=today or date.today(),
@@ -1169,9 +1176,12 @@ def set_step(session: Session, row: Journey, key: str, done: bool, *, actor: str
 
 def due_steps(session: Session, today: date, within: int) -> list[tuple[Journey, Step]]:
     """Steps still to do that are due within `within` days (or late), in every open journey."""
-    found = []
-    for row in active(session):
-        for step in steps(session, row, today):
-            if not step.done and step.due is not None and step.due <= today + timedelta(within):
-                found.append((row, step))
-    return found
+    rows = active(session)
+    docs = folders.current_documents(session) if rows else []
+    limit = today + timedelta(within)
+    return [
+        (row, step)
+        for row in rows
+        for step in steps(session, row, today, docs=docs)
+        if not step.done and step.due is not None and step.due <= limit
+    ]

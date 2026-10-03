@@ -195,3 +195,25 @@ def test_no_network(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None
     monkeypatch.setattr(scan, "lan_address", lambda: None)
     r = client.post("/api/scan/session")
     assert r.status_code == 503 and "local network" in r.json()["detail"]
+
+
+def test_phone_rejects_a_malformed_length(phone: TestClient, session: scan.ScanSession) -> None:
+    headers = {**AUTH, "Content-Length": "abc"}
+    r = phone.post("/api/pages?document=1", content=photo(), headers=headers)
+    assert r.status_code in (400, 413)
+    accented = {"X-Scan-Token": "é".encode("latin-1")}
+    assert phone.get("/api/state", headers=accented).status_code == 403
+
+
+def test_no_page_lands_in_a_session_imported_meanwhile(
+    monkeypatch: pytest.MonkeyPatch, session: scan.ScanSession
+) -> None:
+    def process(data: bytes, hint: scan_image.Quad | None = None) -> scan_image.Page:
+        # The import runs while this photo is being straightened.
+        session.imported = []
+        return scan_image.Page(image=b"", thumb=b"", detected=False)
+
+    monkeypatch.setattr(scan_image, "process", process)
+    with pytest.raises(scan.ScanError):
+        scan.add_page(session, 1, b"photo")
+    assert session.pages == []

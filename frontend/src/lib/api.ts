@@ -218,6 +218,8 @@ export interface ChatStats {
   output_tokens: number
   tokens_per_second: number | null
   prompt_tokens_per_second: number | null
+  /** Time spent loading the model into memory first (null: it was ready). */
+  load_seconds?: number | null
   /** Whole answer, tools included. */
   seconds: number
 }
@@ -265,6 +267,8 @@ export type ChatEvent =
   | { type: "stats"; stats: ChatStats }
   | { type: "token"; text: string }
   | { type: "step" }
+  /** The model is being loaded into memory before it answers. */
+  | { type: "loading" }
   | { type: "done"; response: ChatResponse }
   | { type: "error"; message: string }
 
@@ -362,6 +366,22 @@ export interface EssentialPaper {
   keep: string
   present: boolean
   document_id: number | null
+  // Where to download it when it is missing.
+  portal: Portal | null
+}
+
+/** An online account or official page, opened in the user's browser. */
+export interface Portal {
+  name: string
+  url: string
+}
+
+/** Reminders shown by the system while Binder is closed. */
+export interface Reminders {
+  enabled: boolean
+  // The installed application only: the system can start it while it is closed.
+  available: boolean
+  hour: number
 }
 
 export interface Profile {
@@ -451,6 +471,8 @@ export interface FeedItem {
     | "missing" | "letter" | "suggestion" | "household" | "journey" | "waiting"
     // "N more questions, whenever you like": opens the sorting session.
     | "questions"
+    // A right to check or a duty with no letter (prime d'activité, France Travail update…).
+    | "right"
   tone: Tone
   title: string
   detail: string
@@ -488,6 +510,23 @@ export interface JourneyStep {
   document_ids: number[]
   amount: number | null
   action: StepAction | null
+}
+
+/** A conversation with the agent, as listed in its history. */
+export interface ConversationSummary {
+  id: number
+  title: string
+  /** Document open on screen when it started; its title is null once it is deleted. */
+  document_id: number | null
+  document_title: string | null
+  created_at: string
+  updated_at: string
+  turns: number
+}
+
+/** The turns are the panel's own record, saved as shown (see components/agent.tsx). */
+export interface Conversation<TTurn = unknown> extends ConversationSummary {
+  messages: TTurn[]
 }
 
 export interface Journey {
@@ -560,7 +599,14 @@ export interface Member {
   name: string
   documents: number
   areas: Area[]
+  /** Added by the user (not, or not yet, named in a document). */
+  added: boolean
 }
+
+/** A correction of the household: rename (to another member's name: merge), remove, add. */
+export type MemberEdit =
+  | { action: "add" | "remove"; name: string }
+  | { action: "rename"; name: string; new_name: string }
 
 export interface AreaSummary {
   area: Area
@@ -767,9 +813,19 @@ export const api = {
   areas: () => request<AreaSummary[]>("/areas"),
   calendar: () => request<CalendarEntry[]>("/calendar"),
   essentials: () => request<EssentialPaper[]>("/essentials"),
+  reminders: () => request<Reminders>("/reminders"),
+  saveReminders: (enabled: boolean) => request<Reminders>("/reminders", json("PUT", { enabled })),
   household: () => request<Member[]>("/household"),
+  editHousehold: (edit: MemberEdit) => request<Member[]>("/household", json("POST", edit)),
   sources: (id: number) => request<FieldSource[]>(`/documents/${id}/sources`),
   prepareFolder: (purpose: string) => request<Folder>("/folders/prepare", json("POST", { purpose })),
+  conversations: () => request<ConversationSummary[]>("/conversations"),
+  conversation: <TTurn>(id: number) => request<Conversation<TTurn>>(`/conversations/${id}`),
+  createConversation: <TTurn>(body: { document_id: number | null; turns: TTurn[]; title?: string }) =>
+    request<Conversation<TTurn>>("/conversations", json("POST", body)),
+  updateConversation: <TTurn>(id: number, body: { turns?: TTurn[]; title?: string }) =>
+    request<Conversation<TTurn>>(`/conversations/${id}`, json("PATCH", body)),
+  deleteConversation: (id: number) => request<void>(`/conversations/${id}`, { method: "DELETE" }),
   journeyKinds: () => request<JourneyKindInfo[]>("/journeys/kinds"),
   journeys: () => request<Journey[]>("/journeys"),
   journey: (id: number) => request<Journey>(`/journeys/${id}`),
@@ -805,6 +861,8 @@ export const api = {
   chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
   acceptUpgrade: () => request<ModelsOverview>("/llm/upgrade", { method: "POST" }),
   declineUpgrade: () => request<ModelsOverview>("/llm/upgrade/decline", { method: "POST" }),
+  /** Loads the model again if Ollama let it go, before the question is sent. */
+  warmModel: () => request<void>("/llm/warm", { method: "POST" }),
   downloadModel: (name: string) =>
     request<ModelsOverview>(`/llm/models/${encodeURIComponent(name)}/download`, { method: "POST" }),
   cancelDownload: (name: string) =>

@@ -100,12 +100,8 @@ def worth_asking(doc: Document, today: date | None = None) -> list[str]:
     asked = [f for f in missing if f != "duplicate" and field_matters(doc, f, today)]
     for doubt in doubts:
         code, _, field = doubt.partition(":")
-        if (
-            field
-            and field_matters(doc, field, today)
-            or not field
-            and code in WHOLE_DOCUMENT
-            and (_recent(doc, today) or _in_force(doc))
+        if (field and field_matters(doc, field, today)) or (
+            not field and code in WHOLE_DOCUMENT and (_recent(doc, today) or _in_force(doc))
         ):
             asked.append("confirm")
     if not asked and doc.confidence < CONFIDENT and (_recent(doc, today) or _in_force(doc)):

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
-import { usePanels } from "@/components/panels"
+import { usePanels } from "@/components/panels/context"
 import { useDeleteLetter, useInvalidateAll, useJourneys, useLetters, useUpdateJourney } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { journey as journeyMessages } from "@/i18n/messages/journey"
@@ -27,7 +27,7 @@ function letterState(letter: Letter): LetterState {
 const LETTER_ORDER: Record<LetterState, number> = { noAnswer: 0, draft: 1, sent: 2, answered: 3 }
 
 /** What Binder is following for the user: journeys under way, letters still waiting for something. */
-export function useOngoing() {
+function useOngoing() {
   const journeys = (useJourneys().data ?? []).filter((j) => !j.closed)
   const letters = (useLetters().data ?? [])
     .filter((l) => l.id !== null && letterState(l) !== "answered")
@@ -63,7 +63,7 @@ function JourneyRow({ journey, onOpen }: { journey: Journey; onOpen: () => void 
   const next = journey.steps.find((s) => !s.done)
   return (
     <li className="group/row relative">
-      <button onClick={onOpen} className="flex w-full items-center gap-3 px-5 py-3 pr-11 text-left transition-colors hover:bg-muted/40">
+      <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 px-5 py-3 pr-11 text-left transition-colors hover:bg-muted/40">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
           <ListChecksIcon className="size-4" />
         </span>
@@ -115,13 +115,15 @@ function LetterRow({ letter }: { letter: Letter }) {
   const invalidate = useInvalidateAll()
   const [confirming, setConfirming] = useState(false)
   const state = letterState(letter)
+  // Only saved letters are followed.
+  const id = letter.id
   const answered = useMutation({
-    mutationFn: () => api.letterAnswered(letter.id!),
+    mutationFn: api.letterAnswered,
     onSuccess: invalidate,
     onError: (e) => toast.error(e.message),
   })
   const followUp = useMutation({
-    mutationFn: () => api.letterFollowUp(letter.id!),
+    mutationFn: api.letterFollowUp,
     onSuccess: (l) => {
       invalidate()
       panels.showLetter(l)
@@ -143,6 +145,7 @@ function LetterRow({ letter }: { letter: Letter }) {
       </span>
       <div className="min-w-0 flex-1 pr-7">
         <button
+          type="button"
           onClick={() => panels.showLetter(letter)}
           className="block max-w-full truncate text-left text-sm font-medium hover:underline"
         >
@@ -159,7 +162,7 @@ function LetterRow({ letter }: { letter: Letter }) {
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {state === "noAnswer" && (
-            <Button size="xs" disabled={pending} onClick={() => followUp.mutate()}>
+            <Button size="xs" disabled={pending} onClick={() => id !== null && followUp.mutate(id)}>
               <NotePencilIcon /> {t("followUp")}
             </Button>
           )}
@@ -168,7 +171,7 @@ function LetterRow({ letter }: { letter: Letter }) {
               {t("seeLetter")}
             </Button>
           ) : (
-            <Button size="xs" variant="outline" disabled={pending} onClick={() => answered.mutate()}>
+            <Button size="xs" variant="outline" disabled={pending} onClick={() => id !== null && answered.mutate(id)}>
               <CheckCircleIcon /> {t("markAnswered")}
             </Button>
           )}
@@ -192,7 +195,7 @@ function LetterRow({ letter }: { letter: Letter }) {
         description={t("removeLetterHint", { subject: letter.subject })}
         confirmLabel={t("removeTask")}
         onConfirm={async () => {
-          await remove.mutateAsync(letter.id!)
+          if (id !== null) await remove.mutateAsync(id)
           toast.success(t("taskRemoved"))
         }}
       />
@@ -214,6 +217,7 @@ export function FinishedLetters() {
           {done.map((l) => (
             <li key={l.id}>
               <button
+                type="button"
                 onClick={() => panels.showLetter(l)}
                 className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-muted/40"
               >

@@ -4,6 +4,7 @@ It only knows the scanning page and the pages of the session in progress. Every 
 carry the session token (`X-Scan-Token` header, or `t` parameter for images).
 """
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -55,8 +56,8 @@ def _session(token: str | None, *, phone: bool = True) -> scan.ScanSession:
 
 
 async def _body(request: Request, limit: int) -> bytes:
-    declared = request.headers.get("content-length")
-    if declared and int(declared) > limit:
+    declared = request.headers.get("content-length", "")
+    if declared and (not declared.isdigit() or int(declared) > limit):
         raise HTTPException(413, "Image too large")
     data = await request.body()
     if not data or len(data) > limit:
@@ -86,8 +87,10 @@ def create_scan_app() -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
-    async def harden(request: Request, call_next):  # type: ignore[no-untyped-def]
-        response: Response = await call_next(request)
+    async def harden(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
         headers = response.headers
         headers["Content-Security-Policy"] = CSP
         headers["X-Content-Type-Options"] = "nosniff"

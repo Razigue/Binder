@@ -45,9 +45,9 @@ Features: see README.md (user guide); configuration: docs/configuration.md. Prod
   order ✓" when empty), **My papers** (the seven life areas as tiles with their state in words,
   search and filters, tabs Documents / Calendar / Archives) and **Life events** ("Démarches":
   what to do when you move, start a job, have a child… with the letters, files and what is
-  under way). A **＋ Add** button on every page adds a paper (phone scan first, or a file) or
-  asks the agent (also Ctrl K, never the only way). History, Trash and Settings sit in the
-  profile menu. On a phone: a bottom bar with the three places and ＋.
+  under way). A **＋ Add** button on every page adds a paper (phone scan first, or a file); an
+  ask bar at the bottom of every page asks the agent (also Ctrl K, never the only way). History, Trash and Settings sit in the
+  profile menu. On a phone: a bottom bar with the three places and ＋, the ask bar just above it.
 - Loopback-only server; phone scan opens a temporary token-protected HTTPS server only during a
   session. Losing `DATA_DIR/key` loses the data unless a backup and its recovery code exist.
   Builds are not code-signed yet.

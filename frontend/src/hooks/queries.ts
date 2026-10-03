@@ -1,16 +1,66 @@
-import { useEffect, useRef } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api, type BulkPatch, type Category, type DocPatch, type DocumentStatus } from "@/lib/api"
+import { useCallback, useEffect, useRef } from "react"
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api, type BulkPatch, type Category, type Doc, type DocPatch, type DocumentStatus, type Profile } from "@/lib/api"
 
+type DocumentsParams = { q?: string; category?: Category; status?: DocumentStatus; archived?: boolean; limit?: number }
+type DeadlinesParams = { start?: string; end?: string; include_done?: boolean }
+type ActivityParams = { document_id?: number; limit?: number }
+
+/** Every query key, so that reads and invalidations agree. */
 export const keys = {
   stats: ["stats"] as const,
   status: ["status"] as const,
-  documents: (p: object) => ["documents", p] as const,
+  changes: ["changes"] as const,
+  preferences: ["preferences"] as const,
+  documents: (p: DocumentsParams) => ["documents", p] as const,
   document: (id: number) => ["document", id] as const,
-  deadlines: (p: object) => ["deadlines", p] as const,
+  // The reading depends on the fields: a correction asks for it again.
+  sources: (d: Doc) => ["sources", d.id, d.amount, d.due_date, d.issue_date, d.expiry_date, d.reference, d.issuer] as const,
+  explanation: (d: Doc) => ["explanation", d.id, d.amount, d.due_date, d.expiry_date, d.title] as const,
+  deadlines: (p: DeadlinesParams) => ["deadlines", p] as const,
   trash: ["trash"] as const,
   expirations: ["expirations"] as const,
-  activity: (p: object) => ["activity", p] as const,
+  activity: (p: ActivityParams) => ["activity", p] as const,
+  subscriptions: ["subscriptions"] as const,
+  feed: ["feed"] as const,
+  questions: (ids?: number[]) => ["questions", ids ?? "all"] as const,
+  report: (batch: string) => ["report", batch] as const,
+  areas: ["areas"] as const,
+  calendar: ["calendar"] as const,
+  models: ["models"] as const,
+  conversations: ["conversations"] as const,
+  journeys: ["journeys"] as const,
+  journeyKinds: ["journeyKinds"] as const,
+  journey: (id: number) => ["journey", id] as const,
+  letters: ["letters"] as const,
+  profile: ["profile"] as const,
+  essentials: ["essentials"] as const,
+  household: ["household"] as const,
+  reminders: ["reminders"] as const,
+  backup: ["backup"] as const,
+  demo: ["demo"] as const,
+  importSettings: ["import-settings"] as const,
+  scanSession: (url: string | undefined) => ["scan-session", url] as const,
+}
+
+/** Query definitions shared by several readers (`useQuery`, `useQueries`, the query client). */
+export const queries = {
+  documents: (p: DocumentsParams = {}) =>
+    queryOptions({
+      queryKey: keys.documents(p),
+      queryFn: () => api.documents(p),
+      // Refresh the list while a document is being analysed.
+      refetchInterval: (q) => (q.state.data?.some((d) => d.status === "processing") ? 1500 : false),
+    }),
+  document: (id: number) =>
+    queryOptions({
+      queryKey: keys.document(id),
+      queryFn: () => api.document(id),
+      refetchInterval: (q) => (q.state.data?.status === "processing" ? 1000 : false),
+    }),
+  explanation: (doc: Doc) =>
+    queryOptions({ queryKey: keys.explanation(doc), queryFn: () => api.explanation(doc.id), staleTime: Infinity }),
 }
 
 export function useStatus() {
@@ -21,25 +71,25 @@ export function useStats() {
   return useQuery({ queryKey: keys.stats, queryFn: api.stats })
 }
 
-export function useDocuments(p: { q?: string; category?: Category; status?: DocumentStatus; limit?: number } = {}) {
-  return useQuery({
-    queryKey: keys.documents(p),
-    queryFn: () => api.documents(p),
-    // Refresh the list while a document is being analysed.
-    refetchInterval: (q) => (q.state.data?.some((d) => d.status === "processing") ? 1500 : false),
-  })
+export function useDocuments(p: DocumentsParams = {}) {
+  return useQuery(queries.documents(p))
 }
 
 export function useDocument(id: number | null) {
+  return useQuery({ ...queries.document(id ?? 0), enabled: id !== null })
+}
+
+/** Where each field was read on the page, once the document is read. */
+export function useSources(doc: Doc) {
   return useQuery({
-    queryKey: keys.document(id ?? 0),
-    queryFn: () => api.document(id!),
-    enabled: id !== null,
-    refetchInterval: (q) => (q.state.data?.status === "processing" ? 1000 : false),
+    queryKey: keys.sources(doc),
+    queryFn: () => api.sources(doc.id),
+    enabled: doc.status !== "processing",
+    staleTime: Infinity,
   })
 }
 
-export function useDeadlines(p: { start?: string; end?: string; include_done?: boolean } = {}) {
+export function useDeadlines(p: DeadlinesParams = {}) {
   return useQuery({ queryKey: keys.deadlines(p), queryFn: () => api.deadlines(p) })
 }
 
@@ -48,12 +98,12 @@ export function useDeadlines(p: { start?: string; end?: string; include_done?: b
 export function useLiveChanges() {
   const qc = useQueryClient()
   const seen = useRef<number | null>(null)
-  const changes = useQuery({ queryKey: ["changes"], queryFn: api.changes, refetchInterval: 3000 })
+  const changes = useQuery({ queryKey: keys.changes, queryFn: api.changes, refetchInterval: 3000 })
   const revision = changes.data?.revision
   useEffect(() => {
     if (revision === undefined) return
     if (seen.current !== null && revision !== seen.current) {
-      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "changes" })
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== keys.changes[0] })
     }
     seen.current = revision
   }, [revision, qc])
@@ -61,7 +111,7 @@ export function useLiveChanges() {
 
 export function useInvalidateAll() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries()
+  return useCallback(() => qc.invalidateQueries(), [qc])
 }
 
 export function useUpdateDocument(id: number) {
@@ -72,6 +122,11 @@ export function useUpdateDocument(id: number) {
 export function useDeleteDocument() {
   const invalidate = useInvalidateAll()
   return useMutation({ mutationFn: api.deleteDocument, onSuccess: invalidate })
+}
+
+export function useReanalyze() {
+  const invalidate = useInvalidateAll()
+  return useMutation({ mutationFn: api.reanalyze, onSuccess: invalidate })
 }
 
 /** Grouped actions on the documents selected in a list. */
@@ -104,7 +159,7 @@ export function useTrash() {
   return useQuery({ queryKey: keys.trash, queryFn: api.trash })
 }
 
-export function useActivity(p: { document_id?: number; limit?: number } = {}) {
+export function useActivity(p: ActivityParams = {}) {
   return useQuery({ queryKey: keys.activity(p), queryFn: () => api.activity(p) })
 }
 
@@ -119,7 +174,7 @@ export function usePurgeDocument() {
 }
 
 export function useSubscriptions() {
-  return useQuery({ queryKey: ["subscriptions"], queryFn: api.subscriptions })
+  return useQuery({ queryKey: keys.subscriptions, queryFn: api.subscriptions })
 }
 
 export function useExpirations() {
@@ -135,12 +190,10 @@ export function useArchiveDocument() {
   }
 }
 
-export const feedKey = ["feed"] as const
-
 /** The Today feed; refreshed often while the local AI installs, documents arrive in the background. */
 export function useFeed() {
   return useQuery({
-    queryKey: feedKey,
+    queryKey: keys.feed,
     queryFn: api.feed,
     refetchInterval: (q) => {
       const setup = q.state.data?.setup
@@ -150,30 +203,59 @@ export function useFeed() {
   })
 }
 
+/** The questions Binder has: every one (grouped), or one per document of `ids`. */
+export function useQuestions(ids?: number[]) {
+  return useQuery({ queryKey: keys.questions(ids), queryFn: () => api.questions(ids) })
+}
+
+/** What an import brought in. */
+export function useReport(batch: string) {
+  return useQuery({
+    queryKey: keys.report(batch),
+    queryFn: () => api.report(batch),
+    retry: false,
+    // Until every document of the import is read (and while the first one is still uploading).
+    refetchInterval: (q) => (!q.state.data || q.state.data.processing ? 1500 : false),
+  })
+}
+
+export function useAreas() {
+  return useQuery({ queryKey: keys.areas, queryFn: api.areas, refetchInterval: 30_000 })
+}
+
+/** The administrative year: what comes back every year. */
+export function useCalendar() {
+  return useQuery({ queryKey: keys.calendar, queryFn: api.calendar, staleTime: 300_000 })
+}
+
 /** The local AI models; refreshed while an accepted upgrade downloads. */
 export function useModels() {
   return useQuery({
-    queryKey: ["models"],
+    queryKey: keys.models,
     queryFn: api.models,
     refetchInterval: (q) => (q.state.data?.upgrade?.accepted ? 2000 : false),
   })
 }
 
+export function useConversations() {
+  return useQuery({ queryKey: keys.conversations, queryFn: api.conversations })
+}
+
 export function useJourneys() {
-  return useQuery({ queryKey: ["journeys"], queryFn: api.journeys })
+  return useQuery({ queryKey: keys.journeys, queryFn: api.journeys })
 }
 
 export function useJourneyKinds() {
-  return useQuery({ queryKey: ["journeyKinds"], queryFn: api.journeyKinds, staleTime: Infinity })
+  return useQuery({ queryKey: keys.journeyKinds, queryFn: api.journeyKinds, staleTime: Infinity })
 }
 
 export function useJourney(id: number | null) {
-  return useQuery({ queryKey: ["journey", id], queryFn: () => api.journey(id!), enabled: id !== null })
+  return useQuery({ queryKey: keys.journey(id ?? 0), queryFn: () => api.journey(id ?? 0), enabled: id !== null })
 }
 
 /** Letters Binder wrote, most recent first: drafts, sent ones awaiting an answer, answered. */
 export function useLetters() {
-  return useQuery({ queryKey: ["letters"], queryFn: api.letters })
+  return useQuery({ queryKey: keys.letters, queryFn: api.letters })
 }
 
 export function useDeleteLetter() {
@@ -189,6 +271,47 @@ export function useUpdateJourney() {
   })
 }
 
-export function useProfile() {
-  return useQuery({ queryKey: ["profile"], queryFn: api.profile, staleTime: 60_000 })
+/** The user's details; `fresh` for a form editing them, else a minute old is fine (a name shown). */
+export function useProfile({ fresh = false } = {}) {
+  return useQuery({ queryKey: keys.profile, queryFn: api.profile, ...(fresh ? {} : { staleTime: 60_000 }) })
+}
+
+/** Saves answers about the user's situation on top of the latest profile (the details form keeps
+ * its own unsaved edits); the papers to have follow. */
+export function useSaveSituation(onSaved?: () => void) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (answer: Partial<Profile>) => api.saveProfile({ ...(await api.profile()), ...answer }),
+    onSuccess: (saved) => {
+      qc.setQueryData(keys.profile, saved)
+      void qc.invalidateQueries({ queryKey: keys.essentials })
+      onSaved?.()
+    },
+    onError: (e) => toast.error(e.message),
+  })
+}
+
+/** The papers to have for the user's situation. */
+export function useEssentials() {
+  return useQuery({ queryKey: keys.essentials, queryFn: api.essentials })
+}
+
+export function useHousehold() {
+  return useQuery({ queryKey: keys.household, queryFn: api.household })
+}
+
+export function useReminders() {
+  return useQuery({ queryKey: keys.reminders, queryFn: api.reminders })
+}
+
+export function useBackup() {
+  return useQuery({ queryKey: keys.backup, queryFn: api.backup })
+}
+
+export function useDemoStatus() {
+  return useQuery({ queryKey: keys.demo, queryFn: api.demoStatus })
+}
+
+export function useImportSettings() {
+  return useQuery({ queryKey: keys.importSettings, queryFn: api.importSettings })
 }

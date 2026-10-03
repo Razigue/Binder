@@ -9,8 +9,8 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
+from cryptography.fernet import InvalidToken
 from sqlmodel import Session, col, or_, select
 
 from binder import i18n, security
@@ -354,6 +354,11 @@ def apply_extraction(doc: Document, ext: Extraction) -> None:
     refresh_status(doc)
 
 
+def _doubts(doc: Document) -> list[str]:
+    doubts: list[str] = json.loads(doc.doubts or "[]")
+    return doubts
+
+
 def refresh_status(doc: Document, validated: bool = False) -> None:
     if validated and doc.duplicate_of is not None:
         # Validating a flagged duplicate means deciding to keep both.
@@ -363,7 +368,7 @@ def refresh_status(doc: Document, validated: bool = False) -> None:
         # The user checked the document: the doubts of the reading are settled.
         doc.doubts = "[]"
     missing = rules.missing_for(doc.category, doc.model_dump())
-    doubts = json.loads(doc.doubts or "[]")
+    doubts = _doubts(doc)
     if doc.duplicate_of is not None:
         missing.append("duplicate")
     doc.missing_fields = json.dumps([*missing, *doubts])
@@ -432,7 +437,7 @@ def extract(
     mime_type: str,
     *,
     use_llm: bool = True,
-    example: Callable[[str], dict[str, Any] | None] | None = None,
+    example: Callable[[str], learning.Example | None] | None = None,
 ) -> tuple[ReadResult, Extraction]:
     """Reading and extraction of a file, before anything about the library is applied (past
     corrections, duplicates): what the evaluation measures (scripts/evaluate.py).
@@ -475,8 +480,7 @@ def _read_again(
     reads again the same way, from the other view of the page when it can (the image after the
     text, or the text alone after the image), is settled. Only with the model: without it the
     rules have nothing new to say."""
-    doubted = {d.partition(":")[2] for d in ext.doubts if d.partition(":")[2]}
-    if not doubted:
+    if not any(verify.field_of(d) for d in ext.doubts):
         return
     other = [] if images else _scan_pages(data, mime_type, read, any_pdf=True)
     # Rare (only doubted values) and decisive: a large model reasons on this reading.
@@ -484,10 +488,10 @@ def _read_again(
     if second is None:
         return
     second.doubts = verify.check(second, read.text, scanned=bool(other))
-    still = {d.partition(":")[2] for d in second.doubts if d.partition(":")[2]}
+    still = {verify.field_of(d) for d in second.doubts} - {""}
     kept = []
     for doubt in ext.doubts:
-        field = doubt.partition(":")[2]
+        field = verify.field_of(doubt)
         value = getattr(ext, field, None) if field else None
         if value is not None and field not in still and getattr(second, field, None) == value:
             continue
@@ -532,6 +536,15 @@ def analyze(session: Session, doc: Document) -> Document:
     if waits_for_ai(doc):
         return _wait(session, doc)
     previous_key = organize.series_key(doc)
+    learned = _read(session, doc)
+    _file(session, doc, previous_key, learned)
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+def _read(session: Session, doc: Document) -> list[str]:
+    """Reads the file into `doc`; returns the fields past corrections changed."""
     doc.duplicate_of = None
     data = load_file(doc)
     _link_own_letter(session, doc, data)
@@ -547,6 +560,15 @@ def analyze(session: Session, doc: Document) -> Document:
         if ext.title == rules.T("untitled"):
             ext.title = doc.filename.rsplit(".", 1)[0]
     apply_extraction(doc, ext)
+    # A name the user corrected in the household is written their way.
+    doc.person = household.canonical(session, doc.person)
+    return learned
+
+
+def _file(
+    session: Session, doc: Document, previous_key: tuple[str, str] | None, learned: list[str]
+) -> None:
+    """Everything that follows a reading: duplicates, history, deadlines, search, folders."""
     session.add(doc)
     session.flush()
     organize.detect_duplicate(session, doc)
@@ -562,9 +584,6 @@ def analyze(session: Session, doc: Document) -> Document:
     session.flush()
     subscriptions.check_increase(session, doc)
     anomalies.check_new(session, doc)
-    session.commit()
-    session.refresh(doc)
-    return doc
 
 
 def _archive_if_old(session: Session, doc: Document) -> None:
@@ -610,7 +629,7 @@ def _log_analysis(session: Session, doc: Document) -> None:
     msg: i18n.Msg
     if doc.status == DocumentStatus.TO_REVIEW:
         missing = json.loads(doc.missing_fields)
-        doubts = json.loads(doc.doubts or "[]")
+        doubts = _doubts(doc)
         reasons = [f for f in missing if f not in ("text", "duplicate", *doubts)]
         original = session.get(Document, doc.duplicate_of) if doc.duplicate_of else None
         why: i18n.Msg
@@ -639,7 +658,7 @@ def _log_analysis(session: Session, doc: Document) -> None:
             "confidence": doc.confidence,
             "extractor": doc.extractor,
             "amount": doc.amount,
-            "doubts": json.loads(doc.doubts or "[]"),
+            "doubts": _doubts(doc),
             "due_date": doc.due_date,
             "reference": doc.reference,
             "duplicate_of": doc.duplicate_of,
@@ -761,9 +780,11 @@ def demo_documents(session: Session) -> list[Document]:
     Older versions did not mark them with a batch: those are recognised by their file.
     """
     docs = list(session.exec(select(Document).where(col(Document.batch).startswith(DEMO_BATCH))))
-    for doc in session.exec(select(Document).where(col(Document.filename).in_(DEMO_FILENAMES))):
-        if not is_demo(doc) and _is_demo_file(get_settings().files_dir / doc.stored_name):
-            docs.append(doc)
+    named = session.exec(select(Document).where(col(Document.filename).in_(DEMO_FILENAMES)))
+    files_dir = get_settings().files_dir
+    docs.extend(
+        doc for doc in named if not is_demo(doc) and _is_demo_file(files_dir / doc.stored_name)
+    )
     return docs
 
 
@@ -783,7 +804,7 @@ def demo_leftover_files(session: Session) -> list[Path]:
 def _is_demo_file(path: Path) -> bool:
     try:
         return is_bare_a4_pdf(security.decrypt(path.read_bytes()))
-    except Exception:
+    except (OSError, InvalidToken):
         return False
 
 

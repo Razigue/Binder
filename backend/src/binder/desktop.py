@@ -425,6 +425,13 @@ class WindowApi:
         if self._window is not None:
             self._window.destroy()
 
+    def open_external(self, url: str) -> None:
+        """An official or customer website, in the user's own browser (signed in there)."""
+        import webbrowser
+
+        if str(url).startswith("https://"):
+            webbrowser.open(str(url))
+
     def choose_folder(self, initial: str = "") -> str | None:
         """System folder dialog, for the watched folder. None if cancelled."""
         import webview
@@ -437,7 +444,7 @@ class WindowApi:
         )
         if not chosen:
             return None
-        return str(chosen[0] if isinstance(chosen, (list, tuple)) else chosen)
+        return str(chosen[0] if isinstance(chosen, list | tuple) else chosen)
 
     def _attach(self, window: Any, dark: bool) -> None:
         """Paints the interface's colours if already sent, otherwise defaults for `dark`."""

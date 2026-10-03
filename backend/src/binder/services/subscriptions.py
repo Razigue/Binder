@@ -5,6 +5,7 @@ amount. An increase is flagged when the latest amount exceeds the previous one b
 least 2 (in the user's currency).
 """
 
+import itertools
 from datetime import date
 from statistics import median
 
@@ -15,6 +16,7 @@ from binder import i18n
 from binder.db import WITHOUT_TEXT, in_use
 from binder.models import Category, DocType, Document
 from binder.services import activity
+from binder.services.deadlines import document_date
 from binder.services.rules import normalize
 
 T = i18n.catalog(
@@ -89,10 +91,6 @@ def _key(doc: Document) -> str | None:
     return f"{doc.category.name}|{doc.doc_type or ''}|{who}"
 
 
-def _date(doc: Document) -> date:
-    return doc.issue_date or doc.due_date or doc.created_at.date()
-
-
 def _cadence(interval: float | None) -> str:
     if interval is None:
         return "irregular"
@@ -100,8 +98,8 @@ def _cadence(interval: float | None) -> str:
 
 
 def _build(key: str, docs: list[Document]) -> Subscription:
-    docs = sorted(docs, key=lambda d: (_date(d), d.id or 0))
-    gaps = [(_date(b) - _date(a)).days for a, b in zip(docs, docs[1:], strict=False)]
+    docs = sorted(docs, key=lambda d: (document_date(d), d.id or 0))
+    gaps = [(document_date(b) - document_date(a)).days for a, b in itertools.pairwise(docs)]
     gaps = [g for g in gaps if g > 0]
     interval = median(gaps) if gaps else None
     last, previous = docs[-1], docs[-2]
@@ -123,7 +121,7 @@ def _build(key: str, docs: list[Document]) -> Subscription:
         yearly_estimate=round(last.amount * 365 / interval, 2) if interval else None,
         increase=change >= INCREASE_RATIO and last.amount - previous.amount >= INCREASE_MIN,
         history=[
-            Point(document_id=d.id, date=_date(d), amount=d.amount)
+            Point(document_id=d.id, date=document_date(d), amount=d.amount)
             for d in docs
             if d.id is not None and d.amount is not None
         ],
