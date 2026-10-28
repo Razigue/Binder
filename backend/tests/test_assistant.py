@@ -155,6 +155,7 @@ def test_dismissed_cards_stay_hidden(client: TestClient, demo: dict[str, Any]) -
 # --- Import report --------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("sample_day")
 def test_import_report_groups_a_drop_of_files(client: TestClient, samples: list[Sample]) -> None:
     for s in samples[:3]:
         r = client.post(

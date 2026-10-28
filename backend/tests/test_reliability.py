@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -49,6 +50,7 @@ def test_reimporting_a_trashed_document_restores_it(
     assert again["deleted_at"] is None
 
 
+@pytest.mark.usefixtures("sample_day")
 def test_activity_log_is_readable(client: TestClient, samples: list[Sample]) -> None:
     doc = upload(client, by_name(samples, "facture-edf-juillet.pdf"))
     client.patch(f"/api/documents/{doc['id']}", json={"due_date": "2026-10-20", "validated": True})
