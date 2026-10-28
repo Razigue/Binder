@@ -149,8 +149,13 @@ MOE_BUDGET = 32 * GB
 # less once the firmware and integrated graphics have taken their share).
 MID_VRAM = 8 * GB
 MID_RAM = 15 * GB
-# Qwen 3.5 4B (3.4 GB) needs ~10 GB of RAM next to the system; below, the 2B.
-SMALL_RAM = 10 * GB
+# Qwen 3.5 4B (3.4 GB): the floor of the ladder. The 2B reads too poorly to be chosen for the
+# user; it stays in the catalogue for explicit API choices.
+# Binder picks at most the 9B on its own: it reads documents well and stays quick on an ordinary
+# machine, where a larger model makes every reading slow. The larger ones stay a choice in the
+# API; memory_tier still measures them so that a model the machine runs is never flagged as
+# too heavy.
+AUTO_MAX = "qwen3.5:9b"
 # Free disk needed per byte of model: Ollama writes partial files before the final blobs.
 DISK_MARGIN = 1.2
 
@@ -413,22 +418,21 @@ def memory_tier(ram: int, vram: int, apple: bool = False) -> str:
         return "qwen3.6:35b-a3b"
     if vram >= MID_VRAM or ram >= MID_RAM:
         return "qwen3.5:9b"
-    # Memory unknown (0): the middle of the ladder rather than its bottom.
-    if ram >= SMALL_RAM or ram == 0:
-        return "qwen3.5:4b"
-    return "qwen3.5:2b"
+    return "qwen3.5:4b"
 
 
 def pick_model(
     ram: int, vram: int, free_disk: int, apple: bool = False, ollama: str | None = None
 ) -> str | None:
-    """The best chat model of the catalogue this machine runs comfortably and can store.
+    """The chat model Binder picks for this machine: the 9B when its memory runs it, else the 4B.
 
     Steps down the ranks while the disk lacks room, or the running Ollama (`ollama`, its
     version when known) is too old for a model.
     """
-    wanted = llm_models.rank(memory_tier(ram, vram, apple))
+    wanted = min(llm_models.rank(memory_tier(ram, vram, apple)), llm_models.rank(AUTO_MAX))
     for entry in reversed(llm_models.CHAT):
+        if not entry.pickable:
+            continue
         if entry.rank > wanted or llm.outdated_ollama(ollama, entry.min_ollama):
             continue
         if entry.size * DISK_MARGIN < free_disk:

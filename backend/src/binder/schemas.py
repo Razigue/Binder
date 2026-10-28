@@ -359,6 +359,8 @@ class ModelOut(BaseModel):
     recommended: bool
     # "chat" (can be the active model) or "embedding" (semantic search).
     kind: str = "chat"
+    # Offered in the settings as a manual choice.
+    pickable: bool = False
     in_catalog: bool
     installed: bool
     download: ModelDownload | None = None
@@ -390,6 +392,8 @@ class ModelsOverview(BaseModel):
     recommended_label: str = ""
     # The active model was picked by Binder (upgrades offered), not by the user.
     automatic: bool = True
+    # Model the user picked in the settings, downloading: used once ready.
+    picked: str | None = None
     upgrade: ModelUpgrade | None = None
     models: list[ModelOut]
 
