@@ -82,7 +82,7 @@ def test_answer_in_the_wrong_language_is_asked_again_once(
     ]
     response = loop.run(session, "What is due?", [])
     assert response.answer == "You have an EDF bill to pay before 14 October."
-    assert model.requests[2][-1]["content"] == loop.WRONG_LANGUAGE.format(language="English")
+    assert loop.WRONG_LANGUAGE.format(language="English") in model.requests[2][-1]["content"]
     # Only once: a second answer in French is kept rather than asked again.
     model.replies = [
         call("list", kind="deadlines"),

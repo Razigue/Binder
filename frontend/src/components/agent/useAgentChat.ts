@@ -16,9 +16,6 @@ export function useAgentChat() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [pending, setPending] = useState(false)
   const [viewing, setViewing] = useState<Viewing | null>(null)
-  // Document on screen the user unlinked from their questions, until another one is shown.
-  const [ignored, setIgnored] = useState<number | null>(null)
-  const about = viewing && viewing.id !== ignored ? viewing : null
   // Saved conversation shown (null until its first answer is saved) and the document it is about.
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [linked, setLinked] = useState<number | null>(null)
@@ -93,7 +90,7 @@ export function useAgentChat() {
    * questions about it do not carry the previous one (still in the history). */
   const view = (doc: Viewing) => {
     setViewing(doc)
-    const changed = doc.id !== viewing?.id && doc.id !== ignored
+    const changed = doc.id !== viewing?.id
     if (changed && !pending && turns.length && !concerns(turns, linked, doc.id)) begin()
   }
 
@@ -107,7 +104,7 @@ export function useAgentChat() {
     if (fresh && turns.length) begin()
     const kept = fresh ? [] : turns.slice(0, at)
     if (!kept.length) {
-      setLinked(about?.id ?? null)
+      setLinked(viewing?.id ?? null)
       setPrevious(null)
     }
     const history: ChatMessage[] = kept.flatMap((turn) =>
@@ -152,7 +149,7 @@ export function useAgentChat() {
           else if (event.type === "step") progress(() => ({ draft: "" }))
         },
         abort.signal,
-        about?.id,
+        viewing?.id,
       )
       .then((response) => {
         update(id, { response })
@@ -171,8 +168,8 @@ export function useAgentChat() {
     pending,
     conversationId,
     previous,
-    /** The document on screen questions are about, unless the user unlinked it. */
-    about,
+    /** The document on screen questions are about. */
+    about: viewing,
     showHistory,
     setShowHistory,
     ask,
@@ -181,7 +178,6 @@ export function useAgentChat() {
     resume,
     view,
     leave,
-    ignoreViewing: () => setIgnored(about?.id ?? null),
   }
 }
 

@@ -33,6 +33,7 @@ def test_duplicate_upload_returns_existing(client: TestClient, samples: list[Sam
     assert len(client.get("/api/documents").json()) == 1
 
 
+@pytest.mark.usefixtures("sample_day")
 def test_incomplete_document_goes_to_review_then_validated(
     client: TestClient, samples: list[Sample]
 ) -> None:

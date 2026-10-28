@@ -6,7 +6,8 @@ import type { Doc } from "@/lib/api"
 /** Minimal rendering of the agent's text: links [text](url), citations [#id] and **bold**. */
 export function RichText({ text, docs, onNavigate }: { text: string; docs: Doc[]; onNavigate: () => void }) {
   const t = useT(messages)
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\)|\s?\[#\d+\]|\*\*[^*\n]+\*\*)/g)
+  // "[#web]": the model citing something that is not a document (also while it streams).
+  const parts = text.replace(/\s?\[#(?!\d+\])[^\]\n]{1,30}\]/g, "").split(/(\[[^\]]+\]\([^)]+\)|\s?\[#\d+\]|\*\*[^*\n]+\*\*)/g)
   const order = [...new Set([...text.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))]
   return (
     <>

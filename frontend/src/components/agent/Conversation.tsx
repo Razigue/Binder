@@ -33,7 +33,6 @@ export function AgentConversation({
   onStop,
   onNavigate,
   viewing,
-  onIgnoreViewing,
   previous,
   onResume,
 }: {
@@ -43,7 +42,6 @@ export function AgentConversation({
   onStop: () => void
   onNavigate: () => void
   viewing: Viewing | null
-  onIgnoreViewing: () => void
   previous: Previous | null
   onResume: (id: number) => void
 }) {
@@ -151,7 +149,6 @@ export function AgentConversation({
         pending={pending}
         onStop={onStop}
         viewing={viewing}
-        onIgnoreViewing={onIgnoreViewing}
         onSend={(question, docs) => ask(question, docs)}
       />
 

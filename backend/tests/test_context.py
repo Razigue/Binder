@@ -59,6 +59,17 @@ def test_then_old_results_then_earlier_turns(monkeypatch: pytest.MonkeyPatch) ->
     assert messages[-1] == {"role": "tool", "content": "latest result", "images": ["img"]}
 
 
+def test_document_on_screen_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    messages = _messages()
+    messages.insert(1, {"role": "user", "content": "Document open on screen:", "context": True})
+    _window(monkeypatch, llm.ANSWER_TOKENS + 1500)
+    loop.fit_context(messages, None)
+    # Earlier turns go, the document stays.
+    assert [m["content"] for m in messages[:4]] == [
+        "SYSTEM", "Document open on screen:", "old answer", "Mes factures EDF ?",
+    ]  # fmt: skip
+
+
 def test_tool_schemas_are_never_cut(monkeypatch: pytest.MonkeyPatch) -> None:
     messages = _messages()
     schemas = tools.TOOL_SCHEMAS[:3]
