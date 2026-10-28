@@ -15,6 +15,21 @@ from binder.services import llm, llm_models, scan, websearch
 TODAY = date(2026, 9, 30)
 
 
+@pytest.fixture
+def sample_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep date-sensitive assertions about the fixed samples independent of the run date."""
+    from binder.agent import tools
+    from binder.services import relevance, reports
+
+    class SampleDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return TODAY
+
+    for module in (tools, relevance, reports):
+        monkeypatch.setattr(module, "date", SampleDate)
+
+
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("BINDER_DATA_DIR", str(tmp_path))
