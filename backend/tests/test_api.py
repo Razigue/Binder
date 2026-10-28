@@ -1,11 +1,13 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from binder.samples import Sample
-from tests.conftest import upload
+from binder.services import relevance
+from tests.conftest import TODAY, upload
 
 
 def by_name(samples: list[Sample], name: str) -> Sample:
@@ -34,8 +36,15 @@ def test_duplicate_upload_returns_existing(client: TestClient, samples: list[Sam
 
 
 def test_incomplete_document_goes_to_review_then_validated(
-    client: TestClient, samples: list[Sample]
+    client: TestClient, samples: list[Sample], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Keep the sample bill within the period where its missing due date matters.
+    class SampleDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return TODAY
+
+    monkeypatch.setattr(relevance, "date", SampleDate)
     doc = upload(client, by_name(samples, "facture-edf-juillet.pdf"))
     assert doc["status"] == "to_review"
     assert doc["missing_fields"] == ["due_date"]
