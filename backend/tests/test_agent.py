@@ -19,7 +19,7 @@ from binder.samples import Sample
 from binder.services import embeddings, ingest, llm
 from binder.services.rules import normalize
 from binder.services.text import join_lines, read_document, render_page
-from tests.conftest import upload
+from tests.conftest import TODAY, upload
 
 
 def by_name(samples: list[Sample], name: str) -> Sample:
@@ -116,8 +116,15 @@ def test_text_details_are_found_by_reading(library: dict[str, int], session: Ses
 
 
 def test_deadlines_include_overdue_ones_and_their_total(
-    library: dict[str, int], session: Session
+    library: dict[str, int], session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The samples have fixed dates; their deadlines must not age with the test runner.
+    class SampleDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return TODAY
+
+    monkeypatch.setattr(tools, "date", SampleDate)
     session.add(Deadline(title="Old fine", due_date=date(2020, 1, 15)))
     session.commit()
     result = tools.list_deadlines(session, days=400)
