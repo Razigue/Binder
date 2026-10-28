@@ -246,7 +246,7 @@ def test_answer_without_looking_is_refused_once(
     response = loop.run(session, "How much is my EDF bill?", [], emit=events.append)
     assert response.answer == f"Your EDF bill is €94.37 [#{doc_id}]."
     assert response.citations == [doc_id]
-    assert model.requests[1][-1]["content"] == loop.TOOLS_FIRST
+    assert loop.TOOLS_FIRST in model.requests[1][-1]["content"]
     assert "€120" not in json.dumps(model.requests[1])
     # The discarded guess never reached the screen: no text shown, then wiped.
     shown = "".join(e["text"] for e in events if e["type"] == "token")
@@ -404,6 +404,18 @@ def test_loose_citations_are_fixed_only_for_known_documents(
     assert response.citations == [maif]
 
 
+def test_citations_of_non_documents_are_dropped(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    maif = library["maif-echeance.pdf"]
+    model.replies = [
+        call("search_documents", query="MAIF"),
+        answer(f"Notice: one month [#web], per service-public.fr. Contract [#{maif}]."),
+    ]
+    response = loop.run(session, "Mon contrat MAIF ?", [])
+    assert response.answer == f"Notice: one month, per service-public.fr. Contract [#{maif}]."
+
+
 def test_unnamed_source_is_cited_by_its_title(
     library: dict[str, int], session: Session, model: FakeModel
 ) -> None:
@@ -425,7 +437,7 @@ def test_loops_and_bad_arguments_are_handled(
     assert "not valid JSON" in tool_messages[0]["content"]
     assert "Same call as before" in tool_messages[2]["content"]
     # Out of steps: a last turn without tools.
-    assert model.requests[-1][-1]["content"] == loop.FINAL_NUDGE
+    assert loop.FINAL_NUDGE in model.requests[-1][-1]["content"]
     assert "tools" not in model.kwargs[-1]
 
 
@@ -452,6 +464,25 @@ def test_earlier_documents_stay_citable(
     title = session.get(Document, orange).title  # type: ignore[union-attr]
     assert f"(documents shown: #{orange} {title})" in model.requests[0][2]["content"]
     assert response.citations == [orange]
+
+
+def test_thanks_about_an_open_document(
+    library: dict[str, int], session: Session, model: FakeModel
+) -> None:
+    orange = library["facture-orange.pdf"]
+    doc = session.get(Document, orange)
+    history = [
+        loop.ChatMessage(role="user", content="Que dit cette facture ?"),
+        loop.ChatMessage(role="assistant", content=f"80 Go [#{orange}].", documents=[orange]),
+    ]
+    # The model copies the marker of earlier answers: removed from its own.
+    model.replies = [answer(f"Avec plaisir !\n(documents shown: #{orange} Facture Orange)")]
+    response = loop.run(session, "Ah merci pour l'info !", history, viewing=doc)
+    assert response.answer == "Avec plaisir !"
+    # No request to look it up again; the document on screen stays context, before the history.
+    assert len(model.requests) == 1
+    assert model.requests[0][1]["content"].startswith("Document open on screen")
+    assert model.requests[0][-1]["content"] == "Ah merci pour l'info !"
 
 
 def test_stream_endpoint(client: TestClient, library: dict[str, int], model: FakeModel) -> None:
@@ -627,7 +658,7 @@ def test_announced_action_is_actually_done(
         answer("Done: the old certificate is in the trash."),
     ]
     response = loop.run(session, "Trash last year's MAIF certificate", [])
-    assert model.requests[2][-1]["content"] == loop.DO_IT
+    assert loop.DO_IT in model.requests[2][-1]["content"]
     assert [c.name for c in response.tool_calls] == ["search_documents", "trash_document"]
     # Found by reading documents: the trash waits for the user's confirmation.
     assert not response.changed and response.confirmations[0]["tool"] == "trash_document"
@@ -663,5 +694,5 @@ def test_request_handed_back_to_the_user_is_done(
         answer("Reminder set for 12 November."),
     ]
     response = loop.run(session, "Remind me to pay the canteen on 12 November", [])
-    assert model.requests[2][-1]["content"] == loop.JUST_DO_IT
+    assert loop.JUST_DO_IT in model.requests[2][-1]["content"]
     assert response.changed and response.deadlines[0].title == "Pay the canteen"

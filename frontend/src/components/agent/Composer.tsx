@@ -21,7 +21,6 @@ export function Composer({
   onSend,
   onStop,
   viewing,
-  onIgnoreViewing,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>
   attachments: Attachments
@@ -29,15 +28,21 @@ export function Composer({
   onSend: (question: string, attachments: Doc[]) => void
   onStop: () => void
   viewing: Viewing | null
-  onIgnoreViewing: () => void
 }) {
   const t = useT(messages)
   const [text, setText] = useState("")
+  // A question started about a document no longer makes sense once the user leaves it.
+  const [about, setAbout] = useState(viewing?.id)
+  if (viewing?.id !== about) {
+    setAbout(viewing?.id)
+    if (about !== undefined) setText("")
+  }
   const [camera, setCamera] = useState(false)
   const filePicker = useRef<HTMLInputElement>(null)
   const photoPicker = useRef<HTMLInputElement>(null)
   const { items, uploading, ready } = attachments
   const canSend = !pending && !uploading && (text.trim() !== "" || ready.length > 0)
+  const placeholder = viewing ? t("inputPlaceholderViewing") : t("inputPlaceholder")
 
   const submit = () => {
     if (!canSend) return
@@ -66,7 +71,7 @@ export function Composer({
   return (
     <div className="border-t p-3">
       <div className="rounded-xl border bg-card shadow-xs transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
-        {viewing && <ViewingChip viewing={viewing} onIgnore={onIgnoreViewing} />}
+        {viewing && <ViewingChip viewing={viewing} />}
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {items.map((item) => (
@@ -84,8 +89,8 @@ export function Composer({
             submit()
           }}
           onPaste={onPaste}
-          placeholder={t("inputPlaceholder")}
-          aria-label={t("inputPlaceholder")}
+          placeholder={placeholder}
+          aria-label={placeholder}
           rows={1}
           autoComplete="off"
           autoFocus
@@ -149,26 +154,17 @@ export function Composer({
   )
 }
 
-/** "About: <document>", the document on screen, with a way to unlink it from the questions. */
-function ViewingChip({ viewing, onIgnore }: { viewing: Viewing; onIgnore: () => void }) {
+/** "About: <document>", the document on screen the conversation is about. */
+function ViewingChip({ viewing }: { viewing: Viewing }) {
   const t = useT(messages)
   return (
     <div className="flex px-2.5 pt-2.5">
       <span
-        className="inline-flex max-w-full items-center gap-1.5 rounded-md border bg-background py-0.5 pr-0.5 pl-2 text-xs text-muted-foreground"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground"
         title={t("viewingHint")}
       >
         <FileTextIcon className="size-3.5 shrink-0" />
         <span className="truncate">{t("viewing", { title: viewing.title })}</span>
-        <button
-          type="button"
-          onClick={onIgnore}
-          aria-label={t("ignoreViewing")}
-          title={t("ignoreViewing")}
-          className="relative flex size-5 shrink-0 items-center justify-center rounded-full after:absolute after:-inset-0.5 hover:bg-muted hover:text-foreground"
-        >
-          <XIcon className="size-3" />
-        </button>
       </span>
     </div>
   )

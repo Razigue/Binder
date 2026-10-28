@@ -15,6 +15,7 @@ from binder.config import get_settings
 from binder.db import get_engine
 from binder.models import Correspondence
 from binder.services import lawcheck, letters, llm, websearch
+from binder.services.rules import normalize
 
 OFFICIAL_URL = "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000030332005"
 BLOG_URL = "https://www.blog-assurance.example/loi-hamon"
@@ -249,8 +250,114 @@ def test_answer_quoting_law_is_checked_first(
     monkeypatch.setattr(llm, "chat", chat)
     response = loop.run(session, "Puis-je résilier mon assurance ?", [])
     assert response.answer == "Oui, après un an, d'après legifrance.gouv.fr."
-    assert sent[2][-1]["content"] == loop.VERIFY_LAW
+    note = sent[2][-1]
+    # Marked as Binder's, with the question still to answer.
+    assert note["role"] == "user" and note["content"].startswith("[Binder internal note")
+    assert loop.VERIFY_LAW in note["content"]
+    assert '"Puis-je résilier mon assurance ?"' in note["content"]
     assert web.queries == [QUERY]
+    assert response.warnings == []
+
+
+def test_report_on_the_check_is_not_the_answer(
+    web: Web, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = "Vous pouvez résilier à tout moment (article L113-15-2)."
+    replies = [
+        {"content": "", "tool_calls": [{"function": {"name": "app_help", "arguments": {}}}]},
+        {"content": draft},
+        {
+            "content": "",
+            "tool_calls": [{"function": {"name": "web_search", "arguments": {"query": QUERY}}}],
+        },
+        {"content": "Je ne vois aucune affirmation de loi dans ma réponse précédente."},
+    ]
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "has_vision", lambda: False)
+    monkeypatch.setattr(llm, "chat", lambda *_, **__: {"role": "assistant", **replies.pop(0)})
+    streamed: list[str] = []
+
+    def emit(event: dict[str, Any]) -> None:
+        if event["type"] == "token":
+            streamed.append(event["text"])
+
+    response = loop.run(session, "Puis-je résilier mon assurance ?", [], emit=emit)
+    assert response.answer == draft
+    assert response.warnings == [loop.T("law_not_checked")]
+    # The report was never shown, even for a moment.
+    assert "affirmation" not in "".join(streamed)
+
+
+def test_answer_already_shown_is_flagged_not_rewritten(
+    web: Web, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = (
+        "Your home insurance with MAIF renews every year on 1 January, and the premium for "
+        "this year is taken in monthly instalments from your account. Under the law, you "
+        "can cancel it at any time after the first year."
+    )
+    replies = [
+        {"content": "", "tool_calls": [{"function": {"name": "app_help", "arguments": {}}}]},
+        {"content": text},
+    ]
+
+    def chat(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        reply = replies.pop(0)
+        if kwargs.get("on_token"):
+            for word in str(reply["content"]).split(" "):
+                kwargs["on_token"](word + " ")
+        return {"role": "assistant", **reply}
+
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "has_vision", lambda: False)
+    monkeypatch.setattr(llm, "chat", chat)
+    events: list[dict[str, Any]] = []
+    response = loop.run(session, "Tell me about my home insurance", [], emit=events.append)
+    # The law comes past the opening, already on screen: kept and flagged, never wiped.
+    assert response.answer == text and not replies
+    assert response.warnings == [loop.T("law_not_checked")]
+    assert {"type": "step"} not in events
+    assert "".join(e["text"] for e in events if e["type"] == "token").strip() == text
+
+
+def test_question_about_law_is_held_until_checked(
+    web: Web, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replies = [
+        {"content": "", "tool_calls": [{"function": {"name": "app_help", "arguments": {}}}]},
+        {"content": "The notice period is one month, as for any contract of this kind. " * 3},
+        {
+            "content": "",
+            "tool_calls": [{"function": {"name": "web_search", "arguments": {"query": QUERY}}}],
+        },
+        {"content": "One month after a year, according to legifrance.gouv.fr."},
+    ]
+
+    def chat(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        reply = replies.pop(0)
+        if kwargs.get("on_token"):
+            kwargs["on_token"](str(reply["content"]))
+        return {"role": "assistant", **reply}
+
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "has_vision", lambda: False)
+    monkeypatch.setattr(llm, "chat", chat)
+    events: list[dict[str, Any]] = []
+    loop.run(session, "What is the notice period to cancel?", [], emit=events.append)
+    shown = "".join(e["text"] for e in events if e["type"] == "token")
+    assert shown == "One month after a year, according to legifrance.gouv.fr."
+    assert {"type": "step"} not in events
+
+
+def test_meta_answers_are_recognised() -> None:
+    for text in (
+        "Je ne vois aucune affirmation de loi dans ma réponse précédente.",
+        "Ces faits ne nécessitent pas de vérification externe.",
+        "Je ne trouve aucune information contradictoire sur le site d'Orange.",
+        "There is no claim of law in my previous answer.",
+    ):
+        assert loop.META_ANSWER.search(text), text
+    assert not loop.META_ANSWER.search("Votre forfait inclut 80 Go [#3].")
 
 
 def test_answer_after_a_search_is_not_held(web: Web) -> None:
@@ -259,6 +366,13 @@ def test_answer_after_a_search_is_not_held(web: Web) -> None:
     collector.calls.append(loop.ToolCallTrace(name="web_search", arguments={}))
     assert not loop._states_unchecked_law(collector, "Le préavis légal est d'un mois.")
     assert not loop._states_unchecked_law(loop._Collector(), "Votre facture EDF est payée.")
+
+
+def test_law_words_from_the_document_are_not_checked(web: Web) -> None:
+    collector = loop._Collector()
+    collector.sources.append(normalize("Informations légales et tarifs sur sosh.fr"))
+    assert not loop._states_unchecked_law(collector, "Les informations légales sont sur sosh.fr.")
+    assert loop._states_unchecked_law(collector, "Le délai de rétractation est de 14 jours.")
 
 
 @pytest.fixture

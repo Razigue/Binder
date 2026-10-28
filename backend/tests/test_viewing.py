@@ -70,9 +70,12 @@ def test_llm_receives_the_document_on_screen(
     # Answered from the document on screen, without a search; shown since it is cited.
     assert r["citations"] == [edf] and r["documents"][0]["id"] == edf
     assert len(sent) == 1
-    user = sent[0][-1]["content"]
-    assert user.startswith("How much do I owe?") and "Document open on screen:" in user
-    assert "EDF" in user
+    # The document opens the conversation; the question stays alone, so a short reply to the
+    # last answer is not read as a request about the document.
+    context = sent[0][1]
+    assert context["role"] == "user" and "context" not in context
+    assert context["content"].startswith("Document open on screen:") and "EDF" in context["content"]
+    assert sent[0][-1]["content"] == "How much do I owe?"
     assert "looking at one document" in sent[0][0]["content"]
 
     # Not cited: not shown with the answer.

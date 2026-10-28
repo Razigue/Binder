@@ -22,7 +22,6 @@ export function AgentPanel({ chat, onNavigate }: { chat: AgentChat; onNavigate: 
       onStop={chat.stop}
       onNavigate={onNavigate}
       viewing={chat.about}
-      onIgnoreViewing={chat.ignoreViewing}
       previous={chat.previous}
       onResume={(id) => void chat.resume(id)}
     />
