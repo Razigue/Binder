@@ -161,7 +161,7 @@ export function AppLayout() {
   return (
     <div className="flex h-svh flex-col">
       <TitleBar maximized={desktop.maximized} history={history} />
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto">
         {shell}
       </div>
     </div>
@@ -207,8 +207,14 @@ function MenuChoice({
           featured ? "bg-primary text-primary-foreground" : "bg-accent text-primary",
         )}
       >
-        {/* The menu item recolours every descendant on hover: keep the icon readable on its chip. */}
-        <Icon className={cn("size-4", featured ? "text-primary-foreground!" : "text-primary!")} />
+        {/* The menu item recolours every descendant on hover, the icon's paths included (they
+            fill with their own currentColor): keep them readable on the chip. */}
+        <Icon
+          className={cn(
+            "size-4",
+            featured ? "text-primary-foreground! **:text-primary-foreground!" : "text-primary! **:text-primary!",
+          )}
+        />
       </span>
       <span className="min-w-0">
         <span className="block text-sm font-medium">{title}</span>
