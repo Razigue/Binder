@@ -111,7 +111,7 @@ export function Viewer({
         aria-label={t("pane")}
         aria-describedby={hintId}
         className={cn(
-          "min-h-0 flex-1 overflow-auto bg-muted/50 p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+          "relative min-h-0 flex-1 overflow-auto bg-muted/50 p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
           pan && (dragging ? "cursor-grabbing select-none" : "cursor-grab"),
         )}
         onKeyDown={(e) => {
