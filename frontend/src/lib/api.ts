@@ -162,6 +162,8 @@ export interface LocalModel {
   recommended: boolean
   /** "embedding": semantic search, used as soon as it is installed (never the active model). */
   kind: "chat" | "embedding"
+  /** Offered in the settings as a manual choice (the 4B, the 9B). */
+  pickable: boolean
   in_catalog: boolean
   installed: boolean
   download: ModelDownload | null
@@ -190,6 +192,8 @@ export interface ModelsOverview {
   recommended_label: string
   /** The active model was picked by Binder (upgrades offered), not by the user. */
   automatic: boolean
+  /** Model the user picked in the settings, downloading: used once ready. */
+  picked: string | null
   upgrade: ModelUpgrade | null
   models: LocalModel[]
 }
@@ -859,6 +863,7 @@ export const api = {
   changes: () => request<{ revision: number }>("/changes"),
   models: () => request<ModelsOverview>("/llm"),
   chooseModel: (name: string) => request<ModelsOverview>("/llm/model", json("PUT", { name })),
+  pickModel: (name: string) => request<ModelsOverview>("/llm/pick", json("POST", { name })),
   acceptUpgrade: () => request<ModelsOverview>("/llm/upgrade", { method: "POST" }),
   declineUpgrade: () => request<ModelsOverview>("/llm/upgrade/decline", { method: "POST" }),
   /** Loads the model again if Ollama let it go, before the question is sent. */

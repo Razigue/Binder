@@ -1,10 +1,13 @@
 """Local models: Qwen catalogue, choice of the active model and download through Ollama.
 
-No model ships with Binder: at launch, setup.py picks the best one the machine runs and downloads
-it. The download runs in the background; the interface follows its progress. Each launch measures
-the machine again: when Binder chose the model and a better one now suits the machine, it is
+No model ships with Binder: at launch, setup.py picks the 4B or the 9B, whichever the machine runs,
+and downloads it (the larger ones are the user's choice). The download runs in the background;
+the interface follows its progress. Each launch measures the machine again: when Binder chose the
+model and a better one now suits the machine, it is
 downloaded in the background and used once ready (shown, and the user can stop it; never a
-downgrade, never over a model the user picked). Only the models in use stay on the disk.
+downgrade, never over a model the user picked). The settings let the user pick the 4B or the 9B
+by hand (pick): fetched if needed, then used, and Binder no longer changes it. Only the models in
+use stay on the disk.
 docs/models.md: adding one, retiring one.
 """
 
@@ -38,8 +41,8 @@ T = i18n.catalog(
         "label_27b": {"en": "Qwen 3.6 · 27B", "fr": "Qwen 3.6 · 27B"},
         "label_embed": {"en": "Qwen 3 Embedding · 0.6B", "fr": "Qwen 3 Embedding · 0.6B"},
         "desc_2b": {
-            "en": "Very light, for a modest computer (8 GB of memory). Less reliable extraction.",
-            "fr": "Très léger, pour un ordinateur modeste (8 Go de mémoire). Extraction moins "
+            "en": "Very light, if the 4B is too slow on your computer. Less reliable extraction.",
+            "fr": "Très léger, si le 4B est trop lent sur votre ordinateur. Extraction moins "
             "fiable.",
         },
         "desc_4b": {
@@ -134,6 +137,8 @@ class CatalogEntry:
     kind: str = "chat"
     # Oldest Ollama that runs it ("requires" in the tag's config on registry.ollama.ai).
     min_ollama: str = llm.MIN_OLLAMA_VERSION
+    # Offered in the settings as a manual choice (the models Binder itself picks between).
+    pickable: bool = False
 
 
 GB = 1_000_000_000
@@ -141,8 +146,8 @@ GB = 1_000_000_000
 # reads images and calls tools.
 CATALOG = [
     CatalogEntry("qwen3.5:2b", "label_2b", "desc_2b", int(2.7 * GB), rank=1),
-    CatalogEntry("qwen3.5:4b", "label_4b", "desc_4b", int(3.4 * GB), rank=2),
-    CatalogEntry("qwen3.5:9b", "label_9b", "desc_9b", int(6.6 * GB), rank=3),
+    CatalogEntry("qwen3.5:4b", "label_4b", "desc_4b", int(3.4 * GB), rank=2, pickable=True),
+    CatalogEntry("qwen3.5:9b", "label_9b", "desc_9b", int(6.6 * GB), rank=3, pickable=True),
     # Mixture of experts: ~3B parameters active per token, so it stays fast with most of its
     # weights in RAM (Ollama keeps there what the graphics card cannot hold).
     CatalogEntry(
@@ -187,6 +192,8 @@ class _Advice:
     upgrade: str | None = None
     # Upgrade accepted: Binder switches to it as soon as its download ends.
     accepted: str | None = None
+    # Picked by the user in the settings, still downloading: used as the user's choice once ready.
+    picked: str | None = None
     # The active model was picked by Binder, not by the user.
     automatic: bool = True
 
@@ -342,6 +349,29 @@ def choose(session: Session, name: str, *, actor: str = "user") -> None:
         llm.warm()
 
 
+def pick(session: Session, name: str) -> None:
+    """The user's choice in the settings: used now if installed, otherwise downloaded then used.
+    Either way it is theirs (no more upgrades) and the former model leaves the disk."""
+    entry = BY_NAME.get(name)
+    if entry is None or not entry.pickable:
+        raise UnknownModel(T("not_in_catalog", name=name))
+    installed = llm.installed_models()
+    if installed is None:
+        raise ConnectionError(T("ollama_down"))
+    # The user decides: an upgrade under way, or another pick, gives way to this one.
+    for other in (_advice.upgrade, _advice.picked):
+        if other and other != name:
+            cancel_download(other)
+    _advice.upgrade = _advice.accepted = None
+    if llm.is_installed(name, installed):
+        _advice.picked = None
+        choose(session, name)
+        prune(session)
+    else:
+        _advice.picked = name
+        start_download(name)
+
+
 def remove(session: Session, name: str) -> None:
     """Deletes a catalogue model from the machine (frees disk space)."""
     if name not in BY_NAME:
@@ -428,6 +458,8 @@ def start_download(name: str) -> None:
 
 
 def cancel_download(name: str) -> None:
+    if _advice.picked == name:
+        _advice.picked = None
     with _lock:
         download = _downloads.pop(name, None)
     if download:
@@ -513,6 +545,10 @@ def _on_success(name: str) -> None:
         is_chat = BY_NAME[name].kind == "chat" if name in BY_NAME else True
         if name == _advice.accepted:
             _switch(session, name)
+        elif name == _advice.picked:
+            _advice.picked = None
+            choose(session, name)
+            prune(session)
         elif is_chat and not llm.is_installed(llm.model(), installed):
             choose(session, name, actor="binder")
         session.commit()
@@ -548,6 +584,7 @@ def overview() -> ModelsOverview:
             size=installed.get(e.name, e.size) if installed else e.size,
             recommended=e.kind == "embedding" or e.name == recommended,
             kind=e.kind,
+            pickable=e.pickable,
             in_catalog=True,
             installed=bool(installed and llm.is_installed(e.name, installed)),
             download=downloads.get(e.name),
@@ -578,6 +615,7 @@ def overview() -> ModelsOverview:
         recommended=recommended,
         recommended_label=label(recommended),
         automatic=_advice.automatic,
+        picked=_advice.picked,
         upgrade=upgrade_offer(),
         models=models,
     )

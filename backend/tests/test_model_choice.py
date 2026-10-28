@@ -19,40 +19,52 @@ GB = setup.GB
 @pytest.mark.parametrize(
     ("ram", "vram", "apple", "expected"),
     [
-        # Processor alone.
-        (8, 0, False, "qwen3.5:2b"),
+        # Processor alone: a modest machine gets the 4B, never the 2B.
+        (8, 0, False, "qwen3.5:4b"),
         (12, 0, False, "qwen3.5:4b"),
         (16, 0, False, "qwen3.5:9b"),
-        (32, 0, False, "qwen3.6:35b-a3b"),
-        (64, 0, False, "qwen3.6:35b-a3b"),
-        # An 8 GB graphics card: RAM and VRAM add up for the mixture of experts.
+        # Memory unknown: the 4B.
+        (0, 0, False, "qwen3.5:4b"),
+        # Binder picks the 9B at most, however large the machine.
+        (64, 0, False, "qwen3.5:9b"),
         (16, 8, False, "qwen3.5:9b"),
-        (32, 8, False, "qwen3.6:35b-a3b"),
-        # A 24 GB card holds the dense 27B whole.
-        (32, 24, False, "qwen3.6:27b"),
-        (16, 24, False, "qwen3.6:27b"),
+        (32, 24, False, "qwen3.5:9b"),
         # Apple silicon: unified memory, RAM alone.
+        (8, 0, True, "qwen3.5:4b"),
         (16, 0, True, "qwen3.5:9b"),
-        (32, 0, True, "qwen3.6:35b-a3b"),
-        (64, 0, True, "qwen3.6:27b"),
+        (64, 0, True, "qwen3.5:9b"),
     ],
 )
 def test_model_suits_the_machine(ram: int, vram: int, apple: bool, expected: str) -> None:
     assert setup.pick_model(ram * GB, vram * GB, 500 * GB, apple) == expected
 
 
+@pytest.mark.parametrize(
+    ("ram", "vram", "apple", "expected"),
+    [
+        # What the memory runs, larger models included: a model the user picked in the
+        # settings is flagged as too heavy only above this.
+        (8, 0, False, "qwen3.5:4b"),
+        (16, 0, False, "qwen3.5:9b"),
+        (32, 0, False, "qwen3.6:35b-a3b"),
+        (32, 8, False, "qwen3.6:35b-a3b"),
+        (16, 24, False, "qwen3.6:27b"),
+        (32, 0, True, "qwen3.6:35b-a3b"),
+        (64, 0, True, "qwen3.6:27b"),
+    ],
+)
+def test_memory_tier(ram: int, vram: int, apple: bool, expected: str) -> None:
+    assert setup.memory_tier(ram * GB, vram * GB, apple) == expected
+
+
 def test_smaller_model_when_the_disk_is_short() -> None:
-    # The 35B-A3B needs ~27 GB free: the next rank down that fits.
+    # The 9B needs ~8 GB free: the 4B below that.
     assert setup.pick_model(64 * GB, 0, 25 * GB) == "qwen3.5:9b"
-    assert setup.pick_model(32 * GB, 24 * GB, 25 * GB) == "qwen3.6:27b"
-    assert setup.pick_model(32 * GB, 24 * GB, 20 * GB) == "qwen3.5:9b"
+    assert setup.pick_model(32 * GB, 24 * GB, 7 * GB) == "qwen3.5:4b"
     assert setup.pick_model(16 * GB, 0, 5 * GB) == "qwen3.5:4b"
+    # Enough for the 2B alone: do not silently cross the minimum quality threshold.
+    assert setup.pick_model(16 * GB, 0, 4 * GB) is None
     assert setup.pick_model(16 * GB, 0, 1 * GB) is None
-
-
-def test_an_old_ollama_gets_a_model_it_runs() -> None:
-    assert setup.pick_model(32 * GB, 24 * GB, 500 * GB, ollama="0.20.0") == "qwen3.5:9b"
-    assert setup.pick_model(32 * GB, 24 * GB, 500 * GB, ollama="0.35.0") == "qwen3.6:27b"
 
 
 def test_catalog_ranks_are_distinct_and_ordered() -> None:
@@ -120,13 +132,13 @@ def chosen_by_binder(
     ollama: FakeOllama,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> FakeOllama:
-    """The 9B, picked by Binder on a 16 GB machine."""
+    """The 4B, picked by Binder on an 8 GB machine."""
     monkeypatch.setattr(setup, "_state", setup._State())
-    ollama.models = {"qwen3.5:9b": int(6.6 * GB)}
+    ollama.models = {"qwen3.5:4b": int(3.4 * GB)}
     with Session(get_engine()) as session:
-        llm_models.choose(session, "qwen3.5:9b", actor="binder")
+        llm_models.choose(session, "qwen3.5:4b", actor="binder")
         session.commit()
-    launch(16)
+    launch(8)
     assert offer(client) is None
     return ollama
 
@@ -135,25 +147,38 @@ def test_better_model_is_downloaded_then_replaces_the_former_one(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
     llm.set_owned(True)
-    launch(32)
+    launch(16)
     # Binder chose the model: the better one is fetched without asking, and shown meanwhile.
     upgrade = offer(client)
-    assert upgrade is None or (upgrade["name"] == "qwen3.6:35b-a3b" and upgrade["accepted"])
-    llm_models.wait("qwen3.6:35b-a3b")
+    assert upgrade is None or (upgrade["name"] == "qwen3.5:9b" and upgrade["accepted"])
+    llm_models.wait("qwen3.5:9b")
     data = client.get("/api/llm").json()
-    assert data["active"] == "qwen3.6:35b-a3b" and data["upgrade"] is None
+    assert data["active"] == "qwen3.5:9b" and data["upgrade"] is None
     # Only the model in use stays on the disk.
-    assert by_name(data, "qwen3.5:9b")["installed"] is False
+    assert by_name(data, "qwen3.5:4b")["installed"] is False
     summaries = [e["summary"] for e in client.get("/api/activity").json()]
-    assert "Local AI upgraded: Qwen 3.5 · 9B → Qwen 3.6 · 35B-A3B" in summaries
-    assert "Unused model Qwen 3.5 · 9B deleted (disk space freed)" in summaries
+    assert "Local AI upgraded: Qwen 3.5 · 4B → Qwen 3.5 · 9B" in summaries
+    assert "Unused model Qwen 3.5 · 4B deleted (disk space freed)" in summaries
+
+
+def test_binder_never_upgrades_beyond_the_9b(
+    client: TestClient, chosen_by_binder: FakeOllama
+) -> None:
+    chosen_by_binder.models = {"qwen3.5:9b": int(6.6 * GB)}
+    with Session(get_engine()) as session:
+        llm_models.choose(session, "qwen3.5:9b", actor="binder")
+        session.commit()
+    launch(64, vram=24)
+    assert offer(client) is None
+    data = client.get("/api/llm").json()
+    assert data["active"] == "qwen3.5:9b" and data["recommended"] == "qwen3.5:9b"
 
 
 def test_only_the_models_in_use_stay_on_the_disk(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
     chosen_by_binder.models |= {
-        "qwen3.5:4b": GB,  # replaced earlier
+        "qwen3.5:9b": GB,  # used earlier
         "qwen3.5:27b": GB,  # dropped from the catalogue by an update
         "qwen3-embedding:0.6b": GB,  # search by meaning
         "mistral:7b": GB,  # installed outside Binder
@@ -162,32 +187,32 @@ def test_only_the_models_in_use_stay_on_the_disk(
         # A shared Ollama serves other apps: nothing is deleted there.
         assert llm_models.prune(session) == []
         llm.set_owned(True)
-        assert sorted(llm_models.prune(session)) == ["qwen3.5:27b", "qwen3.5:4b"]
-    assert set(chosen_by_binder.models) == {"qwen3.5:9b", "qwen3-embedding:0.6b", "mistral:7b"}
+        assert sorted(llm_models.prune(session)) == ["qwen3.5:27b", "qwen3.5:9b"]
+    assert set(chosen_by_binder.models) == {"qwen3.5:4b", "qwen3-embedding:0.6b", "mistral:7b"}
 
 
-def test_stopped_upgrade_comes_back_only_when_the_advice_changes(
+def test_stopped_upgrade_is_not_offered_again(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
     chosen_by_binder.gate = threading.Event()
-    launch(32)
+    launch(16)
     # Stopped by the user while it downloads.
     assert client.post("/api/llm/upgrade/decline").status_code == 200
     chosen_by_binder.gate.set()
-    llm_models.wait("qwen3.6:35b-a3b")
+    llm_models.wait("qwen3.5:9b")
     assert offer(client) is None
-    assert client.get("/api/llm").json()["active"] == "qwen3.5:9b"
-    launch(32)  # next launch, same machine
+    assert client.get("/api/llm").json()["active"] == "qwen3.5:4b"
+    launch(16)  # next launch, same machine
     assert offer(client) is None
-    chosen_by_binder.gate = threading.Event()
-    launch(64, vram=24)  # a graphics card was added
-    upgrade = offer(client)
-    assert upgrade is not None and upgrade["name"] == "qwen3.6:27b" and upgrade["accepted"]
-    chosen_by_binder.gate.set()
-    llm_models.wait("qwen3.6:27b")
+    launch(64, vram=24)  # a larger machine: Binder still recommends the 9B
+    assert offer(client) is None
 
 
 def test_weaker_machine_never_downgrades(client: TestClient, chosen_by_binder: FakeOllama) -> None:
+    chosen_by_binder.models = {"qwen3.5:9b": int(6.6 * GB)}
+    with Session(get_engine()) as session:
+        llm_models.choose(session, "qwen3.5:9b", actor="binder")
+        session.commit()
     launch(8)
     assert offer(client) is None
     assert client.get("/api/llm").json()["active"] == "qwen3.5:9b"
@@ -198,19 +223,67 @@ def test_weaker_machine_never_downgrades(client: TestClient, chosen_by_binder: F
 def test_model_chosen_by_hand_is_left_alone(
     client: TestClient, chosen_by_binder: FakeOllama
 ) -> None:
-    assert client.put("/api/llm/model", json={"name": "qwen3.5:9b"}).status_code == 200
-    launch(32)
-    assert offer(client) is None
+    chosen_by_binder.models["qwen3.6:27b"] = int(17.8 * GB)
+    assert client.put("/api/llm/model", json={"name": "qwen3.6:27b"}).status_code == 200
     launch(8)
-    assert setup.status().warning is None
+    assert offer(client) is None and setup.status().warning is None
     data = client.get("/api/llm").json()
     # Only shown: the model that would suit the machine.
-    assert data["automatic"] is False and data["recommended"] == "qwen3.5:2b"
-    launch(32)
+    assert data["automatic"] is False and data["recommended"] == "qwen3.5:4b"
+    launch(16)
     data = client.get("/api/llm").json()
-    assert data["recommended"] == "qwen3.6:35b-a3b"
-    assert data["recommended_label"] == "Qwen 3.6 · 35B-A3B"
+    assert data["active"] == "qwen3.6:27b" and data["recommended"] == "qwen3.5:9b"
+    assert data["recommended_label"] == "Qwen 3.5 · 9B"
     assert client.post("/api/llm/upgrade").status_code == 409
+
+
+def test_user_picks_the_9b_then_back_to_the_4b(
+    client: TestClient, chosen_by_binder: FakeOllama
+) -> None:
+    llm.set_owned(True)
+    # Not on the disk: fetched first, the 4B keeps working meanwhile.
+    chosen_by_binder.gate = threading.Event()
+    data = client.post("/api/llm/pick", json={"name": "qwen3.5:9b"}).json()
+    assert data["picked"] == "qwen3.5:9b" and data["active"] == "qwen3.5:4b"
+    chosen_by_binder.gate.set()
+    llm_models.wait("qwen3.5:9b")
+    data = client.get("/api/llm").json()
+    assert data["active"] == "qwen3.5:9b" and data["picked"] is None
+    assert data["automatic"] is False
+    assert by_name(data, "qwen3.5:4b")["installed"] is False
+    # Back to the 4B, on a machine that would run the 9B: the user's choice, kept at launch.
+    data = client.post("/api/llm/pick", json={"name": "qwen3.5:4b"}).json()
+    llm_models.wait("qwen3.5:4b")
+    launch(16)
+    data = client.get("/api/llm").json()
+    assert data["active"] == "qwen3.5:4b" and data["upgrade"] is None
+    assert by_name(data, "qwen3.5:9b")["installed"] is False
+    summaries = [e["summary"] for e in client.get("/api/activity").json()]
+    assert "Local AI model: Qwen 3.5 · 9B" in summaries
+
+
+def test_pick_stops_the_upgrade_and_can_be_stopped(
+    client: TestClient, chosen_by_binder: FakeOllama
+) -> None:
+    chosen_by_binder.gate = threading.Event()
+    launch(16)  # Binder starts fetching the 9B
+    # The user keeps the 4B: the upgrade gives way, nothing more is fetched.
+    data = client.post("/api/llm/pick", json={"name": "qwen3.5:4b"}).json()
+    assert data["upgrade"] is None and data["automatic"] is False and data["picked"] is None
+    chosen_by_binder.gate.set()
+    llm_models.wait("qwen3.5:9b")
+    assert client.get("/api/llm").json()["active"] == "qwen3.5:4b"
+    # A pick being fetched, stopped: the active model stays.
+    chosen_by_binder.gate = threading.Event()
+    client.post("/api/llm/pick", json={"name": "qwen3.5:9b"})
+    assert client.delete("/api/llm/models/qwen3.5:9b/download").status_code == 204
+    chosen_by_binder.gate.set()
+    llm_models.wait("qwen3.5:9b")
+    data = client.get("/api/llm").json()
+    assert data["active"] == "qwen3.5:4b" and data["picked"] is None
+    # Only the 4B and the 9B are offered as a manual choice.
+    assert client.post("/api/llm/pick", json={"name": "qwen3.6:27b"}).status_code == 400
+    assert [m["name"] for m in data["models"] if m["pickable"]] == ["qwen3.5:4b", "qwen3.5:9b"]
 
 
 def test_graphics_memory_is_read_from_ollama_for_every_vendor(tmp_path: Path) -> None:

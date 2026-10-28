@@ -90,12 +90,17 @@ export function ChoiceGroup<V extends string>({
   value,
   options,
   onChange,
+  disabled,
+  className,
 }: {
   labelId: string
   label: string
   value: V
   options: { value: V; content: ReactNode }[]
   onChange: (value: V) => void
+  disabled?: boolean
+  /** The grid's columns: three by default. */
+  className?: string
 }) {
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0
@@ -111,18 +116,19 @@ export function ChoiceGroup<V extends string>({
       <p id={labelId} className="text-sm font-medium">
         {label}
       </p>
-      <div role="radiogroup" aria-labelledby={labelId} className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+      <div role="radiogroup" aria-labelledby={labelId} className={cn("grid grid-cols-3 gap-1 rounded-lg bg-muted p-1", className)}>
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
             role="radio"
             aria-checked={value === option.value}
-            tabIndex={value === option.value ? 0 : -1}
+            tabIndex={value === option.value || (!options.some((item) => item.value === value) && option === options[0]) ? 0 : -1}
+            disabled={disabled}
             onKeyDown={onKeyDown}
             onClick={() => value !== option.value && onChange(option.value)}
             className={cn(
-              "flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring",
+              "flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring disabled:opacity-60",
               value === option.value
                 ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/5"
                 : "text-muted-foreground hover:text-foreground",

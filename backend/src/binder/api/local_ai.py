@@ -46,6 +46,19 @@ def choose_model(body: ModelChoice, session: SessionDep) -> ModelsOverview:
     return llm_models.overview()
 
 
+@router.post("/llm/pick")
+def pick_model(body: ModelChoice, session: SessionDep) -> ModelsOverview:
+    """The 4B or the 9B, chosen in the settings: downloaded first if it is not on the disk."""
+    try:
+        llm_models.pick(session, body.name)
+    except ConnectionError as e:
+        raise HTTPException(503, str(e)) from e
+    except llm_models.UnknownModel as e:
+        raise HTTPException(400, str(e)) from e
+    session.commit()
+    return llm_models.overview()
+
+
 @router.post("/llm/upgrade", status_code=202)
 def accept_model_upgrade() -> ModelsOverview:
     """Downloads the better model offered; Binder switches to it once it is ready."""

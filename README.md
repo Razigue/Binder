@@ -257,24 +257,22 @@ already that old is archived straight away). Archived papers leave your to-do li
 files, but stay encrypted on your computer: find them in the **Archives** tab, search them,
 download them or bring them back in one click.
 
-**Which AI model will my computer get?** The best one it runs comfortably:
+**Which AI model will my computer get?** One that reads your documents well and stays quick:
 
 | Your computer | Model |
 | --- | --- |
-| Graphics card with 20 GB or more, or a Mac with 48 GB or more | Qwen 3.6 · 27B (18 GB download) |
-| 32 GB of memory or more, counting the graphics card's (a Mac: its memory) | Qwen 3.6 · 35B-A3B (23 GB) |
-| Graphics card with 8 GB, or 16 GB of memory | Qwen 3.5 · 9B (6.6 GB) |
-| 10 to 16 GB of memory | Qwen 3.5 · 4B (3.4 GB) |
-| Less | Qwen 3.5 · 2B (2.7 GB) |
+| Graphics card with 8 GB, or 16 GB of memory or more | Qwen 3.5 · 9B (6.6 GB download) |
+| Less | Qwen 3.5 · 4B (3.4 GB) |
 
-The 35B-A3B only puts about 3 billion of its 35 billion parameters to work on each word, so it
-stays fast even without a graphics card. Short on disk space, Binder takes the next model down.
-At each launch Binder checks your computer again: if you added memory or a graphics card, it
-offers a better model on the **To do** page, with its download size, and switches once it is
-downloaded (the previous one stays installed). Say **No thanks** and it will not ask again
-unless an even better model suits your computer. Binder never moves you to a smaller model on
-its own: it only warns you if the model in use has become too heavy. **Settings > Local AI**
-shows the model in use and the one best suited to your computer.
+Short on disk space, Binder takes the 4B. At each launch Binder checks your computer again: if
+you added memory or a graphics card, it fetches the 9B in the background and switches once it is
+downloaded (shown on the **To do** page, with its download size). Say **No thanks** and it will
+not ask again. Binder never moves you to a smaller model on its own: it only warns you if the
+model in use has become too heavy. **Settings > Local AI** shows the model in use and the one
+best suited to your computer, and lets you switch between the 4B and the 9B. Binder asks you to
+confirm first: the new model may take several minutes to download (your current AI keeps
+working meanwhile), and the former one is then deleted to free the space. A model you pick
+stays yours: Binder no longer changes it.
 
 **Would a less compressed model read better?** The models Binder downloads are quantized to
 4 bits (Q4), the best trade-off for most computers. To measure what an 8-bit version (Q8) would

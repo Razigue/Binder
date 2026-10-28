@@ -111,6 +111,7 @@ def test_catalog_and_external_models(client: TestClient, ollama: FakeOllama) -> 
         "size": 9 * GB,
         "recommended": False,
         "kind": "chat",
+        "pickable": False,
         "in_catalog": False,
         "installed": True,
         "download": None,

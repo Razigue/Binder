@@ -228,12 +228,12 @@ export function useCalendar() {
   return useQuery({ queryKey: keys.calendar, queryFn: api.calendar, staleTime: 300_000 })
 }
 
-/** The local AI models; refreshed while an accepted upgrade downloads. */
+/** The local AI models; refreshed while an accepted upgrade or a picked model downloads. */
 export function useModels() {
   return useQuery({
     queryKey: keys.models,
     queryFn: api.models,
-    refetchInterval: (q) => (q.state.data?.upgrade?.accepted ? 2000 : false),
+    refetchInterval: (q) => (q.state.data?.upgrade?.accepted || q.state.data?.picked ? 2000 : false),
   })
 }
 

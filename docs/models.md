@@ -1,27 +1,34 @@
 # Local models
 
-Binder runs the best chat model each machine supports, and checks again at every launch. Code:
+Binder runs the 4B or the 9B, whichever the machine supports, and checks again at every launch. Code:
 `services/llm_models.py` (catalogue, choice, downloads, upgrades, cleanup), `services/setup.py`
 (measuring the machine, `pick_model`, Binder's own Ollama).
 
 ## Choosing the model
 
-`setup.memory_tier(ram, vram, apple)` climbs a ladder of named thresholds (`DENSE_VRAM`,
-`DENSE_APPLE_RAM`, `MOE_BUDGET`, `MID_VRAM`, `MID_RAM`, `SMALL_RAM`, each with the reason in a
-comment). The memory budget is RAM + VRAM, or RAM alone on Apple silicon (unified memory):
+Binder picks the 4B or the 9B on its own, nothing else: the 9B reads documents well and stays
+quick on an ordinary machine, while a larger model makes every reading slow. The 2B, 35B-A3B and
+27B stay in the catalogue for explicit choices through the local API (`PUT /api/llm/model`
+after installation); a model picked this way is the user's and is never upgraded. The settings
+offer only the 4B and the 9B.
 
-| Machine | Model |
-| --- | --- |
-| VRAM ≥ 20 GB, or Apple with RAM ≥ 48 GB | `qwen3.6:27b` (dense) |
-| budget ≥ 32 GB, with or without a GPU | `qwen3.6:35b-a3b` (MoE, ~3B active per token) |
-| VRAM ≥ 8 GB or RAM ≥ 15 GB | `qwen3.5:9b` |
-| RAM ≥ 10 GB (or unknown) | `qwen3.5:4b` |
-| less | `qwen3.5:2b` |
+`setup.memory_tier(ram, vram, apple)` measures what the memory runs, climbing a ladder of named
+thresholds (`DENSE_VRAM`, `DENSE_APPLE_RAM`, `MOE_BUDGET`, `MID_VRAM`, `MID_RAM`, each with the
+reason in a comment). The memory budget is RAM + VRAM, or RAM alone on Apple silicon (unified
+memory):
 
-A mixture of experts reads only a few experts per token: Ollama keeps in RAM the layers the
-graphics card cannot hold and the model stays fast, which is why the 35B-A3B wins over the dense
-9B even on a processor alone. `pick_model` then steps down the ranks while the free disk lacks
-`size × DISK_MARGIN`, or while the running Ollama is older than the model's `min_ollama`.
+| Machine | Memory tier | Picked by Binder |
+| --- | --- | --- |
+| VRAM ≥ 20 GB, or Apple with RAM ≥ 48 GB | `qwen3.6:27b` (dense) | `qwen3.5:9b` |
+| budget ≥ 32 GB, with or without a GPU | `qwen3.6:35b-a3b` (MoE) | `qwen3.5:9b` |
+| VRAM ≥ 8 GB or RAM ≥ 15 GB | `qwen3.5:9b` | `qwen3.5:9b` |
+| less, or unknown | `qwen3.5:4b` | `qwen3.5:4b` |
+
+`pick_model` caps the tier at `AUTO_MAX` (the 9B), then steps down the ranks while the free disk
+lacks `size × DISK_MARGIN`, or while the running Ollama is older than the model's `min_ollama`.
+Only pickable entries are considered: if even the 4B cannot fit, no model is selected.
+The tier itself is kept for the "too heavy" warning: a model Binder chose earlier is flagged only
+when it exceeds what the memory runs.
 
 ## What each model is given
 
@@ -82,6 +89,12 @@ Every user gets the best local AI their machine runs without thinking about it:
   (`SetupStatus.warning`).
 - A model **chosen by the user** (`PUT /api/llm/model`, or `BINDER_LLM_MODEL`): no offer and no
   warning; Settings > Local AI only shows the recommended model.
+- **Picked by hand in Settings > Local AI** (`POST /api/llm/pick`, catalogue entries with
+  `pickable`: the 4B and the 9B), after a confirmation that names the download size and the
+  deletion of the former model. Installed: used at once. Otherwise downloaded first
+  (`ModelsOverview.picked` while it runs, stopped with `DELETE /api/llm/models/{name}/download`),
+  the former model working meanwhile. Either way it becomes the user's choice (`auto` false: no
+  more upgrades), an upgrade under way is stopped, and the former model is pruned.
 
 Settings saved before `auto` existed count as Binder's choice. Models outside the catalogue
 (rank 0) are never compared.
