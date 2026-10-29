@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgent } from "@/components/agent/context"
 import { DocumentsByYear } from "@/components/documents"
+import { ArchivedJourneys } from "@/components/journey"
 import { EssentialsLink } from "@/components/essentials"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { TabList, TabPanel } from "@/components/Tabs"
@@ -126,6 +127,12 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
     <>
       {!archived && <AreaTiles selected={area} onSelect={onArea} />}
       {!archived && <EssentialsLink />}
+      {archived && (
+        <>
+          <ArchivedJourneys />
+          <h2 className="mb-3 font-semibold">{t("archivedDocuments")}</h2>
+        </>
+      )}
       <div className="relative mb-3">
         <MagnifyingGlassIcon className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
