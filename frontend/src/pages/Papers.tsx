@@ -181,7 +181,7 @@ function DocumentsTab({ archived, area, onArea }: { archived: boolean; area: Are
             )}
           </div>
         ) : (
-          <DocumentsByYear docs={shown} />
+          <DocumentsByYear docs={shown} showDelete={archived} />
         )}
       </Card>
       {/* A search is often a question in disguise: the agent can answer it. */}

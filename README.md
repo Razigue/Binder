@@ -168,7 +168,9 @@ closes the letter.
 
 Completed life-event checklists stay in **My papers → Archives → Archived journeys**, with their completion
 date and the option to reopen them. Journeys completed before dates were recorded remain
-accessible with an unknown completion date.
+accessible with an unknown completion date. Use the trash button on an archived document or
+journey to remove it from Archives. The profile menu’s Trash lets you restore it or permanently
+delete it after confirmation. Deleting a journey keeps its documents.
 
 **Checklists** ("Moving house", "A birth", "Death of a relative", "Income tax return"): Binder
 builds them from your own documents, each step with its deadline:

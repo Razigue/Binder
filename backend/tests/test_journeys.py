@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlmodel import Session
 
+from binder.agent import tools
 from binder.db import get_engine, migrate
 from binder.models import Journey
 from binder.samples import Sample
@@ -161,7 +162,7 @@ def test_offline_agent_starts_a_journey(client: TestClient, samples: list[Sample
     load(client, samples)
     ask = lambda m: client.post("/api/agent/chat", json={"message": m}).json()  # noqa: E731
     r = ask("We're moving soon, what do I need to do?")
-    assert r["answer"] == "What is your moving day? Binder counts every step from it."
+    assert r["answer"] == "What is your moving day? I count every step from it."
     r = ask("On déménage le 15/12/2026, on fait comment ?")
     assert r["journeys"] and r["journeys"][0]["kind"] == "moving" and r["changed"]
     assert r["answer"].startswith("Here is your checklist “Moving house”:")
@@ -202,8 +203,51 @@ def test_legacy_archives_survive_migration_and_list_limit(client: TestClient) ->
         session.commit()
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE journey DROP COLUMN closed_at"))
+        conn.execute(text("ALTER TABLE journey DROP COLUMN deleted_at"))
     migrate(engine)
     migrate(engine)
     archived = client.get("/api/journeys").json()
     assert len(archived) == 51
     assert all(j["closed"] and j["closed_at"] is None for j in archived)
+
+
+def test_archived_journey_trash_restore_and_permanent_delete(client: TestClient) -> None:
+    journey = start(client, "moving", date.today())
+    url = f"/api/journeys/{journey['id']}"
+    assert client.delete(url).status_code == 409
+    closed = client.patch(url, json={"closed": True}).json()
+    deleted = client.delete(url)
+    assert deleted.status_code == 204
+    assert client.get(url).status_code == 404
+    assert client.patch(url, json={"closed": False}).status_code == 404
+    assert client.put(f"{url}/steps/electoral", json={"done": True}).status_code == 404
+    stale = client.post(
+        "/api/actions",
+        json={"type": "journey_step", "params": {"journey_id": journey["id"], "step": "electoral"}},
+    )
+    assert stale.status_code == 409
+    with Session(get_engine()) as session:
+        result = tools.mark_journey_step(session, journey["id"], "electoral")
+        assert not result.changed and "error" in result.payload
+    assert client.get("/api/journeys").json() == []
+    trashed = client.get("/api/journeys/trash").json()
+    assert len(trashed) == 1 and trashed[0]["deleted_at"]
+    assert trashed[0]["closed_at"] == closed["closed_at"]
+    assert client.delete(f"{url}/permanent").status_code == 400
+    # Moving to the trash can be undone immediately.
+    assert client.post(f"/api/undo/{deleted.headers['X-Undo']}").status_code == 204
+    assert client.get(url).status_code == 200
+    assert client.get("/api/journeys/trash").json() == []
+    client.delete(url)
+    restored = client.post(f"{url}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["closed_at"] == closed["closed_at"]
+    assert restored.json()["deleted_at"] is None
+    # Undoing a restore puts it back in the trash, still dated.
+    assert client.post(f"/api/undo/{restored.headers['X-Undo']}").status_code == 204
+    assert client.get(url).status_code == 404
+    assert client.delete(f"{url}/permanent?confirm=true").status_code == 204
+    assert client.get("/api/journeys/trash").json() == []
+    assert client.post(f"{url}/restore").status_code == 404
+    history = client.get("/api/activity").json()
+    assert any("permanently deleted" in item["summary"] for item in history)

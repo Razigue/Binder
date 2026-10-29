@@ -2,7 +2,8 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CircleIcon, CheckCircleIcon, NotePencilIcon, FileTextIcon, FolderPlusIcon, ListChecksIcon, CircleNotchIcon } from "@phosphor-icons/react"
+import { TrashIcon, ArrowCounterClockwiseIcon, CircleIcon, CheckCircleIcon, NotePencilIcon, FileTextIcon, FolderPlusIcon, ListChecksIcon, CircleNotchIcon } from "@phosphor-icons/react"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -12,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { usePanels } from "@/components/panels/context"
 import { FolderView } from "@/components/panels/FolderView"
-import { keys, useInvalidateAll, useJourney, useJourneys } from "@/hooks/queries"
+import { keys, useInvalidateAll, useJourney, useJourneys, useTrashedJourneys } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { journey as messages } from "@/i18n/messages/journey"
 import { api, type Folder, type Journey, type JourneyKindInfo, type JourneyStep, type Letter, type StepAction } from "@/lib/api"
@@ -346,6 +347,8 @@ export function JourneyCard({ journey }: { journey: Journey }) {
 export function ArchivedJourneys() {
   const t = useT(messages)
   const panels = usePanels()
+  const invalidate = useInvalidateAll()
+  const remove = useMutation({ mutationFn: api.trashJourney, onSuccess: invalidate, onError: (e) => toast.error(e.message) })
   const archived = (useJourneys().data ?? []).filter((j) => j.closed).sort((a, b) =>
     (b.closed_at ?? "").localeCompare(a.closed_at ?? "") || b.id - a.id,
   )
@@ -355,11 +358,11 @@ export function ArchivedJourneys() {
       <h2 className="mb-3 font-semibold">{t("archives")}</h2>
       <ul className="divide-y rounded-xl bg-card ring-1 ring-foreground/10">
         {archived.map((j) => (
-          <li key={j.id}>
+          <li key={j.id} className="flex items-center gap-2 pr-3">
             <button
               type="button"
               onClick={() => panels.showJourney(j.id)}
-              className="flex min-h-16 w-full items-center gap-3 px-5 py-3 text-left hover:bg-muted/40"
+              className="flex min-h-16 min-w-0 flex-1 items-center gap-3 px-5 py-3 text-left hover:bg-muted/40"
             >
               <CheckCircleIcon className="size-5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
@@ -369,9 +372,61 @@ export function ArchivedJourneys() {
                 </span>
               </span>
             </button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("trashJourney", { title: j.title })}
+              title={t("trashJourney", { title: j.title })}
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(j.id)}
+            >
+              <TrashIcon className="text-destructive" />
+            </Button>
           </li>
         ))}
       </ul>
+    </section>
+  )
+}
+
+
+/** Deleted journeys share the trash lifecycle with documents. */
+export function TrashedJourneys() {
+  const t = useT(messages)
+  const journeys = useTrashedJourneys()
+  const invalidate = useInvalidateAll()
+  const [target, setTarget] = useState<Journey | null>(null)
+  const options = { onSuccess: invalidate, onError: (e: Error) => toast.error(e.message) }
+  const restore = useMutation({ mutationFn: api.restoreJourney, ...options })
+  const purge = useMutation({ mutationFn: api.purgeJourney, ...options })
+  if (journeys.isPending) return <Skeleton className="mt-6 h-24" />
+  if (journeys.isError) return <p role="alert">{journeys.error.message}</p>
+  if (!journeys.data?.length) return null
+  return (
+    <section className="mt-6">
+      <h2 className="mb-3 font-semibold">{t("trashedJourneys")}</h2>
+      <ul className="divide-y rounded-xl bg-card ring-1 ring-foreground/10">
+        {journeys.data.map((j) => (
+          <li key={j.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{j.title}</span>
+              <span className="text-xs text-muted-foreground">{t("deletedOn", { date: formatDate(j.deleted_at) })}</span>
+            </span>
+            <Button variant="outline" size="sm" disabled={restore.isPending} onClick={() => restore.mutate(j.id)}><ArrowCounterClockwiseIcon /> {t("restoreArchive")}</Button>
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setTarget(j)}><TrashIcon /> {t("purgeArchive")}</Button>
+          </li>
+        ))}
+      </ul>
+      <ConfirmDialog
+        open={target !== null}
+        onOpenChange={(open) => !open && setTarget(null)}
+        title={t("purgeTitle")}
+        description={t("purgeDescription", { title: target?.title ?? "" })}
+        confirmLabel={t("purgeArchive")}
+        onConfirm={async () => {
+          if (target) await purge.mutateAsync(target.id)
+        }}
+      />
     </section>
   )
 }

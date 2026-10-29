@@ -581,6 +581,7 @@ class JourneyOut(BaseModel):
     total: int
     closed: bool
     closed_at: datetime | None
+    deleted_at: datetime | None
     created_at: datetime
 
 
@@ -1019,7 +1020,9 @@ def _sentence(text: str) -> str:
 def _changes(session: Session, year: int, exclude: int | None) -> list[str]:
     """Life events of the income year, from the other journeys."""
     found = []
-    for row in session.exec(select(Journey).where(Journey.kind != "tax_return")):
+    for row in session.exec(
+        select(Journey).where(Journey.kind != "tax_return", col(Journey.deleted_at).is_(None))
+    ):
         if row.id == exclude or row.event_date.year != year:
             continue
         found.append(T(f"change_{row.kind}", date=row.event_date))
@@ -1095,6 +1098,7 @@ def out(session: Session, row: Journey, today: date | None = None) -> JourneyOut
         total=len(found),
         closed=row.closed,
         closed_at=row.closed_at,
+        deleted_at=row.deleted_at,
         created_at=row.created_at,
     )
 
@@ -1103,7 +1107,7 @@ def active(session: Session) -> list[Journey]:
     return list(
         session.exec(
             select(Journey)
-            .where(Journey.closed == False)  # noqa: E712
+            .where(col(Journey.deleted_at).is_(None), Journey.closed == False)  # noqa: E712
             .order_by(col(Journey.event_date))
         )
     )

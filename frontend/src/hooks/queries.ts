@@ -31,6 +31,7 @@ export const keys = {
   models: ["models"] as const,
   conversations: ["conversations"] as const,
   journeys: ["journeys"] as const,
+  trashedJourneys: ["trashedJourneys"] as const,
   journeyKinds: ["journeyKinds"] as const,
   journey: (id: number) => ["journey", id] as const,
   letters: ["letters"] as const,
@@ -314,4 +315,8 @@ export function useDemoStatus() {
 
 export function useImportSettings() {
   return useQuery({ queryKey: keys.importSettings, queryFn: api.importSettings })
+}
+
+export function useTrashedJourneys() {
+  return useQuery({ queryKey: keys.trashedJourneys, queryFn: api.trashedJourneys })
 }

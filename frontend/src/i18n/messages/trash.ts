@@ -3,8 +3,8 @@ import { defineMessages } from "@/i18n/core"
 export const trash = defineMessages({
   en: {
     title: "Trash",
-    subtitle: "Deleted documents stay here, restorable, until you erase them for good.",
-    empty: "The trash is empty.",
+    subtitle: "Deleted documents and journeys stay here until you restore or permanently delete them.",
+    empty: "No deleted documents.",
     deletedOn: "deleted on {date}",
     restore: "Restore",
     restored: "“{title}” restored",
@@ -15,8 +15,8 @@ export const trash = defineMessages({
   },
   fr: {
     title: "Corbeille",
-    subtitle: "Les documents supprimés restent ici, restaurables, tant que vous ne les effacez pas définitivement.",
-    empty: "La corbeille est vide.",
+    subtitle: "Les documents et démarches supprimés restent ici jusqu’à leur restauration ou leur suppression définitive.",
+    empty: "Aucun document supprimé.",
     deletedOn: "supprimé le {date}",
     restore: "Restaurer",
     restored: "« {title} » restauré",

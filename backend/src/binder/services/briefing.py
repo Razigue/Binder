@@ -48,12 +48,12 @@ T = i18n.catalog(
             "fr": "{n} documents à renouveler bientôt.",
         },
         "anomalies_one": {
-            "en": "Binder spotted {n} thing to check.",
-            "fr": "Binder a repéré {n} point à vérifier.",
+            "en": "I spotted {n} thing to check.",
+            "fr": "J’ai repéré {n} point à vérifier.",
         },
         "anomalies_other": {
-            "en": "Binder spotted {n} things to check.",
-            "fr": "Binder a repéré {n} points à vérifier.",
+            "en": "I spotted {n} things to check.",
+            "fr": "J’ai repéré {n} points à vérifier.",
         },
         "questions_one": {
             "en": "{n} quick question is waiting for you.",

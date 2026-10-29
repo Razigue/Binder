@@ -30,7 +30,7 @@ from binder.services import (
 T = i18n.catalog(
     "reports",
     {
-        "filed": {"en": "Filed under {area}", "fr": "Rangé dans {area}"},
+        "filed": {"en": "I filed this under {area}", "fr": "J’ai rangé ce document dans {area}"},
         "to_pay": {
             "en": "{amount:money} to pay by {date:date}",
             "fr": "{amount:money} à payer avant le {date:date}",
@@ -44,8 +44,8 @@ T = i18n.catalog(
         "amount": {"en": "Amount: {amount:money}", "fr": "Montant : {amount:money}"},
         "for_person": {"en": "Concerns {person}", "fr": "Concerne {person}"},
         "question": {"en": "One question for you", "fr": "Une question pour vous"},
-        "summary_filed_one": {"en": "{n} document filed", "fr": "{n} document rangé"},
-        "summary_filed_other": {"en": "{n} documents filed", "fr": "{n} documents rangés"},
+        "summary_filed_one": {"en": "I filed {n} document", "fr": "J’ai rangé {n} document"},
+        "summary_filed_other": {"en": "I filed {n} documents", "fr": "J’ai rangé {n} documents"},
         "brief_nothing": {"en": "Nothing to do", "fr": "Rien à faire"},
         "brief_archived": {
             "en": "Old paper, kept in the archives",

@@ -979,7 +979,7 @@ def mark_journey_step(
 ) -> ToolResult:
     """Ticks a step of a journey the user says they did (done=false unticks it)."""
     row = session.get(Journey, journey_id)
-    if row is None:
+    if row is None or row.deleted_at is not None:
         return _error(f"No journey #{journey_id}")
     try:
         found = journeys.set_step(session, row, step, done, actor="agent")

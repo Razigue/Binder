@@ -7,6 +7,8 @@ export interface Viewing {
 }
 
 interface AgentContextValue {
+  draft: string
+  setDraft: (text: string) => void
   open: (question?: string) => void
   /** A document comes on screen. */
   view: (doc: Viewing) => void

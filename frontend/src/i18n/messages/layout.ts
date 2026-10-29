@@ -4,7 +4,6 @@ import { defineMessages } from "@/i18n/core"
 export const layout = defineMessages({
   en: {
     navigation: "Navigation",
-    skipToContent: "Skip to content",
     waiting_one: "{count} card waiting for you",
     waiting_other: "{count} cards waiting for you",
     "nav.todo": "To do",
@@ -34,7 +33,6 @@ export const layout = defineMessages({
   },
   fr: {
     navigation: "Navigation",
-    skipToContent: "Aller au contenu",
     waiting_one: "{count} carte vous attend",
     waiting_other: "{count} cartes vous attendent",
     "nav.todo": "À faire",

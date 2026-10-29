@@ -61,7 +61,9 @@ def test_activity_log_is_readable(client: TestClient, samples: list[Sample]) -> 
     actions = [e["action"] for e in reversed(entries)]
     assert actions == ["import", "analyze", "update", "validate", "duplicate", "trash"]
     summaries = [e["summary"] for e in entries]
-    assert any("set aside for review (missing due date)" in s for s in summaries)
+    assert any(
+        s.startswith("I set “") and "aside for review (missing due date)" in s for s in summaries
+    )
     assert any("due date: — → 20 Oct 2026" in s for s in summaries)
     update = next(e for e in entries if e["action"] == "update")
     assert update["actor"] == "user"
@@ -70,7 +72,10 @@ def test_activity_log_is_readable(client: TestClient, samples: list[Sample]) -> 
     # Stored as messages: the same log reads in French once the language changes.
     with i18n.using("fr"):
         summaries = [e["summary"] for e in client.get("/api/activity").json()]
-    assert any("mis de côté pour vérification (manque l'échéance)" in s for s in summaries)
+    assert any(
+        s.startswith("J’ai mis «") and "de côté pour vérification (manque l'échéance)" in s
+        for s in summaries
+    )
     assert any("l'échéance : — → 20/10/2026" in s for s in summaries)
 
 
