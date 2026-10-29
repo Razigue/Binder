@@ -8,6 +8,7 @@ the last reminder, and when it already spoke today. It never starts the local AI
 """
 
 import logging
+import sys
 import threading
 from datetime import date
 
@@ -57,7 +58,7 @@ REMEMBER = 300
 
 
 class ReminderSettings(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
 
 
 class ReminderState(BaseModel):
@@ -130,8 +131,12 @@ def remind() -> bool:
     return True
 
 
-def sync(session: Session) -> None:
+def sync(session: Session, *, user_requested: bool = False) -> None:
     """Puts the system task in step with the setting (at each launch and on change)."""
+    # Writing persistence at every launch can trigger Defender. Windows' installed path
+    # stays stable across updates; only a settings action should change its scheduled task.
+    if sys.platform == "win32" and not user_requested:
+        return
     cmd = os_task.command()
     if cmd is None:
         return
@@ -147,5 +152,5 @@ def update(session: Session, enabled: bool) -> ReminderSettings:
         current.enabled = enabled
         settings_store.save(session, KEY, current)
         activity.log(session, "settings", T.msg("enabled" if enabled else "disabled"), actor="user")
-    sync(session)
+    sync(session, user_requested=True)
     return current
