@@ -16,7 +16,7 @@ names the official place to check them.
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -580,6 +580,7 @@ class JourneyOut(BaseModel):
     done: int
     total: int
     closed: bool
+    closed_at: datetime | None
     created_at: datetime
 
 
@@ -1093,6 +1094,7 @@ def out(session: Session, row: Journey, today: date | None = None) -> JourneyOut
         done=sum(s.done for s in found),
         total=len(found),
         closed=row.closed,
+        closed_at=row.closed_at,
         created_at=row.created_at,
     )
 
@@ -1153,6 +1155,7 @@ def update(
         row.details = json.dumps({k: v for k, v in merged.items() if v}, ensure_ascii=False)
     if closed is not None and closed != row.closed:
         row.closed = closed
+        row.closed_at = datetime.now(UTC) if closed else None
         key = "closed" if closed else "reopened"
         activity.log(session, "journey", T.msg(key, title=title(row)), actor=actor)
     session.add(row)

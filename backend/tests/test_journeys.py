@@ -1,10 +1,14 @@
 """Guided journeys: steps built from the documents, letters, feed cards, undo, agent."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlmodel import Session
 
+from binder.db import get_engine, migrate
+from binder.models import Journey
 from binder.samples import Sample
 from tests.conftest import upload
 
@@ -165,3 +169,41 @@ def test_offline_agent_starts_a_journey(client: TestClient, samples: list[Sample
     # A birth certificate is a document, not a birth.
     r = ask("Où est l'acte de naissance de Léa ?")
     assert not r.get("journeys")
+
+
+def test_completed_journey_is_dated_accessible_and_reopenable(client: TestClient) -> None:
+    journey = start(client, "moving", date.today())
+    url = f"/api/journeys/{journey['id']}"
+    assert journey["closed_at"] is None
+    before = datetime.now(UTC).replace(tzinfo=None)
+    response = client.patch(url, json={"closed": True})
+    closed = response.json()
+    stamp = datetime.fromisoformat(closed["closed_at"]).replace(tzinfo=None)
+    assert before <= stamp <= datetime.now(UTC).replace(tzinfo=None)
+    assert closed["closed"]
+    assert client.get(url).json()["closed_at"] == closed["closed_at"]
+    assert any(j["id"] == journey["id"] for j in client.get("/api/journeys").json())
+    assert client.patch(url, json={"closed": True}).json()["closed_at"] == closed["closed_at"]
+    # Undo restores both the active status and its absent completion date.
+    assert client.post(f"/api/undo/{response.headers['X-Undo']}").status_code == 204
+    assert client.get(url).json()["closed_at"] is None
+    client.patch(url, json={"closed": True})
+    reopened = client.patch(url, json={"closed": False})
+    assert not reopened.json()["closed"] and reopened.json()["closed_at"] is None
+    assert client.post(f"/api/undo/{reopened.headers['X-Undo']}").status_code == 204
+    assert client.get(url).json()["closed_at"] is not None
+
+
+def test_legacy_archives_survive_migration_and_list_limit(client: TestClient) -> None:
+    engine = get_engine()
+    with Session(engine) as session:
+        for _ in range(51):
+            session.add(Journey(kind="moving", event_date=date.today(), closed=True))
+        session.commit()
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE journey DROP COLUMN closed_at"))
+    migrate(engine)
+    migrate(engine)
+    archived = client.get("/api/journeys").json()
+    assert len(archived) == 51
+    assert all(j["closed"] and j["closed_at"] is None for j in archived)

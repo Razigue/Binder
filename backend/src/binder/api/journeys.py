@@ -50,9 +50,7 @@ def list_kinds() -> list[journeys.KindInfo]:
 
 @router.get("")
 def list_journeys(session: SessionDep) -> list[journeys.JourneyOut]:
-    rows = session.exec(
-        select(Journey).order_by(col(Journey.closed), col(Journey.event_date)).limit(50)
-    )
+    rows = session.exec(select(Journey).order_by(col(Journey.closed), col(Journey.event_date)))
     return [journeys.out(session, row) for row in rows]
 
 

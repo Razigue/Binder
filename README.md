@@ -166,6 +166,10 @@ or file) sit below. On top, **In progress** follows what is under way: checklist
 reminder; once the date has passed, **Write a reminder** drafts it, and **I got an answer**
 closes the letter.
 
+Completed life-event checklists stay in **Life events → Archived journeys**, with their completion
+date and the option to reopen them. Journeys completed before dates were recorded remain
+accessible with an unknown completion date.
+
 **Checklists** ("Moving house", "A birth", "Death of a relative", "Income tax return"): Binder
 builds them from your own documents, each step with its deadline:
 the suppliers, bank and insurers to tell about a move (one tap writes each letter, and the step

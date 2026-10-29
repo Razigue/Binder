@@ -545,6 +545,7 @@ export interface Journey {
   done: number
   total: number
   closed: boolean
+  closed_at: string | null
   created_at: string
 }
 
