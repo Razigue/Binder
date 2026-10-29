@@ -326,6 +326,7 @@ class Journey(SQLModel, table=True):
     # JSON list of the keys of the steps marked done.
     done: str = "[]"
     closed: bool = False
+    closed_at: datetime | None = None
 
 
 class Conversation(SQLModel, table=True):

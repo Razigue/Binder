@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { usePanels } from "@/components/panels/context"
 import { FolderView } from "@/components/panels/FolderView"
-import { keys, useInvalidateAll, useJourney } from "@/hooks/queries"
+import { keys, useInvalidateAll, useJourney, useJourneys } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { journey as messages } from "@/i18n/messages/journey"
 import { api, type Folder, type Journey, type JourneyKindInfo, type JourneyStep, type Letter, type StepAction } from "@/lib/api"
@@ -74,6 +74,11 @@ function JourneyView({ id, onNavigate }: { id: number; onNavigate: () => void })
     )
   return (
     <div className="space-y-4">
+      {data.closed && (
+        <p className="text-sm text-muted-foreground" role="status">
+          {data.closed_at ? t("archivedOn", { date: formatDate(data.closed_at) }) : t("archivedUnknown")}
+        </p>
+      )}
       <EventDate journey={data} pending={edit.isPending} onSave={(event_date) => edit.mutate({ event_date })} />
       <div className="space-y-1.5">
         <Progress
@@ -333,5 +338,40 @@ export function JourneyCard({ journey }: { journey: Journey }) {
         </Button>
       </div>
     </div>
+  )
+}
+
+
+/** Completed journeys stay accessible and can be reopened from their detail. */
+export function ArchivedJourneys() {
+  const t = useT(messages)
+  const panels = usePanels()
+  const archived = (useJourneys().data ?? []).filter((j) => j.closed).sort((a, b) =>
+    (b.closed_at ?? "").localeCompare(a.closed_at ?? "") || b.id - a.id,
+  )
+  if (!archived.length) return null
+  return (
+    <section>
+      <h2 className="mb-3 font-semibold">{t("archives")}</h2>
+      <ul className="divide-y rounded-xl bg-card ring-1 ring-foreground/10">
+        {archived.map((j) => (
+          <li key={j.id}>
+            <button
+              type="button"
+              onClick={() => panels.showJourney(j.id)}
+              className="flex min-h-16 w-full items-center gap-3 px-5 py-3 text-left hover:bg-muted/40"
+            >
+              <CheckCircleIcon className="size-5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{j.title}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {j.closed_at ? t("archivedOn", { date: formatDate(j.closed_at) }) : t("archivedUnknown")}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

@@ -34,6 +34,9 @@ export const journey = defineMessages({
     close: "Close this journey",
     reopen: "Reopen",
     closed: "Journey closed",
+    archives: "Archived journeys",
+    archivedOn: "Completed on {date}",
+    archivedUnknown: "Completed · date not recorded",
     working: "Binder is working on it…",
   },
   fr: {
@@ -68,6 +71,9 @@ export const journey = defineMessages({
     close: "Terminer cette démarche",
     reopen: "Rouvrir",
     closed: "Démarche terminée",
+    archives: "Démarches archivées",
+    archivedOn: "Terminée le {date}",
+    archivedUnknown: "Terminée · date non enregistrée",
     working: "Binder s'en occupe…",
   },
 })
