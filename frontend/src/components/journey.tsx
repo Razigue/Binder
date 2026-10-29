@@ -351,7 +351,7 @@ export function ArchivedJourneys() {
   )
   if (!archived.length) return null
   return (
-    <section>
+    <section className="mb-8">
       <h2 className="mb-3 font-semibold">{t("archives")}</h2>
       <ul className="divide-y rounded-xl bg-card ring-1 ring-foreground/10">
         {archived.map((j) => (

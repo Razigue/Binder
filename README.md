@@ -166,7 +166,7 @@ or file) sit below. On top, **In progress** follows what is under way: checklist
 reminder; once the date has passed, **Write a reminder** drafts it, and **I got an answer**
 closes the letter.
 
-Completed life-event checklists stay in **Life events → Archived journeys**, with their completion
+Completed life-event checklists stay in **My papers → Archives → Archived journeys**, with their completion
 date and the option to reopen them. Journeys completed before dates were recorded remain
 accessible with an unknown completion date.
 

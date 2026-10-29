@@ -6,7 +6,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAgent } from "@/components/agent/context"
-import { ArchivedJourneys } from "@/components/journey"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { FinishedLetters, Ongoing } from "@/components/ongoing"
 import { PrepareDialog, type Task } from "@/components/prepare"
@@ -148,7 +147,6 @@ export function ProceduresPage() {
             <RobotIcon /> {t("askAgent")}
           </Button>
         </div>
-        <ArchivedJourneys />
         <FinishedLetters />
       </div>
       <Dialog open={event !== null} onOpenChange={(open) => !open && setEvent(null)}>
