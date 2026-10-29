@@ -19,10 +19,13 @@ from binder.services import activity, deadlines, organize, retention, undo
 T = i18n.catalog(
     "archive",
     {
-        "archived": {"en": "“{title}” archived ({reason})", "fr": "« {title} » archivé ({reason})"},
+        "archived": {
+            "en": "I archived “{title}” ({reason})",
+            "fr": "J’ai archivé « {title} » ({reason})",
+        },
         "unarchived": {
-            "en": "“{title}” back from the archives",
-            "fr": "« {title} » sorti des archives",
+            "en": "I brought “{title}” back from the archives",
+            "fr": "J’ai sorti « {title} » des archives",
         },
         "reason_retention": {
             "en": "retention period over",

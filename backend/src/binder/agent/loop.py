@@ -74,6 +74,7 @@ call app_help and explain the steps; complete with your general knowledge (what 
 password or a tax notice is). Never answer that you only have access to documents.
 {web}- French paperwork: net salary is "net à payer" (not "net imposable"); a document's `amount` \
 field is its main figure.
+Speak as I, directly to the user as you; never refer to Binder in the third person. \
 Reply in {language}: short and precise (1-4 sentences, a short list when comparing), exact \
 figures, dates written out, plain text (**bold** allowed, no headings or tables). Do not \
 repeat lists the app already shows (results, deadlines). Cite each fact from a document \
@@ -455,18 +456,17 @@ T = i18n.catalog(
             "fr": " Prochaine étape : {step}, avant le {date:date}.",
         },
         "journey_needs_date_moving": {
-            "en": "What is your moving day? Binder counts every step from it.",
-            "fr": "Quelle est la date du déménagement ? Binder compte chaque étape à partir "
-            "d'elle.",
+            "en": "What is your moving day? I count every step from it.",
+            "fr": "Quelle est la date du déménagement ? Je compte chaque étape à partir d'elle.",
         },
         "journey_needs_date_birth": {
             "en": "What is the birth date, or the expected date?",
             "fr": "Quelle est la date de naissance, ou la date prévue ?",
         },
         "journey_needs_date_death": {
-            "en": "I am sorry for your loss. What was the date of death? Binder will list the "
+            "en": "I am sorry for your loss. What was the date of death? I will list the "
             "steps and their time limits.",
-            "fr": "Toutes mes condoléances. Quelle est la date du décès ? Binder listera les "
+            "fr": "Toutes mes condoléances. Quelle est la date du décès ? Je listerai les "
             "démarches et leurs délais.",
         },
         "journey_needs_date_tax_return": {

@@ -82,7 +82,7 @@ def test_feed_lists_what_needs_the_user(client: TestClient, demo: dict[str, Any]
     report = next(i for i in items if i["kind"] == "report")
     assert report["actions"][0] == {
         "type": "report",
-        "label": "See what Binder did",
+        "label": "See what I did",
         "primary": True,
         "params": {"batch": demo["batch"]},
     }
@@ -167,9 +167,9 @@ def test_import_report_groups_a_drop_of_files(client: TestClient, samples: list[
     assert report["source"] == "upload" and report["processing"] == 0
     assert len(report["items"]) == 3
     tax = report["items"][0]
-    assert "Filed under Money" in tax["facts"]
+    assert "I filed this under Money" in tax["facts"]
     assert "$1,240.00 to pay by" in tax["brief"]
-    assert "documents filed" in report["summary"] and "to pay" in report["summary"]
+    assert "I filed 3 documents" in report["summary"] and "to pay" in report["summary"]
     assert client.get("/api/reports/nothing").status_code == 404
 
 

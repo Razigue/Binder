@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { ArrowCounterClockwiseIcon, TrashIcon } from "@phosphor-icons/react"
+import { TrashedJourneys } from "@/components/journey"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -106,6 +107,7 @@ export function TrashPage() {
           </SelectionMenu>
         )}
       </Card>
+      <TrashedJourneys />
       <SelectionBar selection={selection} actions={actions} />
       <ConfirmDialog
         open={target !== null}

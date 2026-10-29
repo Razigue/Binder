@@ -327,6 +327,7 @@ class Journey(SQLModel, table=True):
     done: str = "[]"
     closed: bool = False
     closed_at: datetime | None = None
+    deleted_at: datetime | None = None
 
 
 class Conversation(SQLModel, table=True):

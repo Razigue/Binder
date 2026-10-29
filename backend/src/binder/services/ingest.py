@@ -65,10 +65,10 @@ T = i18n.catalog(
             "en": "“{filename}” ignored: already present as “{known}”",
             "fr": "« {filename} » ignoré : déjà présent sous « {known} »",
         },
-        "imported": {"en": "“{filename}” imported", "fr": "« {filename} » importé"},
+        "imported": {"en": "I imported “{filename}”", "fr": "J’ai importé « {filename} »"},
         "imported_from": {
-            "en": "“{filename}” imported {origin}",
-            "fr": "« {filename} » importé {origin}",
+            "en": "I imported “{filename}” {origin}",
+            "fr": "J’ai importé « {filename} » {origin}",
         },
         "demo_origin": {"en": "(demo)", "fr": "(démonstration)"},
         "reimported": {"en": "reimported", "fr": "réimporté"},
@@ -122,35 +122,37 @@ T = i18n.catalog(
             "fr": "texte lu par l'IA seule, non vérifié",
         },
         "to_review": {
-            "en": "“{title}” set aside for review ({why})",
-            "fr": "« {title} » mis de côté pour vérification ({why})",
+            "en": "I set “{title}” aside for review ({why})",
+            "fr": "J’ai mis « {title} » de côté pour vérification ({why})",
         },
         "classified": {
-            "en": "“{title}” filed under {category:category} ({confidence})",
-            "fr": "« {title} » classé dans {category:category} ({confidence})",
+            "en": "I filed “{title}” under {category:category} ({confidence})",
+            "fr": "J’ai classé « {title} » dans {category:category} ({confidence})",
         },
         "waiting": {
-            "en": "“{title}” is waiting for the local AI: Binder will read it as soon as it is "
-            "ready",
-            "fr": "« {title} » attend l'IA locale : Binder le lira dès qu'elle sera prête",
+            "en": "“{title}” is waiting for the local AI: I will read it as soon as it is ready",
+            "fr": "« {title} » attend l'IA locale : je le lirai dès qu’elle sera prête",
         },
         "analysis_failed": {
             "en": "“{title}”: analysis failed, check it manually",
             "fr": "« {title} » : analyse impossible, à vérifier à la main",
         },
-        "trashed": {"en": "“{title}” moved to the trash", "fr": "« {title} » mis à la corbeille"},
-        "trashed_because": {
-            "en": "“{title}” moved to the trash ({reason})",
-            "fr": "« {title} » mis à la corbeille ({reason})",
+        "trashed": {
+            "en": "I moved “{title}” to the trash",
+            "fr": "J’ai mis « {title} » à la corbeille",
         },
-        "restored": {"en": "“{title}” restored", "fr": "« {title} » restauré"},
+        "trashed_because": {
+            "en": "I moved “{title}” to the trash ({reason})",
+            "fr": "J’ai mis « {title} » à la corbeille ({reason})",
+        },
+        "restored": {"en": "I restored “{title}”", "fr": "J’ai restauré « {title} »"},
         "restored_because": {
-            "en": "“{title}” restored ({reason})",
-            "fr": "« {title} » restauré ({reason})",
+            "en": "I restored “{title}” ({reason})",
+            "fr": "J’ai restauré « {title} » ({reason})",
         },
         "purged": {
-            "en": "“{title}” permanently deleted",
-            "fr": "« {title} » supprimé définitivement",
+            "en": "I permanently deleted “{title}”",
+            "fr": "J’ai supprimé définitivement « {title} »",
         },
         "demo_cleared_one": {
             "en": "Demo data cleared ({n} document)",

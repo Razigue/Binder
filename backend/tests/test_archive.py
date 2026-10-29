@@ -57,10 +57,12 @@ def test_old_documents_are_suggested_then_archived_never_deleted(
     assert phone["id"] not in _ids(client.get("/api/documents").json())
     assert _ids(client.get("/api/documents", params={"archived": True}).json()) == [phone["id"]]
     log = client.get("/api/activity", params={"document_id": phone["id"]}).json()
-    assert log[0]["summary"].endswith("archived (retention period over)")
+    assert log[0]["summary"] == f"I archived “{phone['title']}” (retention period over)"
     with i18n.using("fr"):
         log = client.get("/api/activity", params={"document_id": phone["id"]}).json()
-    assert log[0]["summary"].endswith("archivé (durée de conservation dépassée)")
+    assert log[0]["summary"] == (
+        f"J’ai archivé « {phone['title']} » (durée de conservation dépassée)"
+    )
     # Only what really can be archived is.
     r = client.post("/api/retention/archive", json={"ids": [slip["id"]]}).json()
     assert r["count"] == 0

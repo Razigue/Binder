@@ -546,6 +546,7 @@ export interface Journey {
   total: number
   closed: boolean
   closed_at: string | null
+  deleted_at: string | null
   created_at: string
 }
 
@@ -836,6 +837,10 @@ export const api = {
   journey: (id: number) => request<Journey>(`/journeys/${id}`),
   startJourney: (body: { kind: JourneyKind; event_date: string; details: Record<string, string> }) =>
     request<Journey>("/journeys", json("POST", body)),
+  trashedJourneys: () => request<Journey[]>("/journeys/trash"),
+  trashJourney: (id: number) => request<void>(`/journeys/${id}`, { method: "DELETE" }),
+  restoreJourney: (id: number) => request<Journey>(`/journeys/${id}/restore`, { method: "POST" }),
+  purgeJourney: (id: number) => request<void>(`/journeys/${id}/permanent?confirm=true`, { method: "DELETE" }),
   updateJourney: (id: number, body: { event_date?: string; details?: Record<string, string>; closed?: boolean }) =>
     request<Journey>(`/journeys/${id}`, json("PATCH", body)),
   journeyStep: (id: number, key: string, done: boolean) =>

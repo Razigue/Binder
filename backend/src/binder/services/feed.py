@@ -74,7 +74,7 @@ T = i18n.catalog(
             "en": "{n} demo documents",
             "fr": "{n} documents de démonstration",
         },
-        "see_report": {"en": "See what Binder did", "fr": "Voir ce que Binder a fait"},
+        "see_report": {"en": "See what I did", "fr": "Voir ce que j’ai fait"},
         "ok": {"en": "OK", "fr": "OK"},
         "overdue": {
             "en": "{days} days late",
@@ -143,10 +143,9 @@ T = i18n.catalog(
             "fr": "Courrier à {recipient} prêt",
         },
         "draft_detail": {
-            "en": "“{subject}”. Download it, sign it, send it, then tell Binder: it will follow "
-            "it up.",
-            "fr": "« {subject} ». Téléchargez-le, signez-le, envoyez-le, puis dites-le à Binder : "
-            "il en assurera le suivi.",
+            "en": "“{subject}”. Download it, sign it, send it, then tell me: I will follow it up.",
+            "fr": "« {subject} ». Téléchargez-le, signez-le, envoyez-le, puis dites-le-moi : "
+            "j’en assurerai le suivi.",
         },
         "download_pdf": {"en": "Download (PDF)", "fr": "Télécharger (PDF)"},
         "sent": {"en": "I sent it", "fr": "Je l'ai envoyé"},
@@ -170,8 +169,8 @@ T = i18n.catalog(
         },
         "yes_answer": {"en": "Yes", "fr": "Oui"},
         "household_title": {
-            "en": "Binder recognised your household",
-            "fr": "Binder a reconnu votre foyer",
+            "en": "I recognised your household",
+            "fr": "J’ai reconnu votre foyer",
         },
         "household_detail": {
             "en": "{names}. Each document is linked to the person it concerns.",
@@ -185,16 +184,16 @@ T = i18n.catalog(
         "act_dismissed": {"en": "Hidden", "fr": "Masqué"},
         "act_letter": {"en": "Letter ready", "fr": "Courrier prêt"},
         "act_sent": {
-            "en": "Noted: Binder will remind you to follow it up on {date:date}",
-            "fr": "C'est noté : Binder vous proposera une relance le {date:date}",
+            "en": "Noted: I’ll remind you to follow it up on {date:date}",
+            "fr": "C’est noté : je vous proposerai une relance le {date:date}",
         },
         "act_reminder": {
             "en": "Reminder set for {date:date}",
             "fr": "Rappel prévu le {date:date}",
         },
         "act_recovery": {
-            "en": "Code noted. Binder no longer shows it.",
-            "fr": "Code noté. Binder ne l'affiche plus.",
+            "en": "Code noted. I no longer show it.",
+            "fr": "Code noté. Je ne l’affiche plus.",
         },
         "list_separator": {"en": ", ", "fr": ", "},
         "step_due_in": {"en": "By {date:date}", "fr": "Avant le {date:date}"},
@@ -211,12 +210,12 @@ T = i18n.catalog(
             "fr": "{n} autres questions, quand vous voulez",
         },
         "more_questions_detail_one": {
-            "en": "About {n} document. Nothing urgent: Binder has filed it meanwhile.",
-            "fr": "Sur {n} document. Rien d'urgent : Binder l'a rangé en attendant.",
+            "en": "About {n} document. Nothing urgent: I have filed it meanwhile.",
+            "fr": "Sur {n} document. Rien d'urgent : je l’ai rangé en attendant.",
         },
         "more_questions_detail_other": {
-            "en": "About {n} documents. Nothing urgent: Binder has filed them meanwhile.",
-            "fr": "Sur {n} documents. Rien d'urgent : Binder les a rangés en attendant.",
+            "en": "About {n} documents. Nothing urgent: I have filed them meanwhile.",
+            "fr": "Sur {n} documents. Rien d'urgent : je les ai rangés en attendant.",
         },
         "sort_now": {"en": "Answer them", "fr": "Y répondre"},
         "act_answered_many_one": {
@@ -236,8 +235,8 @@ T = i18n.catalog(
             "fr": "{n} documents attendent l'IA locale",
         },
         "waiting_detail": {
-            "en": "They are kept safe. Binder reads and files them as soon as the AI is ready.",
-            "fr": "Ils sont en sécurité. Binder les lira et les rangera dès que l'IA sera prête.",
+            "en": "They are kept safe. I read and file them as soon as the AI is ready.",
+            "fr": "Ils sont en sécurité. Je les lirai et les rangerai dès que l’IA sera prête.",
         },
     },
 )
@@ -1039,7 +1038,7 @@ def _dismiss(session: Session, params: Params, actor: str) -> ActResult:
 
 def _journey_step(session: Session, params: Params, actor: str) -> ActResult:
     journey = session.get(Journey, _int(params, "journey_id"))
-    if journey is None:
+    if journey is None or journey.deleted_at is not None:
         raise BadAction("journey")
     key = str(params.get("step") or "")
     try:

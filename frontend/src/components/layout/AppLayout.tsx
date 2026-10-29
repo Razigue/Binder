@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState, type ReactElement } from "react"
+import { Suspense, useEffect, useRef, type ReactElement } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { ArrowUpIcon, RobotIcon, FilesIcon, ClockCounterClockwiseIcon, CompassIcon, GearSixIcon, CheckSquareIcon, TrashIcon, PlusIcon, DeviceMobileIcon, UploadSimpleIcon, UserCircleIcon, type Icon } from "@phosphor-icons/react"
 import { BinderMark } from "@/components/layout/BinderMark"
@@ -46,16 +46,6 @@ export function AppLayout() {
 
   const shell = (
     <div className={cn("flex", titleBar ? "min-h-full" : "min-h-svh")}>
-      <a
-        href="#main"
-        onClick={(e) => {
-          e.preventDefault()
-          document.getElementById("main")?.focus()
-        }}
-        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-background focus:px-4 focus:py-2.5 focus:text-sm focus:font-medium focus:shadow-sm"
-      >
-        {t("skipToContent")}
-      </a>
       <div className="hidden w-60 shrink-0 border-r bg-sidebar md:block">
         <aside className="sticky top-0 flex h-[calc(100svh-var(--titlebar-height,0px))] flex-col px-3 py-5 select-none">
           {/* The desktop title bar already carries the logo and name. */}
@@ -231,14 +221,13 @@ function MenuChoice({
 function AskBar() {
   const t = useT(layout)
   const agent = useAgent()
-  const [text, setText] = useState("")
+  const { draft: text, setDraft: setText } = agent
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 px-4 pb-3 md:bottom-0 md:left-60 md:pb-4">
       <form
         onSubmit={(e) => {
           e.preventDefault()
           agent.open(text.trim() || undefined)
-          setText("")
         }}
         className="pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-xl border bg-card p-1.5 pl-4 shadow-sm transition-colors focus-within:border-primary/40"
       >

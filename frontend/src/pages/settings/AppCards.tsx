@@ -127,19 +127,6 @@ export function LocalAiCard() {
   return (
     <Card className="gap-5 p-6">
       <CardHeading icon={CpuIcon} title={t("card.title")} description={data.automatic ? t("card.automatic") : t("card.manual")} />
-      <dl className="grid gap-4 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-muted-foreground">{t("card.active")}</dt>
-          <dd className="font-medium">
-            {data.active_label}
-            {!data.active_installed && <span className="ml-2 font-normal text-muted-foreground">{t("card.notInstalled")}</span>}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("card.recommended")}</dt>
-          <dd className="font-medium">{data.recommended_label}</dd>
-        </div>
-      </dl>
       <ModelPicker data={data} />
       {data.upgrade && <UpgradeOffer upgrade={data.upgrade} />}
     </Card>

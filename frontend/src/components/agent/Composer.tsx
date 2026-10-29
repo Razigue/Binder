@@ -9,7 +9,7 @@ import { ACCEPT } from "@/lib/files"
 import { cn } from "@/lib/utils"
 import { Thumbnail } from "./actions"
 import { CameraDialog } from "./CameraDialog"
-import type { Viewing } from "./context"
+import { useAgent, type Viewing } from "./context"
 import { isSubmit } from "./turns"
 import type { Attachment, Attachments } from "./useAttachments"
 
@@ -30,13 +30,7 @@ export function Composer({
   viewing: Viewing | null
 }) {
   const t = useT(messages)
-  const [text, setText] = useState("")
-  // A question started about a document no longer makes sense once the user leaves it.
-  const [about, setAbout] = useState(viewing?.id)
-  if (viewing?.id !== about) {
-    setAbout(viewing?.id)
-    if (about !== undefined) setText("")
-  }
+  const { draft: text, setDraft: setText } = useAgent()
   const [camera, setCamera] = useState(false)
   const filePicker = useRef<HTMLInputElement>(null)
   const photoPicker = useRef<HTMLInputElement>(null)

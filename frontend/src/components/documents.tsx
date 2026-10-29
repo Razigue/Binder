@@ -5,7 +5,8 @@ import { ArchiveIcon, ArrowUUpLeftIcon, PushPinIcon, SealCheckIcon, CaretRightIc
 import { CategoryIcon } from "@/components/CategoryIcon"
 import { RowCheckbox, SelectionBar, SelectionMenu, type SelectionAction } from "@/components/selection"
 import { selectableRow, selectedRowClass, useSelection, useSelectionKeys } from "@/hooks/useSelection"
-import { useBulkDocuments } from "@/hooks/queries"
+import { Button } from "@/components/ui/button"
+import { useBulkDocuments, useDeleteDocument } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { area as messages } from "@/i18n/messages/area"
 import { selection as selectionMessages } from "@/i18n/messages/selection"
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils"
 
 /** Documents by year, most recent first, as rows inside a card. Several can be selected (tick
  * boxes, Ctrl/Shift+click, right click) and handled together. */
-export function DocumentsByYear({ docs }: { docs: Doc[] }) {
+export function DocumentsByYear({ docs, showDelete = false }: { docs: Doc[]; showDelete?: boolean }) {
+  const ts = useT(selectionMessages)
+  const remove = useDeleteDocument()
   const t = useT(messages)
   const years = useMemo(() => {
     const groups = new Map<string, Doc[]>()
@@ -45,6 +48,7 @@ export function DocumentsByYear({ docs }: { docs: Doc[] }) {
                     {...selectableRow(selection, d.id)}
                     className={cn(
                       "grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-3 hover:bg-muted/40",
+                      showDelete && "pr-16",
                       selectedRowClass,
                     )}
                   >
@@ -82,6 +86,19 @@ export function DocumentsByYear({ docs }: { docs: Doc[] }) {
                     <span className="text-sm tabular-nums">{d.amount !== null ? formatAmount(d.amount) : ""}</span>
                     <CaretRightIcon className="size-4 text-muted-foreground" />
                   </Link>
+                  {showDelete && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="absolute top-1/2 right-3 -translate-y-1/2 text-destructive"
+                      aria-label={`${ts("trash")} : ${d.title || d.filename}`}
+                      title={ts("trash")}
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate(d.id, { onError: (e) => toast.error(e.message) })}
+                    >
+                      <TrashIcon />
+                    </Button>
+                  )}
                   <RowCheckbox selection={selection} id={d.id} label={d.title || d.filename}>
                     <CategoryIcon category={d.category} />
                   </RowCheckbox>

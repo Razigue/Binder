@@ -16,11 +16,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const t = useT(messages)
   const [isOpen, setOpen] = useState(false)
   const chat = useAgentChat()
+  const [draft, setDraft] = useState("")
 
   // A question sent from a page (shortcut, card, step) starts its own conversation.
   const open = (question?: string) => {
     setOpen(true)
-    if (question) chat.ask(question, [], chat.turns.length, true)
+    if (question && !chat.pending) {
+      chat.ask(question, [], chat.turns.length, true)
+      setDraft("")
+    }
   }
 
   // The context hands out stable functions that call the latest ones: pages using the agent do
@@ -31,11 +35,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   })
   const value = useMemo(
     () => ({
+      draft,
+      setDraft,
       open: (question?: string) => latest.current.open(question),
       view: (doc: Viewing) => latest.current.view(doc),
       leave: (id: number) => latest.current.leave(id),
     }),
-    [],
+    [draft],
   )
 
   // Opening the chat brings the model back into memory while the question is typed.
