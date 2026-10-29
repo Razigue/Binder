@@ -76,3 +76,18 @@ PyInstaller build run straight from `packaging/dist/` does not update itself.
 
 Copies extracted from the portable archives of v0.3.1 and earlier no longer update: they find no
 archive in newer releases and start normally. Their users install with the installer once.
+
+## Windows Defender behavior alerts
+
+A `Behavior:Win32/Persistence.A!ml` alert at launch is consistent with reminder task
+registration, but the detection name alone does not establish the cause. Binder no longer
+creates or rewrites its Windows scheduled task at startup. New installations leave closed-app
+reminders off until the user enables them in Settings; saved preferences and existing tasks
+are preserved. Enabling reminders still registers a task and needs Windows validation.
+
+Record the release version, exact detection name, detection time, Defender intelligence version
+and SHA-256 of the affected `Binder.exe`. Reproduce with current Defender definitions, first at
+launch, then when enabling reminders. Linux tests cannot validate Defender behavior. If a false
+positive is confirmed, submit the exact flagged executable through the
+[Microsoft software developer portal](https://www.microsoft.com/en-us/wdsi/filesubmission).
+Signing is configured above; it does not guarantee that Defender will accept a build.

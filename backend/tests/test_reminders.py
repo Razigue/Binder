@@ -5,6 +5,7 @@ from collections.abc import Iterator, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ from binder.services import (
     profile,
     reminders,
     rights,
+    settings_store,
 )
 
 TODAY = date(2026, 10, 6)
@@ -235,6 +237,8 @@ def test_remind_run_while_closed(session: Session, monkeypatch: pytest.MonkeyPat
     shown: list[tuple[str, str]] = []
     monkeypatch.setattr(notify, "send", lambda title, body: shown.append((title, body)) or True)
     monkeypatch.setattr(get_settings(), "notifications", True)
+    reminders.update(session, True)
+    session.commit()
     assert not instance.running()
     assert reminders.remind() is True
     assert shown == [("Binder: 1 thing to do", "Pay the rent. Open Binder to see it.")]
@@ -262,7 +266,7 @@ def test_instance_lock() -> None:
 def test_reminders_api(client: TestClient) -> None:
     r = client.get("/api/reminders")
     # A development run cannot be started by the system.
-    assert r.json() == {"enabled": True, "available": False, "hour": os_task.HOUR}
+    assert r.json() == {"enabled": False, "available": False, "hour": os_task.HOUR}
     r = client.put("/api/reminders", json={"enabled": False})
     assert r.json()["enabled"] is False
     assert client.get("/api/reminders").json()["enabled"] is False
@@ -330,3 +334,38 @@ def test_linux_timer_or_autostart(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "--remind" in autostart.read_text(encoding="utf-8")
     os_task.unregister(platform="linux", home=tmp_path, run=Recorder())
     assert not autostart.exists() and not (units / "binder-reminders.timer").exists()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_windows_startup_never_changes_scheduled_task(
+    session: Session, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    settings_store.save(session, reminders.KEY, reminders.ReminderSettings(enabled=enabled))
+    monkeypatch.setattr(reminders.sys, "platform", "win32")
+    monkeypatch.setattr(os_task, "command", lambda: ["Binder.exe", "--remind"])
+    thread = Mock()
+    monkeypatch.setattr(reminders.threading, "Thread", thread)
+    reminders.sync(session)
+    thread.assert_not_called()
+    assert reminders.load(session).enabled is enabled
+
+
+def test_windows_reminder_task_requires_settings_action(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(reminders.sys, "platform", "win32")
+    monkeypatch.setattr(get_settings(), "notifications", True)
+    cmd = ["Binder.exe", "--remind"]
+    monkeypatch.setattr(os_task, "command", lambda: cmd)
+    thread, register, unregister = Mock(), Mock(), Mock()
+    monkeypatch.setattr(reminders.threading, "Thread", thread)
+    monkeypatch.setattr(os_task, "register", register)
+    monkeypatch.setattr(os_task, "unregister", unregister)
+    assert reminders.load(session).enabled is False
+    reminders.update(session, True)
+    thread.call_args.kwargs["target"]()
+    register.assert_called_once_with(cmd)
+    unregister.assert_not_called()
+    reminders.update(session, False)
+    thread.call_args.kwargs["target"]()
+    unregister.assert_called_once_with()

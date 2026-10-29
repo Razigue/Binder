@@ -29,11 +29,14 @@ Through environment variables, or in a `backend/.env` file:
 
 ## Reminders while Binder is closed
 
+Closed-app reminders are off by default; enable them in Settings.
 The installed application registers a task of the system's own scheduler that runs
 `Binder --remind` every day at 09:00 and after login (`services/os_task.py`): a Task Scheduler
 task "Binder reminders" on Windows (missed runs made up), a LaunchAgent `app.binder.reminders`
 on macOS, a systemd user timer `binder-reminders.timer` on Linux (an XDG autostart entry without
-systemd). It is registered again at each launch (the path follows the application), removed
+systemd). On Windows, only a Settings action registers or removes the task; startup never
+rewrites it, and the installed path stays stable across updates. On macOS and Linux it is
+synchronized at each launch. It is removed
 when the user turns reminders off in Settings and, on Windows, by the uninstaller. A development
 run (`uv run binder`) never registers it.
 
